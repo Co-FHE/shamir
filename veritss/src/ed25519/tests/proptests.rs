@@ -2,6 +2,9 @@ use crate::*;
 use frost_core::tests::proptests::{tweak_strategy, SignatureCase};
 use proptest::prelude::*;
 
+use curve25519_dalek::{edwards::EdwardsPoint, traits::Identity};
+use ed25519::Ed25519Sha512;
+use frost_core::{Ciphersuite, Group, GroupError};
 use rand_chacha::ChaChaRng;
 use rand_core::SeedableRng;
 

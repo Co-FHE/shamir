@@ -1,5 +1,7 @@
 use crate::*;
 use curve25519_dalek::{edwards::EdwardsPoint, traits::Identity};
+use ed25519::Ed25519Sha512;
+use frost_core::{Ciphersuite, Group, GroupError};
 
 #[test]
 fn check_deserialize_non_prime_order() {

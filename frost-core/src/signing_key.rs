@@ -10,11 +10,13 @@ use crate::{
 };
 
 /// A signing key for a Schnorr signature on a FROST [`Ciphersuite::Group`].
+/// s_i = f(x_i) where f is the secret polynomial and x_i is the participant's identifier.
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub struct SigningKey<C>
 where
     C: Ciphersuite,
 {
+    // g^scalar
     pub(crate) scalar: Scalar<C>,
 }
 

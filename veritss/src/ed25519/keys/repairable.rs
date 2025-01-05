@@ -4,13 +4,14 @@
 //! The RTS is used to help a signer (participant) repair their lost share. This is achieved
 //! using a subset of the other signers know here as `helpers`.
 
+extern crate alloc;
 use alloc::collections::BTreeMap;
 
 // This is imported separately to make `gencode` work.
 // (if it were below, the position of the import would vary between ciphersuites
 //  after `cargo fmt`)
-use crate::{frost, Ciphersuite, CryptoRng, Identifier, RngCore, Scalar};
-use crate::{Ed25519Sha512, Error};
+use crate::ed25519::{frost, Ciphersuite, CryptoRng, Identifier, RngCore, Scalar};
+use crate::ed25519::{Ed25519Sha512, Error};
 
 use super::{SecretShare, VerifiableSecretSharingCommitment};
 
@@ -61,11 +62,11 @@ mod tests {
     use rand::thread_rng;
     use serde_json::Value;
 
-    use crate::Ed25519Sha512;
+    use crate::ed25519::Ed25519Sha512;
 
     lazy_static! {
         pub static ref REPAIR_SHARE: Value =
-            serde_json::from_str(include_str!("../../tests/helpers/repair-share.json").trim())
+            serde_json::from_str(include_str!("../../../tests/helpers/repair-share.json").trim())
                 .unwrap();
     }
 

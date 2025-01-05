@@ -5,7 +5,6 @@
 pub mod samples;
 
 use ed25519_dalek::Verifier;
-use frost_ed25519::*;
 
 // #[cfg(test)]
 pub fn verify_signature(

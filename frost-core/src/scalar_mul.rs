@@ -51,6 +51,7 @@ where
     /// # Safety
     ///
     /// The full scalar field MUST fit in 256 bits in this implementation.
+    /// NAF length = div_ceil(bits * 8 + 1, w)
     fn non_adjacent_form(&self, w: usize) -> Vec<i8> {
         // required by the NAF definition
         debug_assert!(w >= 2);
@@ -121,11 +122,12 @@ where
                 pos += 1;
                 continue;
             }
-
             if window < width / 2 {
+                // set as 1
                 carry = 0;
                 naf[pos] = window as i8;
             } else {
+                //set as -1
                 carry = 1;
                 naf[pos] = (window as i8).wrapping_sub(width as i8);
             }

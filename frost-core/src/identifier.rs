@@ -150,7 +150,8 @@ where
     C: Ciphersuite,
 {
     type Error = Error<C>;
-
+    // set g^n as the identifier
+    // it cannot be zero since the f(0) = shared secret
     fn try_from(n: u16) -> Result<Identifier<C>, Self::Error> {
         if n == 0 {
             Err(FieldError::InvalidZeroScalar.into())

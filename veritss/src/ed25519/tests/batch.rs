@@ -1,6 +1,7 @@
 use rand::thread_rng;
 
 use crate::*;
+use ed25519::Ed25519Sha512;
 
 #[test]
 fn check_batch_verify() {

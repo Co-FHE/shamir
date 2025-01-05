@@ -1,0 +1,6 @@
+[workspace]
+resolver = "2"
+members = ["frost-core", "frost-rerandomized", "veritss"]
+
+[profile.test.package."*"]
+opt-level = 3

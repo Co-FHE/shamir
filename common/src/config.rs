@@ -2,11 +2,13 @@
 use config::{Config, Environment, File};
 use lazy_static::lazy_static;
 use serde::Deserialize;
-use std::sync::RwLock;
+use std::{collections::BTreeMap, sync::RwLock};
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct Settings {
     pub logging: LoggingSettings,
+    pub coordinator: CoordinatorSettings,
+    pub signer: SignerSettings,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -24,6 +26,20 @@ pub struct LoggingLevelSettings {
 pub struct LoggingFileSettings {
     pub level: String,
     pub dir_path: String,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct CoordinatorSettings {
+    pub keypair_path: String,
+    pub port: u16,
+    pub remote_addr: String,
+    pub peer_id: String,
+    pub ipc_socket_path: String,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct SignerSettings {
+    pub keypair_path_mapping: BTreeMap<u16, String>,
 }
 
 lazy_static! {

@@ -1,7 +1,5 @@
 // my_workspace/common/src/lib.rs
 mod config;
 mod logging;
-pub mod message;
-
-pub use config::SETTINGS;
+pub use config::Settings;
 pub use logging::init_logging;

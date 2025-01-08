@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use frost_core::{round1::Nonce, Ciphersuite, Element, Group, Scalar};
-use frost_ed25519::{
+use veritss::ed25519::{
     keys::{
         dkg::{round1, round2},
         KeyPackage, PublicKeyPackage, SecretShare, SigningShare, VerifiableSecretSharingCommitment,
@@ -14,7 +14,7 @@ use frost_ed25519::{
     Field, Signature, SigningPackage, VerifyingKey,
 };
 
-type C = frost_ed25519::Ed25519Sha512;
+type C = veritss::ed25519::Ed25519Sha512;
 
 fn element1() -> Element<C> {
     <C as Ciphersuite>::Group::generator()

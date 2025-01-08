@@ -56,7 +56,7 @@ where
 
         // Generate Schnorr challenge
         let c: Challenge<C> = <C>::challenge(&R, &public, message).expect("should not return error since that happens only if one of the inputs is the identity. R is not since k is nonzero. The verifying_key is not because signing keys are not allowed to be zero.");
-
+        // s = k+ed
         let z = k + (c.0 * self.scalar);
 
         Signature { R, z }

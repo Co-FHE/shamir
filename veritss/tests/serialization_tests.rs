@@ -2,7 +2,7 @@
 
 mod helpers;
 
-use frost_ed25519::{
+use veritss::ed25519::{
     keys::{
         dkg::{round1, round2},
         KeyPackage, PublicKeyPackage, SecretShare,

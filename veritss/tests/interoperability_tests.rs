@@ -1,6 +1,5 @@
-use crate::Ed25519Sha512;
-use frost_ed25519::*;
 use rand::thread_rng;
+use veritss::ed25519::*;
 
 mod helpers;
 

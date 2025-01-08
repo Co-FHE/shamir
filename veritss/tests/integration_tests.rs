@@ -1,7 +1,7 @@
-use frost_ed25519::*;
 use lazy_static::lazy_static;
 use rand::thread_rng;
 use serde_json::Value;
+use veritss::ed25519::*;
 
 #[test]
 fn check_zero_key_fails() {

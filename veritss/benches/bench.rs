@@ -1,7 +1,6 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 use rand::thread_rng;
-
-use frost_ed25519::*;
+use veritss::ed25519::*;
 
 fn bench_ed25519_batch_verify(c: &mut Criterion) {
     let mut rng = thread_rng();

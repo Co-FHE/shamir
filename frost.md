@@ -22,6 +22,10 @@ FROST is a threshold signature protocol based on Schnorr signatures. In the KeyG
     1. Sample \(k\) from \(\mathbb{Z}_q\), compute \(R_i = g^k\).
     2. Compute challenge \(c_i = H(i, \Phi, g^{a_{i0}}, R_i)\).
     3. Compute response \(\mu_i = k + a_{i0} \cdot c_i\).
+  - Where:
+    - \(k\) is private nonce
+    - \(a_{i0}\)is private key (local)
+    - \(R_i\) is public nonce
 - **\(R_i\)**
   - The temporary commitment in the Schnorr proof.
 - **\(c_i\)**

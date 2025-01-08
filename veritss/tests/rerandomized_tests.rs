@@ -1,5 +1,5 @@
-use frost_ed25519::Ed25519Sha512;
 use rand::thread_rng;
+use veritss::ed25519::Ed25519Sha512;
 
 #[test]
 fn check_randomized_sign_with_dealer() {

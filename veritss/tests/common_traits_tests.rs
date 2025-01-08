@@ -2,9 +2,9 @@
 
 mod helpers;
 
-use frost_ed25519::SigningKey;
 use helpers::samples;
 use rand::thread_rng;
+use veritss::ed25519::SigningKey;
 
 #[allow(clippy::unnecessary_literal_unwrap)]
 fn check_common_traits_for_type<T: Clone + Eq + PartialEq + std::fmt::Debug>(v: T) {

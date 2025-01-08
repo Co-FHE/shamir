@@ -1,3 +1,4 @@
+use libp2p::identify::Behaviour;
 use std::any;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -10,7 +11,7 @@ use tokio::task;
 use common::Settings;
 use futures::StreamExt;
 use libp2p::{
-    identify::{self, Behaviour},
+    identify::{self},
     noise,
     swarm::SwarmEvent,
     tcp, yamux, Multiaddr,
@@ -87,7 +88,17 @@ impl Coordinator {
             tokio::select! {
                 event = self.swarm.select_next_some()=> {
                     match event {
-                        SwarmEvent::NewListenAddr { address, .. } => println!("Listening on {address:?}"),
+                        SwarmEvent::NewListenAddr { address, .. } => tracing::info!("Listening on {address:?}"),
+                        SwarmEvent::Behaviour(event) => {
+                            match event {
+                                identify::Event::Received { connection_id, peer_id, info } => {
+                                    tracing::info!("Received identify info from {peer_id:?}: {info:?}");
+                                },
+                                identify::Event::Sent { connection_id, peer_id } => todo!(),
+                                identify::Event::Pushed { connection_id, peer_id, info } => todo!(),
+                                identify::Event::Error { connection_id, peer_id, error } => todo!(),
+                            }
+                        }
                         _ => {}
                     }
                 },

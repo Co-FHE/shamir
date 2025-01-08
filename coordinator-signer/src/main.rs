@@ -48,7 +48,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             );
             // convert id to peer id
             let peer_id = keypair.public().to_peer_id();
-            tracing::info!("Starting signer with peer id: {}", peer_id);
+            tracing::info!("Starting signer with validator peer id: {}", peer_id);
             let mut signer = signer::Signer::new(keypair)?;
             signer.start_listening().await?;
         }

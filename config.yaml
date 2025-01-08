@@ -12,4 +12,4 @@ coordinator:
   ipc_socket_path: ".ipc_socket/coordinator.sock"
 signer:
   keypair_path_mapping: { 1: "keys_for_test/signer1.key", 2: "keys_for_test/signer2.key", 3: "keys_for_test/signer3.key" }
-  ipc_socket_path: ".ipc_socket/signer"
+  ipc_socket_path: ".ipc_socket/"

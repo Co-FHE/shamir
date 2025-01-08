@@ -40,6 +40,7 @@ pub struct CoordinatorSettings {
 #[derive(Debug, Deserialize, Clone)]
 pub struct SignerSettings {
     pub keypair_path_mapping: BTreeMap<u16, String>,
+    pub ipc_socket_path: String,
 }
 
 lazy_static! {

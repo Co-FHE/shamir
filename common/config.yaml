@@ -1,0 +1,6 @@
+logging:
+  console:
+    level: "info"
+  file:
+    level: "info"
+    dir_path: "logs"

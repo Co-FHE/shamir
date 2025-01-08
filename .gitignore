@@ -36,3 +36,4 @@ Cargo.lock
 
 # Generated files
 .cargo-ok
+**/logs

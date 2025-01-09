@@ -5,8 +5,11 @@ use std::{
 };
 mod commands;
 mod coordinator;
+// mod dkgp;
+mod behaviour;
 mod message;
 mod signer;
+mod utils;
 use common::Settings;
 use coordinator::Coordinator;
 use futures::StreamExt;

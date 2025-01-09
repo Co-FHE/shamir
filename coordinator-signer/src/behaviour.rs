@@ -32,10 +32,12 @@ pub(crate) enum SigToCoorResponse {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum CoorToSigRequest {
     ValidatorIdentity(Vec<u8>),
+    StartDkg,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum CoorToSigResponse {
-    ValidatorIdentity,
+    Success,
+    Failure(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

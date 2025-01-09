@@ -591,7 +591,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "config",
- "frost-core",
+ "frost-core 2.0.0",
  "lazy_static",
  "rand",
  "serde",
@@ -692,7 +692,10 @@ dependencies = [
  "bytes",
  "clap",
  "common",
- "frost-core",
+ "frost-core 2.0.0",
+ "frost-ed25519",
+ "frost-secp256k1",
+ "frost-secp256k1-tr",
  "futures",
  "libp2p",
  "pem",
@@ -1198,14 +1201,87 @@ dependencies = [
 ]
 
 [[package]]
+name = "frost-core"
+version = "2.0.0"
+source = "git+https://github.com/verisense-network/frost.git?branch=main#39b61ec9da75c73476f1573a0781fb87069d86b1"
+dependencies = [
+ "byteorder",
+ "const-crc32-nostd",
+ "debugless-unwrap",
+ "derive-getters",
+ "document-features",
+ "hex",
+ "itertools 0.13.0",
+ "postcard",
+ "rand_core",
+ "serde",
+ "serdect",
+ "thiserror 2.0.9",
+ "thiserror-nostd-notrait",
+ "visibility",
+ "zeroize",
+]
+
+[[package]]
+name = "frost-ed25519"
+version = "2.0.0"
+source = "git+https://github.com/verisense-network/frost.git?branch=main#39b61ec9da75c73476f1573a0781fb87069d86b1"
+dependencies = [
+ "curve25519-dalek",
+ "document-features",
+ "frost-core 2.0.0 (git+https://github.com/verisense-network/frost.git?branch=main)",
+ "frost-rerandomized 2.0.0 (git+https://github.com/verisense-network/frost.git?branch=main)",
+ "rand_core",
+ "sha2",
+]
+
+[[package]]
 name = "frost-rerandomized"
 version = "2.0.0"
 dependencies = [
  "derive-getters",
  "document-features",
- "frost-core",
+ "frost-core 2.0.0",
  "hex",
  "rand_core",
+]
+
+[[package]]
+name = "frost-rerandomized"
+version = "2.0.0"
+source = "git+https://github.com/verisense-network/frost.git?branch=main#39b61ec9da75c73476f1573a0781fb87069d86b1"
+dependencies = [
+ "derive-getters",
+ "document-features",
+ "frost-core 2.0.0 (git+https://github.com/verisense-network/frost.git?branch=main)",
+ "hex",
+ "rand_core",
+]
+
+[[package]]
+name = "frost-secp256k1"
+version = "2.0.0"
+source = "git+https://github.com/verisense-network/frost.git?branch=main#39b61ec9da75c73476f1573a0781fb87069d86b1"
+dependencies = [
+ "document-features",
+ "frost-core 2.0.0 (git+https://github.com/verisense-network/frost.git?branch=main)",
+ "frost-rerandomized 2.0.0 (git+https://github.com/verisense-network/frost.git?branch=main)",
+ "k256",
+ "rand_core",
+ "sha2",
+]
+
+[[package]]
+name = "frost-secp256k1-tr"
+version = "2.0.0"
+source = "git+https://github.com/verisense-network/frost.git?branch=main#39b61ec9da75c73476f1573a0781fb87069d86b1"
+dependencies = [
+ "document-features",
+ "frost-core 2.0.0 (git+https://github.com/verisense-network/frost.git?branch=main)",
+ "frost-rerandomized 2.0.0 (git+https://github.com/verisense-network/frost.git?branch=main)",
+ "k256",
+ "rand_core",
+ "sha2",
 ]
 
 [[package]]
@@ -4265,8 +4341,8 @@ dependencies = [
  "curve25519-dalek",
  "document-features",
  "ed25519-dalek",
- "frost-core",
- "frost-rerandomized",
+ "frost-core 2.0.0",
+ "frost-rerandomized 2.0.0",
  "hex",
  "insta",
  "k256",

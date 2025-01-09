@@ -7,7 +7,7 @@ mod commands;
 mod coordinator;
 // mod dkgp;
 mod behaviour;
-mod message;
+mod crypto;
 mod signer;
 mod utils;
 use common::Settings;

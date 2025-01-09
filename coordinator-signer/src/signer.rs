@@ -4,7 +4,7 @@ use libp2p::{ping, rendezvous, request_response, PeerId, StreamProtocol};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::{any, time};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::unix::SocketAddr;
@@ -132,6 +132,7 @@ impl Signer {
         self.swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
 
         let listener = self.start_ipc_listening().await?;
+        self.dial_coordinator()?;
         loop {
             tokio::select! {
                 event = self.swarm.select_next_some()=> {
@@ -169,6 +170,12 @@ impl Signer {
             } if peer_id == self.coordinator_peer_id => {
                 tracing::warn!("Lost connection to rendezvous point {}", error);
             }
+            SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
+                tracing::error!("Outgoing connection to {:?} error: {:?}", peer_id, error);
+                tracing::info!("Dialing coordinator after 3 seconds");
+                tokio::time::sleep(Duration::from_secs(3)).await;
+                self.dial_coordinator()?;
+            }
             SwarmEvent::ConnectionEstablished { peer_id, .. }
                 if peer_id == self.coordinator_peer_id =>
             {
@@ -195,7 +202,10 @@ impl Signer {
                 let request = ValidatorIdentityRequest {
                     signature: signature,
                     public_key: self.validator_keypair.public().encode_protobuf(),
-                    nonce: time::Instant::now().elapsed().as_millis() as u64,
+                    nonce: SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs(),
                 };
                 let request_id = self.swarm.behaviour_mut().sig2coor.send_request(
                     &self.coordinator_peer_id,
@@ -287,6 +297,23 @@ impl Signer {
                         }
                     }
                 }
+            }
+            SwarmEvent::Behaviour(SigBehaviourEvent::Coor2sig(
+                request_response::Event::Message {
+                    peer,
+                    message:
+                        request_response::Message::Request {
+                            request_id,
+                            request,
+                            channel,
+                        },
+                },
+            )) => {
+                tracing::info!(
+                    "Received request from {:?} with request {:?}",
+                    peer,
+                    request
+                );
             }
             other => {
                 tracing::debug!("Unhandled {:?}", other);

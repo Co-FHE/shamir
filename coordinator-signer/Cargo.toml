@@ -26,7 +26,9 @@ libp2p = { version = "0.54", features = [
     "rendezvous",
 ] }
 anyhow = "1.0.70"
-# tokio-uds = "0.2"
+frost-ed25519 = { git = "https://github.com/verisense-network/frost.git", branch = "main", package = "frost-ed25519" }
+frost-secp256k1 = { git = "https://github.com/verisense-network/frost.git", branch = "main", package = "frost-secp256k1" }
+frost-secp256k1-tr = { git = "https://github.com/verisense-network/frost.git", branch = "main", package = "frost-secp256k1-tr" }
 
 clap = { version = "4.5.4", features = ["derive"] }
 tracing = "0.1.39"

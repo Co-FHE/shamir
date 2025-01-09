@@ -25,7 +25,7 @@ use tokio::net::unix::SocketAddr;
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{Receiver, Sender};
-use tokio::task;
+use tokio::{task, time};
 #[derive(Debug)]
 pub struct RegistryInfo {
     pub(crate) signer_p2p_peer_id: PeerId,
@@ -34,7 +34,6 @@ pub struct RegistryInfo {
 pub struct Coordinator {
     p2p_keypair: libp2p::identity::Keypair,
     swarm: libp2p::Swarm<CoorBehaviour>,
-    signer_keypairs: BTreeMap<u16, Multiaddr>,
     ipc_path: PathBuf,
     registry_info: HashMap<OutboundRequestId, RegistryInfo>,
     valid_validators: HashMap<PeerId, ValidValidator>,
@@ -44,6 +43,7 @@ enum Command {
     PeerId,
     Help,
     ListSignerAddr,
+    StartDkg,
     Unknown(String),
 }
 
@@ -56,25 +56,29 @@ impl Command {
             .replace("_", " ")
             .as_str()
         {
-            "peer id" => Command::PeerId,
-            "help" => Command::Help,
-            "list signer addr" => Command::ListSignerAddr,
+            "peer id" | "peerid" | "pid" => Command::PeerId,
+            "help" | "h" => Command::Help,
+            "list signer info" | "ls" => Command::ListSignerAddr,
+            "start dkg" | "dkg" => Command::StartDkg,
             other => Command::Unknown(other.to_string()),
         }
     }
 
     fn help_text() -> &'static str {
         "Available commands:
-        - peer id: Show the peer ID
-        - help: Show this help message
-        - list signer addr: List signer addresses"
+        - peer id | peerid | pid: Show the peer ID
+        - help | h: Show this help message
+        - list signer info | ls: List signer info
+        - start dkg | dkg: Start DKG"
     }
 }
+#[derive(Debug, Clone)]
 struct ValidValidator {
     pub(crate) p2p_peer_id: PeerId,
     pub(crate) validator_peer_id: PeerId,
     pub(crate) validator_public_key: PublicKey,
     pub(crate) nonce: u64,
+    pub(crate) address: Option<Multiaddr>,
 }
 impl Coordinator {
     pub fn new(p2p_keypair: libp2p::identity::Keypair) -> anyhow::Result<Self> {
@@ -112,7 +116,6 @@ impl Coordinator {
         Ok(Self {
             p2p_keypair,
             swarm,
-            signer_keypairs: BTreeMap::new(),
             ipc_path: Settings::global().coordinator.ipc_socket_path.into(),
             registry_info: HashMap::new(),
             valid_validators: HashMap::new(),
@@ -189,7 +192,7 @@ impl Coordinator {
                         },
                 },
             )) => {
-                tracing::info!(
+                tracing::debug!(
                     "Received request from {:?} with request_id {:?}",
                     peer,
                     request_id
@@ -215,9 +218,10 @@ impl Coordinator {
                             );
                             let _ = self.swarm.behaviour_mut().sig2coor.send_response(
                                 channel,
-                                SigToCoorResponse::Failure(
-                                    "Validator peerid is not in whitelist".to_string(),
-                                )
+                                SigToCoorResponse::Failure(format!(
+                                    "Validator peerid {} is not in whitelist",
+                                    validator_peer
+                                ))
                                 .into(),
                             );
                             return Ok(());
@@ -230,27 +234,45 @@ impl Coordinator {
                         ]);
                         // Verify the signature
                         if public_key.verify(&hash, &signature) {
-                            tracing::info!(
-                                "Valid signature from validator peerid : {} p2p peerid : {}",
-                                validator_peer,
-                                peer
-                            );
-                            let existing_validator = self.valid_validators.get(&validator_peer);
+                            let address = self.p2ppeerid_2_endpoint.get(&peer).cloned();
                             let new_validator = ValidValidator {
                                 p2p_peer_id: peer,
                                 validator_peer_id: validator_peer,
                                 validator_public_key: public_key,
-                                nonce: nonce,
+                                nonce,
+                                address,
                             };
-                            if existing_validator.is_none()
-                                || existing_validator.unwrap().nonce < nonce
-                            {
-                                self.valid_validators.insert(validator_peer, new_validator);
+
+                            let old_validator = self.valid_validators.get(&validator_peer).cloned();
+
+                            let should_insert = match &old_validator {
+                                Some(v) => v.nonce < nonce,
+                                None => true,
+                            };
+
+                            if should_insert {
+                                self.valid_validators
+                                    .insert(validator_peer, new_validator.clone());
                             }
-                            let addr = self.p2ppeerid_2_endpoint.get(&peer);
-                            if let Some(addr) = addr {
+
+                            tracing::info!(
+                                "Validator_peerid: {}, p2p_peerid : {}, total validators: {}",
+                                validator_peer,
+                                peer,
+                                self.valid_validators.len()
+                            );
+
+                            if old_validator.is_none() {
+                                tracing::info!("{:#?}", new_validator);
+                            } else {
+                                tracing::info!("{:#?}", old_validator.unwrap());
+                                tracing::info!("{:#?}", new_validator);
+                            }
+
+                            if let Some(addr) = self.p2ppeerid_2_endpoint.get(&peer) {
                                 self.swarm.add_peer_address(peer, addr.clone());
                             }
+
                             // Send success response
                             let _ = self
                                 .swarm
@@ -310,14 +332,14 @@ impl Coordinator {
                         reader.get_mut().write_all(b"\n").await?;
                     }
                     Command::ListSignerAddr => {
-                        let addresses = self
-                            .signer_keypairs
-                            .keys()
-                            .map(|k| k.to_string())
-                            .collect::<Vec<_>>()
-                            .join(", ");
-                        reader.get_mut().write_all(addresses.as_bytes()).await?;
-                        reader.get_mut().write_all(b"\n").await?;
+                        // dump the validators info
+                        for validator in self.valid_validators.values() {
+                            reader
+                                .get_mut()
+                                .write_all(format!("{:#?}", validator).as_bytes())
+                                .await?;
+                            reader.get_mut().write_all(b"\n").await?;
+                        }
                     }
                     Command::Unknown(cmd) => {
                         let msg = format!("Unknown command: {}\n", cmd);
@@ -327,6 +349,14 @@ impl Coordinator {
                             .write_all(Command::help_text().as_bytes())
                             .await?;
                         reader.get_mut().write_all(b"\n").await?;
+                    }
+                    Command::StartDkg => {
+                        for validator in self.valid_validators.values() {
+                            self.swarm
+                                .behaviour_mut()
+                                .coor2sig
+                                .send_request(&validator.p2p_peer_id, CoorToSigRequest::StartDkg);
+                        }
                     }
                 }
             }

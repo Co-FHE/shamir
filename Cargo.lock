@@ -692,16 +692,21 @@ dependencies = [
  "bytes",
  "clap",
  "common",
+ "ed25519-dalek",
  "frost-core 2.0.0",
  "frost-ed25519",
  "frost-secp256k1",
  "frost-secp256k1-tr",
  "futures",
+ "hex",
  "libp2p",
  "pem",
+ "proptest",
+ "rand_core",
  "serde",
  "serde_json",
  "sha2",
+ "thiserror 1.0.69",
  "tokio",
  "tracing",
  "uuid",
@@ -4333,6 +4338,10 @@ name = "uuid"
 version = "1.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b913a3b5fe84142e269d63cc62b64319ccaf89b748fc31fe025177f767a756c4"
+dependencies = [
+ "getrandom",
+ "serde",
+]
 
 [[package]]
 name = "valuable"

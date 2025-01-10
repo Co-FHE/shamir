@@ -143,27 +143,27 @@ impl SessionId {
         if max_signers < min_signers {
             return Err(SessionError::InvalidMinSigners(min_signers, max_signers));
         }
-        // Parse hash1 (8 bytes)
-        let hash1 = hex::decode(parts[3])
+        // Parse validators_hash (8 bytes)
+        let validators_hash = hex::decode(parts[3])
             .map_err(|e| SessionError::InvalidSessionIdFormat(s.to_string(), e.to_string()))?;
-        if hash1.len() != 8 {
+        if validators_hash.len() != 8 {
             return Err(SessionError::InvalidSessionIdFormat(
                 s.to_string(),
-                "Invalid hash1 length".to_string(),
+                "Invalid validators_hash length".to_string(),
             ));
         }
-        bytes[5..13].copy_from_slice(&hash1);
+        bytes[5..13].copy_from_slice(&validators_hash);
 
-        // Parse hash2 (8 bytes)
-        let hash2 = hex::decode(parts[4])
+        // Parse identifiers_hash (8 bytes)
+        let identifiers_hash = hex::decode(parts[4])
             .map_err(|e| SessionError::InvalidSessionIdFormat(s.to_string(), e.to_string()))?;
-        if hash2.len() != 8 {
+        if identifiers_hash.len() != 8 {
             return Err(SessionError::InvalidSessionIdFormat(
                 s.to_string(),
-                "Invalid hash2 length".to_string(),
+                "Invalid identifiers_hash length".to_string(),
             ));
         }
-        bytes[13..21].copy_from_slice(&hash2);
+        bytes[13..21].copy_from_slice(&identifiers_hash);
 
         // Parse UUID (16 bytes)
         let uuid = hex::decode(parts[5])

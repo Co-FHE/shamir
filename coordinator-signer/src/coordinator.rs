@@ -306,7 +306,46 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                             .await?;
                         reader.get_mut().write_all(b"\n").await?;
                     }
-                    Command::StartDkg => {
+                    Command::StartDkg(min_signers, crypto_type) => {
+                        let mut participants = Vec::new();
+                        if min_signers > self.valid_validators.len() as u16 {
+                            let msg = format!(
+                                "Not enough validators to start DKG, min_signers: {}, validators: {}",
+                                min_signers,
+                                self.valid_validators.len()
+                            );
+                            reader.get_mut().write_all(msg.as_bytes()).await?;
+                            reader.get_mut().write_all(b"\n").await?;
+                            return Err(anyhow::anyhow!(msg));
+                        }
+                        if self.valid_validators.len() > 255 {
+                            let msg = format!(
+                                "Too many validators to start DKG, max is 255, got {}",
+                                self.valid_validators.len()
+                            );
+                            reader.get_mut().write_all(msg.as_bytes()).await?;
+                            reader.get_mut().write_all(b"\n").await?;
+                            return Err(anyhow::anyhow!(msg));
+                        }
+                        if min_signers < (self.valid_validators.len() as u16 + 1) / 2
+                            || min_signers == 0
+                        {
+                            let msg = format!(
+                                "Min signers is too low, min_signers: {}, validators: {}",
+                                min_signers,
+                                self.valid_validators.len()
+                            );
+                            reader.get_mut().write_all(msg.as_bytes()).await?;
+                            reader.get_mut().write_all(b"\n").await?;
+                            return Err(anyhow::anyhow!(msg));
+                        }
+                        for (i, validator) in self.valid_validators.values().enumerate() {
+                            participants
+                                .push(((i + 1) as u16, validator.validator_peer_id.clone()));
+                        }
+                        let session =
+                            Session::<VI>::new(crypto_type, participants.clone(), min_signers);
+
                         for validator in self.valid_validators.values() {
                             self.swarm
                                 .behaviour_mut()

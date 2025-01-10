@@ -1,5 +1,4 @@
 use sha2::{Digest, Sha256};
-use std::borrow::Cow;
 
 /// Concatenates data and calculates their SHA256 hash
 ///

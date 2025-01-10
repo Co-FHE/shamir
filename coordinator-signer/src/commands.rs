@@ -1,4 +1,4 @@
-use clap::{command, Args, Parser, Subcommand};
+use clap::{command, Parser, Subcommand};
 
 // Define the structure for the command-line application
 #[derive(Parser)]

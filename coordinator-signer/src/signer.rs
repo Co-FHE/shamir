@@ -1,35 +1,35 @@
-use libp2p::identity::ed25519;
 use libp2p::request_response::ProtocolSupport;
 use libp2p::{ping, rendezvous, request_response, PeerId, StreamProtocol};
-use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use std::{any, time};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::unix::SocketAddr;
 use tokio::net::{UnixListener, UnixStream};
-use tokio::sync::mpsc;
-use tokio::sync::mpsc::{Receiver, Sender};
-use tokio::task;
 
 use common::Settings;
 use futures::StreamExt;
 use libp2p::{
-    identify::{self, Behaviour},
+    identify::{self},
     noise,
     swarm::SwarmEvent,
     tcp, yamux, Multiaddr,
 };
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 
 use crate::behaviour::{
     SigBehaviour, SigBehaviourEvent, SigToCoorRequest, SigToCoorResponse, ValidatorIdentityRequest,
 };
+use crate::crypto::{
+    ValidatorIdentity, ValidatorIdentityIdentity, ValidatorIdentityKeypair,
+    ValidatorIdentityPublicKey,
+};
+mod command;
 use crate::utils::{self, concat_string_hash};
+use command::Command;
 
-pub struct Signer {
-    validator_keypair: libp2p::identity::Keypair,
+pub struct Signer<VI: ValidatorIdentity> {
+    validator_keypair: VI::Keypair,
     p2p_keypair: libp2p::identity::Keypair,
     swarm: libp2p::Swarm<SigBehaviour>,
     coordinator_addr: Multiaddr,
@@ -37,46 +37,9 @@ pub struct Signer {
     coordinator_peer_id: PeerId,
     register_request_id: Option<request_response::OutboundRequestId>,
 }
-enum Command {
-    PeerId,
-    ValidatorPeerId,
-    CoordinatorPeerId,
-    P2pPeerId,
-    Help,
-    PingCoordinator,
-    Unknown(String),
-}
-impl Command {
-    fn parse(input: &str) -> Self {
-        match input
-            .trim()
-            .to_lowercase()
-            .replace("-", " ")
-            .replace("_", " ")
-            .as_str()
-        {
-            "peer id" | "id" | "pid" => Command::PeerId,
-            "validator peer id" | "vpid" => Command::ValidatorPeerId,
-            "coordinator peer id" | "cpid" => Command::CoordinatorPeerId,
-            "p2p peer id" | "ppid" => Command::P2pPeerId,
-            "help" | "h" => Command::Help,
-            "ping coordinator" | "pc" => Command::PingCoordinator,
-            other => Command::Unknown(other.to_string()),
-        }
-    }
-    fn help_text() -> &'static str {
-        "Available commands:
-        - `peer id`/`id`/`pid`: Show the peer ID
-            - `validator peer id`/`vpid`: Show the validator peer ID
-            - `coordinator peer id`/`cpid`: Show the coordinator peer ID
-            - `p2p peer id`/`ppid`: Show the p2p peer ID
-        - `help`/`h`: Show this help message
-        - `ping coordinator`/`pc`: Ping the coordinator"
-    }
-}
 
-impl Signer {
-    pub fn new(validator_keypair: libp2p::identity::Keypair) -> Result<Self, anyhow::Error> {
+impl<VI: ValidatorIdentity> Signer<VI> {
+    pub fn new(validator_keypair: VI::Keypair) -> Result<Self, anyhow::Error> {
         let keypair = libp2p::identity::Keypair::generate_ed25519();
         let mut swarm = libp2p::SwarmBuilder::with_existing_identity(keypair.clone())
             .with_tokio()
@@ -113,7 +76,7 @@ impl Signer {
         )
         .parse()?;
         let coordinator_peer_id =
-            PeerId::from_str(&Settings::global().coordinator.peer_id).unwrap();
+            <PeerId as FromStr>::from_str(&Settings::global().coordinator.peer_id).unwrap();
         swarm.add_peer_address(coordinator_peer_id, coordinator_addr.clone());
         Ok(Self {
             validator_keypair: validator_keypair.clone(),
@@ -122,9 +85,15 @@ impl Signer {
             coordinator_addr,
             ipc_path: PathBuf::from(Settings::global().signer.ipc_socket_path).join(format!(
                 "signer_{}.sock",
-                validator_keypair.public().to_peer_id().to_string()
+                validator_keypair
+                    .to_public_key()
+                    .to_identity()
+                    .to_fmt_string()
             )),
-            coordinator_peer_id: PeerId::from_str(&Settings::global().coordinator.peer_id).unwrap(),
+            coordinator_peer_id: <PeerId as FromStr>::from_str(
+                &Settings::global().coordinator.peer_id,
+            )
+            .unwrap(),
             register_request_id: None,
         })
     }
@@ -191,8 +160,8 @@ impl Signer {
                 let hash = concat_string_hash(&[
                     "register".as_bytes(),
                     self.validator_keypair
-                        .public()
-                        .to_peer_id()
+                        .to_public_key()
+                        .to_identity()
                         .to_bytes()
                         .as_slice(),
                     self.p2p_keypair.public().to_peer_id().to_bytes().as_slice(),
@@ -201,7 +170,7 @@ impl Signer {
                 let signature = self.validator_keypair.sign(hash.as_slice()).unwrap();
                 let request = ValidatorIdentityRequest {
                     signature: signature,
-                    public_key: self.validator_keypair.public().encode_protobuf(),
+                    public_key: self.validator_keypair.to_public_key().to_bytes(),
                     nonce: SystemTime::now()
                         .duration_since(UNIX_EPOCH)
                         .unwrap()
@@ -215,7 +184,7 @@ impl Signer {
                     "Sent registration request to coordinator with request_id: {:?}, pk: {}, validator_peer_id: {:?}, nonce: {:?}",
                     request_id,
                     utils::to_hex(request.public_key),
-                    self.validator_keypair.public().to_peer_id().to_base58(),
+                    self.validator_keypair.to_public_key().to_identity().to_fmt_string(),
                     request.nonce,
                 );
                 self.register_request_id = Some(request_id);
@@ -301,12 +270,7 @@ impl Signer {
             SwarmEvent::Behaviour(SigBehaviourEvent::Coor2sig(
                 request_response::Event::Message {
                     peer,
-                    message:
-                        request_response::Message::Request {
-                            request_id,
-                            request,
-                            channel,
-                        },
+                    message: request_response::Message::Request { request, .. },
                 },
             )) => {
                 tracing::info!(
@@ -338,7 +302,7 @@ impl Signer {
                 match command {
                     Command::PeerId => {
                         tracing::info!("Sending peer id");
-                        reader.get_mut().write_all(format!("p2p peer id: {}\nvalidator peer id: {}\ncoordinator peer id: {}", self.p2p_keypair.public().to_peer_id().to_base58(), self.validator_keypair.public().to_peer_id().to_base58(), self.coordinator_addr.to_string()).as_bytes()).await?;
+                        reader.get_mut().write_all(format!("p2p peer id: {}\nvalidator peer id: {}\ncoordinator peer id: {}", self.p2p_keypair.public().to_peer_id().to_base58(), self.validator_keypair.to_public_key().to_identity().to_fmt_string(), self.coordinator_addr.to_string()).as_bytes()).await?;
                         reader.get_mut().write_all(b"\n").await?;
                     }
                     Command::Help => {
@@ -354,9 +318,9 @@ impl Signer {
                             .get_mut()
                             .write_all(
                                 self.validator_keypair
-                                    .public()
-                                    .to_peer_id()
-                                    .to_base58()
+                                    .to_public_key()
+                                    .to_identity()
+                                    .to_fmt_string()
                                     .as_bytes(),
                             )
                             .await?;

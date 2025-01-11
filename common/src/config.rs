@@ -13,6 +13,7 @@ pub struct Settings {
     pub coordinator: CoordinatorSettings,
     pub signer: SignerSettings,
     pub connection: ConnectionSettings,
+    pub session: SessionSettings,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -52,6 +53,11 @@ pub struct SignerSettings {
 #[derive(Debug, Deserialize, Clone)]
 pub struct ConnectionSettings {
     pub ping_interval: u64,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct SessionSettings {
+    pub state_channel_retry_interval: u64,
 }
 
 lazy_static! {

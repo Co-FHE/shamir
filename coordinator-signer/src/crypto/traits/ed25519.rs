@@ -11,7 +11,7 @@ use super::{
 #[derive(Debug, Clone)]
 pub struct Ed25519Identity;
 
-#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+#[derive(Debug, Clone, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub struct Ed25519Id(pub [u8; 32]); // SHA256 hash of public key
 
 impl ValidatorIdentity for Ed25519Identity {

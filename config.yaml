@@ -20,3 +20,5 @@ signer:
   ipc_socket_path: ".ipc_socket/"
 connection:
   ping_interval: 1
+session:
+  state_channel_retry_interval: 1

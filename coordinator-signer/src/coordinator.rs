@@ -22,6 +22,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::unix::SocketAddr;
 use tokio::net::{UnixListener, UnixStream};
+use tokio::sync::mpsc::{Receiver, Sender, UnboundedReceiver, UnboundedSender};
 use tokio::sync::RwLock;
 mod command;
 use command::Command;
@@ -29,11 +30,13 @@ pub struct Coordinator<VI: ValidatorIdentity> {
     p2p_keypair: libp2p::identity::Keypair,
     swarm: libp2p::Swarm<CoorBehaviour>,
     ipc_path: PathBuf,
-    sessions: HashMap<uuid::Uuid, Session<VI>>,
+    sessions: HashMap<SessionId<VI::Identity>, Session<VI>>,
     valid_validators: HashMap<VI::Identity, ValidValidator<VI>>,
     p2ppeerid_2_endpoint: HashMap<PeerId, Multiaddr>,
+    session_receiver: UnboundedReceiver<TSSState<VI>>,
+    session_sender: UnboundedSender<TSSState<VI>>,
 }
-impl<VI: ValidatorIdentity> Coordinator<VI> {
+impl<VI: ValidatorIdentity + 'static> Coordinator<VI> {
     pub fn new(p2p_keypair: libp2p::identity::Keypair) -> anyhow::Result<Self> {
         let swarm = libp2p::SwarmBuilder::with_existing_identity(p2p_keypair.clone())
             .with_tokio()
@@ -66,6 +69,7 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
             })?
             .with_swarm_config(|cfg| cfg.with_idle_connection_timeout(Duration::from_secs(5)))
             .build();
+        let (session_sender, session_receiver) = tokio::sync::mpsc::unbounded_channel();
         Ok(Self {
             p2p_keypair,
             swarm,
@@ -73,6 +77,8 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
             sessions: HashMap::new(),
             valid_validators: HashMap::new(),
             p2ppeerid_2_endpoint: HashMap::new(),
+            session_sender,
+            session_receiver,
         })
     }
 
@@ -343,9 +349,21 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                             participants
                                 .push(((i + 1) as u16, validator.validator_peer_id.clone()));
                         }
-                        let session =
-                            Session::<VI>::new(crypto_type, participants.clone(), min_signers);
+                        let session = Session::<VI>::new(
+                            crypto_type,
+                            participants.clone(),
+                            min_signers,
+                            self.session_sender.clone(),
+                        );
 
+                        if let Err(e) = session {
+                            let msg = format!("Error creating session: {}", e);
+                            reader.get_mut().write_all(msg.as_bytes()).await?;
+                            reader.get_mut().write_all(b"\n").await?;
+                            return Err(anyhow::anyhow!(msg));
+                        }
+                        let session = session.unwrap();
+                        session.start().await;
                         for validator in self.valid_validators.values() {
                             self.swarm
                                 .behaviour_mut()

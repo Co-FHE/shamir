@@ -95,6 +95,9 @@ impl<VI: ValidatorIdentity + 'static> Session<VI> {
     pub(crate) async fn start(self) {
         tokio::spawn(async move {
             loop {
+                if self.dkg_state.completed() {
+                    break;
+                }
                 match self.dkg_state {
                     DKGState::Part1(ref dkg_part1_state) => {
                         if let Err(e) = self

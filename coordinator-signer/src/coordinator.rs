@@ -82,7 +82,7 @@ impl<VI: ValidatorIdentity + 'static> Coordinator<VI> {
         })
     }
 
-    pub async fn start_listening(&mut self) -> Result<(), anyhow::Error> {
+    pub async fn start_listening(mut self) -> Result<(), anyhow::Error> {
         self.swarm.listen_on(
             format!("/ip4/0.0.0.0/tcp/{}", Settings::global().coordinator.port).parse()?,
         )?;

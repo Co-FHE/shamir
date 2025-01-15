@@ -11,7 +11,7 @@ pub trait ValidatorIdentity: fmt::Debug + Clone {
     type PublicKey: fmt::Debug
         + Clone
         + ValidatorIdentityPublicKey<Identity = Self::Identity, Keypair = Self::Keypair>;
-    type Identity: fmt::Debug + Clone + ValidatorIdentityIdentity<PublicKey = Self::PublicKey>;
+    type Identity: fmt::Debug + ValidatorIdentityIdentity<PublicKey = Self::PublicKey>;
 }
 pub trait ValidatorIdentityPublicKey
 where
@@ -35,7 +35,7 @@ pub trait ValidatorIdentityKeypair {
 }
 pub trait ValidatorIdentityIdentity
 where
-    Self: Sized + Hash + cmp::Eq + cmp::Ord + Send + Sync,
+    Self: Sized + Hash + cmp::Eq + cmp::Ord + Send + Sync + Clone,
 {
     type PublicKey: ValidatorIdentityPublicKey;
     type DecodeError: std::error::Error + std::marker::Send + std::marker::Sync + 'static;

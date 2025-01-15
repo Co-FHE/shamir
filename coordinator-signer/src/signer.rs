@@ -97,7 +97,7 @@ impl<VI: ValidatorIdentity> Signer<VI> {
             register_request_id: None,
         })
     }
-    pub(crate) async fn start_listening(&mut self) -> Result<(), anyhow::Error> {
+    pub(crate) async fn start_listening(mut self) -> Result<(), anyhow::Error> {
         self.swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
 
         let listener = self.start_ipc_listening().await?;

@@ -7,15 +7,13 @@ pub(crate) use ed25519::*;
 pub(crate) use p2p_identity::*;
 use std::{cmp, fmt};
 pub trait ValidatorIdentity: fmt::Debug + Clone {
-    type Keypair: Clone + ValidatorIdentityKeypair<PublicKey = Self::PublicKey>;
-    type PublicKey: fmt::Debug
-        + Clone
-        + ValidatorIdentityPublicKey<Identity = Self::Identity, Keypair = Self::Keypair>;
-    type Identity: fmt::Debug + ValidatorIdentityIdentity<PublicKey = Self::PublicKey>;
+    type Keypair: ValidatorIdentityKeypair<PublicKey = Self::PublicKey>;
+    type PublicKey: ValidatorIdentityPublicKey<Identity = Self::Identity, Keypair = Self::Keypair>;
+    type Identity: ValidatorIdentityIdentity<PublicKey = Self::PublicKey>;
 }
 pub trait ValidatorIdentityPublicKey
 where
-    Self: Sized,
+    Self: Sized + fmt::Debug + Clone,
 {
     type Identity: ValidatorIdentityIdentity;
     type Keypair: ValidatorIdentityKeypair;
@@ -27,7 +25,10 @@ where
     fn to_bytes(&self) -> Vec<u8>;
     fn verify<M: AsRef<[u8]>, S: AsRef<[u8]>>(&self, message: M, signature: S) -> bool;
 }
-pub trait ValidatorIdentityKeypair {
+pub trait ValidatorIdentityKeypair
+where
+    Self: Clone,
+{
     type PublicKey: ValidatorIdentityPublicKey;
     type SignError: std::error::Error + std::marker::Send + std::marker::Sync + 'static;
     fn to_public_key(&self) -> Self::PublicKey;
@@ -35,7 +36,7 @@ pub trait ValidatorIdentityKeypair {
 }
 pub trait ValidatorIdentityIdentity
 where
-    Self: Sized + Hash + cmp::Eq + cmp::Ord + Send + Sync + Clone,
+    Self: Sized + Hash + cmp::Eq + cmp::Ord + Send + Sync + Clone + fmt::Debug,
 {
     type PublicKey: ValidatorIdentityPublicKey;
     type DecodeError: std::error::Error + std::marker::Send + std::marker::Sync + 'static;

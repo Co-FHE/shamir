@@ -23,7 +23,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::unix::SocketAddr;
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::mpsc::{Receiver, Sender, UnboundedReceiver, UnboundedSender};
-use tokio::sync::RwLock;
+use tokio::sync::{oneshot, RwLock};
 mod command;
 use command::Command;
 pub struct Coordinator<VI: ValidatorIdentity> {
@@ -33,8 +33,14 @@ pub struct Coordinator<VI: ValidatorIdentity> {
     sessions: HashMap<SessionId<VI::Identity>, Session<VI>>,
     valid_validators: HashMap<VI::Identity, ValidValidator<VI>>,
     p2ppeerid_2_endpoint: HashMap<PeerId, Multiaddr>,
-    session_receiver: UnboundedReceiver<TSSState<VI>>,
-    session_sender: UnboundedSender<TSSState<VI>>,
+    session_receiver: UnboundedReceiver<(
+        DKGSingleRequest<VI::Identity>,
+        oneshot::Sender<DKSingleResponse<VI::Identity>>,
+    )>,
+    session_sender: UnboundedSender<(
+        DKGSingleRequest<VI::Identity>,
+        oneshot::Sender<DKSingleResponse<VI::Identity>>,
+    )>,
 }
 impl<VI: ValidatorIdentity + 'static> Coordinator<VI> {
     pub fn new(p2p_keypair: libp2p::identity::Keypair) -> anyhow::Result<Self> {

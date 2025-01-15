@@ -693,7 +693,7 @@ dependencies = [
  "clap",
  "common",
  "ed25519-dalek",
- "frost-core 2.0.0",
+ "frost-core 2.0.0 (git+https://github.com/verisense-network/frost.git?branch=main)",
  "frost-ed25519",
  "frost-secp256k1",
  "frost-secp256k1-tr",

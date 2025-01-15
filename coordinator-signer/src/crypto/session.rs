@@ -6,6 +6,8 @@ use crate::crypto::{CryptoType, ValidatorIdentity};
 use common::Settings;
 pub(crate) use error::SessionError;
 use frost_ed25519::keys::dkg::part1;
+use futures::stream::FuturesUnordered;
+use futures::StreamExt;
 use libp2p::{Multiaddr, PeerId};
 use serde::{Deserialize, Serialize};
 pub(crate) use session_id::SessionId;
@@ -15,7 +17,8 @@ use std::{
     collections::{BTreeMap, HashMap},
     marker::PhantomData,
 };
-use tokio::sync::mpsc::{Sender, UnboundedSender};
+use tokio::sync::mpsc::{self, unbounded_channel, Sender, UnboundedReceiver, UnboundedSender};
+use tokio::sync::oneshot;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -33,12 +36,15 @@ pub(crate) enum TSSState<VI: ValidatorIdentity> {
 
 pub(crate) struct Session<VI: ValidatorIdentity> {
     session_id: SessionId<VI::Identity>,
-    pub(crate) crypto_type: CryptoType,
-    pub(crate) min_signers: u16,
-    pub(crate) dkg_state: DKGState<VI::Identity>,
-    pub(crate) participants: BTreeMap<u16, VI::Identity>,
-    pub(crate) signing_state: HashMap<Uuid, SigningState>,
-    pub(crate) sender: UnboundedSender<TSSState<VI>>,
+    crypto_type: CryptoType,
+    min_signers: u16,
+    dkg_state: DKGState<VI::Identity>,
+    participants: BTreeMap<u16, VI::Identity>,
+    signing_state: HashMap<Uuid, SigningState>,
+    dkg_sender: UnboundedSender<(
+        DKGSingleRequest<VI::Identity>,
+        oneshot::Sender<DKSingleResponse<VI::Identity>>,
+    )>,
 }
 
 impl<VI: ValidatorIdentity + 'static> Session<VI> {
@@ -46,7 +52,10 @@ impl<VI: ValidatorIdentity + 'static> Session<VI> {
         crypto_type: CryptoType,
         participants: Vec<(u16, VI::Identity)>,
         min_signers: u16,
-        sender: UnboundedSender<TSSState<VI>>,
+        dkg_sender: UnboundedSender<(
+            DKGSingleRequest<VI::Identity>,
+            oneshot::Sender<DKSingleResponse<VI::Identity>>,
+        )>,
     ) -> Result<Self, SessionError> {
         let mut participants_map = BTreeMap::new();
         for (id, identity) in participants {
@@ -81,7 +90,8 @@ impl<VI: ValidatorIdentity + 'static> Session<VI> {
             )));
         }
         let session_id = SessionId::new(crypto_type, min_signers, &participants_map)?;
-        let dkg_state = DKGState::Part1(DKGPart1State::new(min_signers, participants_map.clone()));
+        let dkg_state = DKGState::new(min_signers, participants_map.clone());
+
         Ok(Session {
             session_id,
             crypto_type,
@@ -89,29 +99,64 @@ impl<VI: ValidatorIdentity + 'static> Session<VI> {
             dkg_state,
             participants: participants_map,
             signing_state: HashMap::new(),
-            sender,
+            dkg_sender,
         })
     }
-    pub(crate) async fn start(self) {
+    pub(crate) async fn start(mut self) {
         tokio::spawn(async move {
             loop {
                 if self.dkg_state.completed() {
                     break;
                 }
-                match self.dkg_state {
-                    DKGState::Part1(ref dkg_part1_state) => {
-                        if let Err(e) = self
-                            .sender
-                            .send(TSSState::DKG(DKGState::Part1(dkg_part1_state.clone())))
-                        {
-                            tracing::error!("Error sending DKG state: {}", e);
+                let mut futures = FuturesUnordered::new();
+                for request in self.dkg_state.split_into_single_requests() {
+                    let (tx, rx) = oneshot::channel();
+                    futures.push(rx);
+                    if let Err(e) = self.dkg_sender.send((request, tx)) {
+                        tracing::error!("Error sending DKG state: {}", e);
+                        tokio::time::sleep(tokio::time::Duration::from_secs(
+                            Settings::global().session.state_channel_retry_interval,
+                        ))
+                        .await;
+                    }
+                }
+                let mut responses = BTreeMap::new();
+                for _ in 0..self.participants.len() {
+                    let response = futures.next().await;
+                    match response {
+                        Some(Ok(response)) => {
+                            responses.insert(response.get_identifier(), response);
+                        }
+                        Some(Err(e)) => {
+                            tracing::error!("Error receiving DKG state: {}", e);
+                            break;
+                        }
+                        None => {
+                            tracing::error!("DKG state is not completed");
+                            break;
+                        }
+                    }
+                }
+                if responses.len() == self.participants.len() {
+                    let result = self.dkg_state.handle_response(responses);
+                    match result {
+                        Ok(next_state) => self.dkg_state = next_state,
+                        Err(e) => {
+                            tracing::error!("Error handling DKG state: {}", e);
                             tokio::time::sleep(tokio::time::Duration::from_secs(
                                 Settings::global().session.state_channel_retry_interval,
                             ))
                             .await;
+                            continue;
                         }
                     }
-                    _ => {}
+                } else {
+                    tracing::error!("DKG state is not completed");
+                    tokio::time::sleep(tokio::time::Duration::from_secs(
+                        Settings::global().session.state_channel_retry_interval,
+                    ))
+                    .await;
+                    continue;
                 }
             }
         });

@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 pem = { version = "3" }
-frost-core = { path = "../frost-core" }
+# frost-core = { path = "../frost-core" }
 veritss = { path = "../veritss" }
 common = { path = "../common" }
 tokio = { version = "1.37.0", features = ["full"] }
@@ -26,6 +26,7 @@ libp2p = { version = "0.54", features = [
     "rendezvous",
 ] }
 anyhow = "1.0.70"
+frost-core = { git = "https://github.com/verisense-network/frost.git", branch = "main", package = "frost-core" }
 frost-ed25519 = { git = "https://github.com/verisense-network/frost.git", branch = "main", package = "frost-ed25519" }
 frost-secp256k1 = { git = "https://github.com/verisense-network/frost.git", branch = "main", package = "frost-secp256k1" }
 frost-secp256k1-tr = { git = "https://github.com/verisense-network/frost.git", branch = "main", package = "frost-secp256k1-tr" }

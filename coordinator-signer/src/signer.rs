@@ -31,7 +31,7 @@ use command::Command;
 pub struct Signer<VI: ValidatorIdentity> {
     validator_keypair: VI::Keypair,
     p2p_keypair: libp2p::identity::Keypair,
-    swarm: libp2p::Swarm<SigBehaviour>,
+    swarm: libp2p::Swarm<SigBehaviour<VI::Identity>>,
     coordinator_addr: Multiaddr,
     ipc_path: PathBuf,
     coordinator_peer_id: PeerId,
@@ -123,7 +123,7 @@ impl<VI: ValidatorIdentity> Signer<VI> {
     }
     pub(crate) async fn handle_swarm_event(
         &mut self,
-        event: SwarmEvent<SigBehaviourEvent>,
+        event: SwarmEvent<SigBehaviourEvent<VI::Identity>>,
     ) -> Result<(), anyhow::Error> {
         match event {
             SwarmEvent::NewListenAddr { address, .. } => {

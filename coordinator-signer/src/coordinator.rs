@@ -28,7 +28,7 @@ mod command;
 use command::Command;
 pub struct Coordinator<VI: ValidatorIdentity> {
     p2p_keypair: libp2p::identity::Keypair,
-    swarm: libp2p::Swarm<CoorBehaviour>,
+    swarm: libp2p::Swarm<CoorBehaviour<VI::Identity>>,
     ipc_path: PathBuf,
     sessions: HashMap<SessionId<VI::Identity>, Session<VI>>,
     valid_validators: HashMap<VI::Identity, ValidValidator<VI>>,
@@ -100,6 +100,15 @@ impl<VI: ValidatorIdentity + 'static> Coordinator<VI> {
                             tracing::error!("Error handling swarm event: {}", e);
                         }
                     },
+                    recv_data = self.session_receiver.recv()=> {
+                        if let Some((request, sender)) = recv_data {
+                            if let Err(e) = self.handle_dkg_request(request, sender).await {
+                                tracing::error!("Error handling DKG request: {}", e);
+                            }
+                        } else {
+                            tracing::error!("Error receiving DKG request");
+                        }
+                    }
                     command_result = listener.accept()=> {
                         if let Err(e) = self.handle_command(command_result).await {
                             tracing::error!("Error handling command: {}", e);
@@ -108,10 +117,17 @@ impl<VI: ValidatorIdentity + 'static> Coordinator<VI> {
             }
         }
     }
+    pub async fn handle_dkg_request(
+        &mut self,
+        request: DKGSingleRequest<VI::Identity>,
+        sender: oneshot::Sender<DKGSingleResponse<VI::Identity>>,
+    ) -> Result<(), anyhow::Error> {
+        todo!()
+    }
 
     pub async fn handle_swarm_event(
         &mut self,
-        event: SwarmEvent<CoorBehaviourEvent>,
+        event: SwarmEvent<CoorBehaviourEvent<VI::Identity>>,
     ) -> Result<(), anyhow::Error> {
         match event {
             SwarmEvent::ConnectionEstablished {
@@ -370,12 +386,8 @@ impl<VI: ValidatorIdentity + 'static> Coordinator<VI> {
                         }
                         let session = session.unwrap();
                         session.start().await;
-                        for validator in self.valid_validators.values() {
-                            self.swarm
-                                .behaviour_mut()
-                                .coor2sig
-                                .send_request(&validator.p2p_peer_id, CoorToSigRequest::StartDkg);
-                        }
+                        // accept ctrl+c to stop
+                        tokio::signal::ctrl_c().await?;
                     }
                 }
             }

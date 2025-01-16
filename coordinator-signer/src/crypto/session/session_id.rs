@@ -1,5 +1,6 @@
 use crate::crypto::session::error::SessionError;
 use crate::crypto::{CryptoType, ValidatorIdentityIdentity};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, marker::PhantomData};
 use uuid::Uuid;
@@ -11,10 +12,21 @@ use uuid::Uuid;
 // 8 bytes: hash of participants (ordered by VI::Identity) (leading 8 bytes)
 // 8 bytes: hash of TSS::Identity of participants (ordered by VI::Identity) (leading 8 bytes)
 // 16 bytes: uuid of session
-// the SessionId cannot used in any consensus
+// The SessionId cannot be used in any consensus
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct SessionId<VI: ValidatorIdentityIdentity>([u8; 37], PhantomData<VI>); // 1 + 2 + 2 + 8 + 8 + 16 = 37 bytes
 
+impl<VII: ValidatorIdentityIdentity> Serialize for SessionId<VII> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+impl<'de, VII: ValidatorIdentityIdentity> Deserialize<'de> for SessionId<VII> {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        SessionId::from_string(&s).map_err(serde::de::Error::custom)
+    }
+}
 impl<VII: ValidatorIdentityIdentity> SessionId<VII> {
     pub fn new(
         crypto_type: CryptoType,

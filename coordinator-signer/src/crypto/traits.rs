@@ -1,4 +1,5 @@
 use libp2p::identity::ParseError;
+use serde::{Deserialize, Serialize};
 use std::hash::Hash;
 use std::str::FromStr;
 mod ed25519;
@@ -9,7 +10,10 @@ use std::{cmp, fmt};
 pub trait ValidatorIdentity: fmt::Debug + Clone {
     type Keypair: ValidatorIdentityKeypair<PublicKey = Self::PublicKey>;
     type PublicKey: ValidatorIdentityPublicKey<Identity = Self::Identity, Keypair = Self::Keypair>;
-    type Identity: ValidatorIdentityIdentity<PublicKey = Self::PublicKey>;
+    type Identity: ValidatorIdentityIdentity<PublicKey = Self::PublicKey>
+        + Serialize
+        + for<'de> Deserialize<'de>
+        + 'static;
 }
 pub trait ValidatorIdentityPublicKey
 where

@@ -35,6 +35,7 @@ pub(crate) enum DKGState<VII: ValidatorIdentityIdentity> {
     },
     Completed,
 }
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum DKGSingleRequest<VII: ValidatorIdentityIdentity> {
     Part1 {
         crypto_type: CryptoType,
@@ -44,9 +45,25 @@ pub(crate) enum DKGSingleRequest<VII: ValidatorIdentityIdentity> {
         identifier: u16,
         identity: VII,
     },
-    Part2,
-    Part3,
+    Part2 {
+        crypto_type: CryptoType,
+        min_signers: u16,
+        max_signers: u16,
+        identifier: u16,
+        identity: VII,
+        round1_packages: BTreeMap<u16, DKGRound1Package>,
+    },
+    Part3 {
+        crypto_type: CryptoType,
+        min_signers: u16,
+        max_signers: u16,
+        identifier: u16,
+        identity: VII,
+        round1_packages: BTreeMap<u16, DKGRound1Package>,
+        round2_packages: BTreeMap<u16, DKGRound2Package>,
+    },
 }
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum DKGSingleResponse<VII: ValidatorIdentityIdentity> {
     Part1 {
         min_signers: u16,

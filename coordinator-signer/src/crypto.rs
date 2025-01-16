@@ -44,7 +44,7 @@ impl From<frost_secp256k1_tr::Error> for CryptoError {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum DKGPackage {
     Round1(DKGRound1Package),
     Round2(DKGRound2Package),
@@ -55,13 +55,13 @@ pub(crate) trait CryptoPackageTrait {
         self.get_crypto_type() == crypto_type
     }
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum DKGRound1Package {
     Ed25519(frost_ed25519::keys::dkg::round1::Package),
     Secp256k1(frost_secp256k1::keys::dkg::round1::Package),
     Secp256k1Tr(frost_secp256k1_tr::keys::dkg::round1::Package),
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum DKGRound2Package {
     Ed25519(frost_ed25519::keys::dkg::round2::Package),
     Secp256k1(frost_secp256k1::keys::dkg::round2::Package),

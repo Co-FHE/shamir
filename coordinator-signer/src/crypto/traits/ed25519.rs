@@ -1,4 +1,5 @@
 use ed25519_dalek::{Signature, SignatureError, SigningKey, VerifyingKey};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::error::Error as StdError;
 use std::fmt;
@@ -11,7 +12,7 @@ use super::{
 #[derive(Debug, Clone)]
 pub struct Ed25519Identity;
 
-#[derive(Debug, Clone, Hash, Eq, PartialEq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Hash, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Ed25519Id(pub [u8; 32]); // SHA256 hash of public key
 
 impl ValidatorIdentity for Ed25519Identity {

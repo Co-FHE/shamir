@@ -1,43 +1,57 @@
-use libp2p::{identify, ping, rendezvous, request_response, swarm::NetworkBehaviour};
+use libp2p::{
+    identify, ping, rendezvous,
+    request_response::{self, Codec},
+    swarm::NetworkBehaviour,
+};
 use serde::{Deserialize, Serialize};
 
+use crate::crypto::{
+    DKGSingleRequest, DKGSingleResponse, ValidatorIdentity, ValidatorIdentityIdentity,
+};
+
 #[derive(NetworkBehaviour)]
-pub(crate) struct CoorBehaviour {
+pub(crate) struct CoorBehaviour<
+    VII: ValidatorIdentityIdentity + Serialize + for<'de> Deserialize<'de> + 'static,
+> {
     pub(crate) identify: identify::Behaviour,
     pub(crate) ping: ping::Behaviour,
     pub(crate) sig2coor: request_response::cbor::Behaviour<SigToCoorRequest, SigToCoorResponse>,
-    pub(crate) coor2sig: request_response::cbor::Behaviour<CoorToSigRequest, CoorToSigResponse>,
+    pub(crate) coor2sig:
+        request_response::cbor::Behaviour<CoorToSigRequest<VII>, CoorToSigResponse<VII>>,
     pub(crate) rendezvous: rendezvous::server::Behaviour,
 }
+
 #[derive(NetworkBehaviour)]
-pub(crate) struct SigBehaviour {
+pub(crate) struct SigBehaviour<
+    VII: ValidatorIdentityIdentity + Serialize + for<'de> Deserialize<'de> + 'static,
+> {
     pub(crate) identify: identify::Behaviour,
     pub(crate) ping: ping::Behaviour,
     pub(crate) sig2coor: request_response::cbor::Behaviour<SigToCoorRequest, SigToCoorResponse>,
-    pub(crate) coor2sig: request_response::cbor::Behaviour<CoorToSigRequest, CoorToSigResponse>,
+    pub(crate) coor2sig:
+        request_response::cbor::Behaviour<CoorToSigRequest<VII>, CoorToSigResponse<VII>>,
     pub(crate) rendezvous: rendezvous::client::Behaviour,
 }
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum SigToCoorRequest {
     ValidatorIndentity(ValidatorIdentityRequest),
 }
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum SigToCoorResponse {
     Success,
     Failure(String),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) enum CoorToSigRequest {
-    ValidatorIdentity(Vec<u8>),
-    StartDkg,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) enum CoorToSigRequest<VII: ValidatorIdentityIdentity + 'static> {
+    DKGRequest(DKGSingleRequest<VII>),
 }
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) enum CoorToSigResponse {
-    Success,
-    Failure(String),
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) enum CoorToSigResponse<VII: ValidatorIdentityIdentity + 'static> {
+    DKGResponse(DKGSingleResponse<VII>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

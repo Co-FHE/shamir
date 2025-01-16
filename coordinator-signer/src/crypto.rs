@@ -43,19 +43,16 @@ impl From<frost_secp256k1_tr::Error> for CryptoError {
         Self::Secp256k1Tr(e)
     }
 }
+
 #[derive(Debug, Clone)]
 pub(crate) struct CryptoRound1<C: Ciphersuite> {
     ciphersuite: C,
     dkg_round1_package: Option<frost_core::keys::dkg::round1::Package<C>>,
-    dkg_round2_package: Option<frost_core::keys::dkg::round2::Package<C>>,
-    dkg_public_key_package: Option<frost_core::keys::PublicKeyPackage<C>>,
 }
 #[derive(Debug, Clone)]
 pub(crate) struct CryptoRound2<C: Ciphersuite> {
     ciphersuite: C,
-    dkg_round1_package: Option<frost_core::keys::dkg::round1::Package<C>>,
     dkg_round2_package: Option<frost_core::keys::dkg::round2::Package<C>>,
-    dkg_public_key_package: Option<frost_core::keys::PublicKeyPackage<C>>,
 }
 #[derive(Debug, Clone)]
 pub(crate) enum CryptoRound1Package {

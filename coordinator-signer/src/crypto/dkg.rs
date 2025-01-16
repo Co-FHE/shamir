@@ -5,7 +5,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use tokio::sync::oneshot;
 
-use super::{CryptoError, CryptoPackage, CryptoType, Session, SessionId, ValidatorIdentity};
+use super::{
+    CryptoError, CryptoRound1Package, CryptoRound2Package, CryptoType, Session, SessionId,
+    ValidatorIdentity,
+};
 
 #[derive(Debug, Clone)]
 pub(crate) enum DKGState<VII: ValidatorIdentityIdentity> {
@@ -20,14 +23,15 @@ pub(crate) enum DKGState<VII: ValidatorIdentityIdentity> {
         min_signers: u16,
         session_id: SessionId<VII>,
         participants: BTreeMap<u16, VII>,
-        round1_packages: BTreeMap<u16, CryptoPackage>,
+        round1_packages: BTreeMap<u16, CryptoRound1Package>,
     },
     Part3 {
         crypto_type: CryptoType,
         min_signers: u16,
         session_id: SessionId<VII>,
         participants: BTreeMap<u16, VII>,
-        packages: BTreeMap<u16, CryptoPackage>,
+        round1_packages: BTreeMap<u16, CryptoRound1Package>,
+        round2_packages: BTreeMap<u16, CryptoRound2Package>,
     },
     Completed,
 }
@@ -49,7 +53,7 @@ pub(crate) enum DKSingleResponse<VII: ValidatorIdentityIdentity> {
         max_signers: u16,
         identifier: u16,
         identity: VII,
-        crypto_package: CryptoPackage,
+        crypto_package: CryptoRound1Package,
     },
     Part2,
     Part3,
@@ -70,9 +74,7 @@ impl<VII: ValidatorIdentityIdentity> SingleResponse for DKSingleResponse<VII> {
         }
     }
 
-    fn get_crypto_package(&self) -> CryptoPackage {
-        todo!()
-    }
+    fn get_crypto_package(&self) -> CryptoRound1Package {}
 }
 pub(crate) trait State<VII: ValidatorIdentityIdentity> {
     type SingleRequest: SingleRequest;
@@ -96,7 +98,7 @@ where
 {
     type Error: std::error::Error;
     fn get_identifier(&self) -> u16;
-    fn get_crypto_package(&self) -> CryptoPackage;
+    fn get_crypto_package(&self) -> CryptoRound1Package;
 }
 
 pub(crate) struct DKGPart1SingleRequest<VII: ValidatorIdentityIdentity> {

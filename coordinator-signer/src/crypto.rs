@@ -67,6 +67,18 @@ pub(crate) enum DKGRound2Package {
     Secp256k1(frost_secp256k1::keys::dkg::round2::Package),
     Secp256k1Tr(frost_secp256k1_tr::keys::dkg::round2::Package),
 }
+#[derive(Debug, Clone)]
+pub(crate) enum DKGRound1SecretPackage {
+    Ed25519(frost_ed25519::keys::dkg::round1::SecretPackage),
+    Secp256k1(frost_secp256k1::keys::dkg::round1::SecretPackage),
+    Secp256k1Tr(frost_secp256k1_tr::keys::dkg::round1::SecretPackage),
+}
+#[derive(Debug, Clone)]
+pub(crate) enum DKGRound2SecretPackage {
+    Ed25519(frost_ed25519::keys::dkg::round2::SecretPackage),
+    Secp256k1(frost_secp256k1::keys::dkg::round2::SecretPackage),
+    Secp256k1Tr(frost_secp256k1_tr::keys::dkg::round2::SecretPackage),
+}
 impl CryptoPackageTrait for DKGPackage {
     fn get_crypto_type(&self) -> CryptoType {
         match self {

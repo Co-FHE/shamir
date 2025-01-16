@@ -6,8 +6,9 @@ use std::collections::BTreeMap;
 use tokio::sync::oneshot;
 
 use super::{
-    CryptoError, CryptoPackageTrait, CryptoType, DKGPackage, DKGRound1Package, DKGRound2Package,
-    Session, SessionId, ValidatorIdentity,
+    CryptoError, CryptoPackageTrait, CryptoType, DKGPackage, DKGRound1Package,
+    DKGRound1SecretPackage, DKGRound2Package, DKGRound2SecretPackage, Session, SessionId,
+    ValidatorIdentity,
 };
 
 #[derive(Debug, Clone)]
@@ -35,13 +36,40 @@ pub(crate) enum DKGState<VII: ValidatorIdentityIdentity> {
     },
     Completed,
 }
+
+#[derive(Debug, Clone)]
+pub(crate) enum DKGSignerState<VII: ValidatorIdentityIdentity> {
+    Part1 {
+        crypto_type: CryptoType,
+        min_signers: u16,
+        session_id: SessionId<VII>,
+        participants: BTreeMap<u16, VII>,
+        identifier: u16,
+        identity: VII,
+        round1_secret_package: DKGRound1SecretPackage,
+        round1_package: DKGRound1Package,
+    },
+    Part2 {
+        crypto_type: CryptoType,
+        min_signers: u16,
+        session_id: SessionId<VII>,
+        participants: BTreeMap<u16, VII>,
+        identifier: u16,
+        identity: VII,
+        round1_secret_package: DKGRound1SecretPackage,
+        round1_package: DKGRound2Package,
+        round1_packages: BTreeMap<u16, DKGRound2Package>,
+        round2_secret_package: DKGRound2SecretPackage,
+        round2_package: DKGRound2Package,
+    },
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum DKGSingleRequest<VII: ValidatorIdentityIdentity> {
     Part1 {
         crypto_type: CryptoType,
         session_id: SessionId<VII>,
         min_signers: u16,
-        max_signers: u16,
+        participants: BTreeMap<u16, VII>,
         identifier: u16,
         identity: VII,
     },
@@ -86,11 +114,17 @@ pub(crate) enum DKGSingleResponse<VII: ValidatorIdentityIdentity> {
         identity: VII,
         crypto_package: DKGPackage,
     },
+    Failure(String),
 }
 impl<VII: ValidatorIdentityIdentity> SingleRequest for DKGSingleRequest<VII> {
+    type Identity = VII;
     type Response = DKGSingleResponse<VII>;
-    fn response_channel(self) -> oneshot::Sender<DKGSingleResponse<VII>> {
-        todo!()
+    fn get_identity(&self) -> &Self::Identity {
+        match self {
+            DKGSingleRequest::Part1 { identity, .. } => identity,
+            DKGSingleRequest::Part2 { identity, .. } => identity,
+            DKGSingleRequest::Part3 { identity, .. } => identity,
+        }
     }
 }
 impl<VII: ValidatorIdentityIdentity> SingleResponse for DKGSingleResponse<VII> {
@@ -101,6 +135,7 @@ impl<VII: ValidatorIdentityIdentity> SingleResponse for DKGSingleResponse<VII> {
             DKGSingleResponse::Part1 { identifier, .. } => *identifier,
             DKGSingleResponse::Part2 { identifier, .. } => *identifier,
             DKGSingleResponse::Part3 { identifier, .. } => *identifier,
+            DKGSingleResponse::Failure(_) => todo!(),
         }
     }
 
@@ -109,6 +144,7 @@ impl<VII: ValidatorIdentityIdentity> SingleResponse for DKGSingleResponse<VII> {
             DKGSingleResponse::Part1 { crypto_package, .. } => crypto_package.clone(),
             DKGSingleResponse::Part2 { crypto_package, .. } => crypto_package.clone(),
             DKGSingleResponse::Part3 { crypto_package, .. } => crypto_package.clone(),
+            DKGSingleResponse::Failure(_) => todo!(),
         }
     }
 }
@@ -126,7 +162,8 @@ pub(crate) trait State<VII: ValidatorIdentityIdentity> {
 }
 pub(crate) trait SingleRequest {
     type Response;
-    fn response_channel(self) -> oneshot::Sender<Self::Response>;
+    type Identity: ValidatorIdentityIdentity;
+    fn get_identity(&self) -> &Self::Identity;
 }
 pub(crate) trait SingleResponse
 where
@@ -175,7 +212,7 @@ impl<VII: ValidatorIdentityIdentity> State<VII> for DKGState<VII> {
                 .iter()
                 .map(|(id, identity)| DKGSingleRequest::Part1 {
                     min_signers: *min_signers,
-                    max_signers: participants.len() as u16,
+                    participants: participants.clone(),
                     identifier: *id,
                     identity: identity.clone(),
                     session_id: session_id.clone(),

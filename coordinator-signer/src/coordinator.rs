@@ -1,12 +1,12 @@
 use crate::behaviour::{
-    CoorBehaviour, CoorBehaviourEvent, CoorToSigRequest, SigToCoorRequest, SigToCoorResponse,
-    ValidatorIdentityRequest,
+    CoorBehaviour, CoorBehaviourEvent, CoorToSigRequest, CoorToSigResponse, SigToCoorRequest,
+    SigToCoorResponse, ValidatorIdentityRequest,
 };
 use crate::crypto::*;
 use crate::utils::*;
 use common::Settings;
 use futures::StreamExt;
-use libp2p::request_response::ProtocolSupport;
+use libp2p::request_response::{OutboundRequestId, ProtocolSupport};
 use libp2p::{
     identify::{self},
     noise,
@@ -33,6 +33,7 @@ pub struct Coordinator<VI: ValidatorIdentity> {
     sessions: HashMap<SessionId<VI::Identity>, Session<VI>>,
     valid_validators: HashMap<VI::Identity, ValidValidator<VI>>,
     p2ppeerid_2_endpoint: HashMap<PeerId, Multiaddr>,
+    request_mapping: HashMap<OutboundRequestId, oneshot::Sender<DKGSingleResponse<VI::Identity>>>,
     session_receiver: UnboundedReceiver<(
         DKGSingleRequest<VI::Identity>,
         oneshot::Sender<DKGSingleResponse<VI::Identity>>,
@@ -83,6 +84,7 @@ impl<VI: ValidatorIdentity + 'static> Coordinator<VI> {
             sessions: HashMap::new(),
             valid_validators: HashMap::new(),
             p2ppeerid_2_endpoint: HashMap::new(),
+            request_mapping: HashMap::new(),
             session_sender,
             session_receiver,
         })
@@ -122,7 +124,35 @@ impl<VI: ValidatorIdentity + 'static> Coordinator<VI> {
         request: DKGSingleRequest<VI::Identity>,
         sender: oneshot::Sender<DKGSingleResponse<VI::Identity>>,
     ) -> Result<(), anyhow::Error> {
-        todo!()
+        tracing::info!("Received DKG request: {:?}", request);
+        let peer = request.get_identity();
+        let validator = self.valid_validators.get(peer).cloned();
+        match validator {
+            Some(validator) => {
+                tracing::info!(
+                    "Sending DKG request to validator: {:?}",
+                    validator.p2p_peer_id
+                );
+                let outbound_request_id = self.swarm.behaviour_mut().coor2sig.send_request(
+                    &validator.p2p_peer_id,
+                    CoorToSigRequest::DKGRequest(request),
+                );
+                tracing::info!("Outbound request id: {:?}", outbound_request_id);
+                self.request_mapping.insert(outbound_request_id, sender);
+            }
+            None => {
+                tracing::error!("Validator not found");
+                if let Err(e) = sender.send(DKGSingleResponse::Failure(format!(
+                    "Validator not found: {}",
+                    peer.to_fmt_string()
+                ))) {
+                    tracing::error!("Error sending failure response: {:?}", e);
+                    return Err(anyhow::anyhow!("Error sending failure response: {:?}", e));
+                }
+                return Ok(());
+            }
+        }
+        Ok(())
     }
 
     pub async fn handle_swarm_event(
@@ -162,6 +192,32 @@ impl<VI: ValidatorIdentity + 'static> Coordinator<VI> {
                     registrations.len()
                 );
             }
+            SwarmEvent::Behaviour(CoorBehaviourEvent::Coor2sig(
+                request_response::Event::Message {
+                    peer,
+                    message:
+                        request_response::Message::Response {
+                            request_id,
+                            response,
+                        },
+                    connection_id,
+                },
+            )) => {
+                tracing::debug!(
+                    "Received response from {:?} with request_id {:?}",
+                    peer,
+                    request_id
+                );
+                if let Some(sender) = self.request_mapping.remove(&request_id) {
+                    if let CoorToSigResponse::DKGResponse(response) = response {
+                        if let Err(e) = sender.send(response) {
+                            tracing::error!("Error sending response: {:?}", e);
+                        }
+                    } else {
+                        tracing::error!("Invalid response: {:?}", response);
+                    }
+                }
+            }
             SwarmEvent::Behaviour(CoorBehaviourEvent::Sig2coor(
                 request_response::Event::Message {
                     peer,
@@ -171,6 +227,7 @@ impl<VI: ValidatorIdentity + 'static> Coordinator<VI> {
                             request,
                             channel,
                         },
+                    connection_id,
                 },
             )) => {
                 tracing::debug!(
@@ -387,7 +444,6 @@ impl<VI: ValidatorIdentity + 'static> Coordinator<VI> {
                         let session = session.unwrap();
                         session.start().await;
                         // accept ctrl+c to stop
-                        tokio::signal::ctrl_c().await?;
                     }
                 }
             }

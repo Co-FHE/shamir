@@ -18,10 +18,11 @@ use libp2p::{
 use tokio::io::AsyncWriteExt;
 
 use crate::behaviour::{
-    SigBehaviour, SigBehaviourEvent, SigToCoorRequest, SigToCoorResponse, ValidatorIdentityRequest,
+    CoorToSigRequest, SigBehaviour, SigBehaviourEvent, SigToCoorRequest, SigToCoorResponse,
+    ValidatorIdentityRequest,
 };
 use crate::crypto::{
-    ValidatorIdentity, ValidatorIdentityIdentity, ValidatorIdentityKeypair,
+    DKGSingleRequest, ValidatorIdentity, ValidatorIdentityIdentity, ValidatorIdentityKeypair,
     ValidatorIdentityPublicKey,
 };
 mod command;
@@ -237,6 +238,40 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                     return Err(anyhow::anyhow!("Failed to register: {error}"));
                 }
             }
+            SwarmEvent::Behaviour(SigBehaviourEvent::Coor2sig(
+                request_response::Event::Message {
+                    peer,
+                    message:
+                        request_response::Message::Request {
+                            request_id,
+                            request,
+                            channel,
+                        },
+                    connection_id,
+                },
+            )) => {
+                tracing::debug!(
+                    "Received request from {:?} with request_id {:?}",
+                    peer,
+                    request_id
+                );
+                match request {
+                    CoorToSigRequest::DKGRequest(request) => match request {
+                        DKGSingleRequest::Part1 { .. } => {
+                            tracing::info!("Received DKG part 1 request");
+                        }
+                        DKGSingleRequest::Part2 { .. } => {
+                            tracing::info!("Received DKG part 2 request");
+                        }
+                        DKGSingleRequest::Part3 { .. } => {
+                            tracing::info!("Received DKG part 3 request");
+                        }
+                    },
+                    _ => {
+                        tracing::error!("Invalid request: {:?}", request);
+                    }
+                }
+            }
             SwarmEvent::Behaviour(SigBehaviourEvent::Sig2coor(
                 request_response::Event::Message {
                     peer,
@@ -245,6 +280,7 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                             request_id,
                             response,
                         },
+                    connection_id,
                 },
             )) => {
                 if Some(request_id) == self.register_request_id {
@@ -266,18 +302,6 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                         }
                     }
                 }
-            }
-            SwarmEvent::Behaviour(SigBehaviourEvent::Coor2sig(
-                request_response::Event::Message {
-                    peer,
-                    message: request_response::Message::Request { request, .. },
-                },
-            )) => {
-                tracing::info!(
-                    "Received request from {:?} with request {:?}",
-                    peer,
-                    request
-                );
             }
             other => {
                 tracing::debug!("Unhandled {:?}", other);

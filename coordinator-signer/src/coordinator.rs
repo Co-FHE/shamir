@@ -103,6 +103,7 @@ impl<VI: ValidatorIdentity + 'static> Coordinator<VI> {
                         }
                     },
                     recv_data = self.session_receiver.recv()=> {
+                        tracing::info!("Received DKG request from session");
                         if let Some((request, sender)) = recv_data {
                             if let Err(e) = self.handle_dkg_request(request, sender).await {
                                 tracing::error!("Error handling DKG request: {}", e);
@@ -124,7 +125,7 @@ impl<VI: ValidatorIdentity + 'static> Coordinator<VI> {
         request: DKGSingleRequest<VI::Identity>,
         sender: oneshot::Sender<DKGSingleResponse<VI::Identity>>,
     ) -> Result<(), anyhow::Error> {
-        tracing::info!("Received DKG request: {:?}", request);
+        tracing::info!("Received DKG request From Session: {:?}", request);
         let peer = request.get_identity();
         let validator = self.valid_validators.get(peer).cloned();
         match validator {
@@ -203,19 +204,24 @@ impl<VI: ValidatorIdentity + 'static> Coordinator<VI> {
                     connection_id,
                 },
             )) => {
-                tracing::debug!(
+                tracing::info!(
                     "Received response from {:?} with request_id {:?}",
                     peer,
                     request_id
                 );
                 if let Some(sender) = self.request_mapping.remove(&request_id) {
                     if let CoorToSigResponse::DKGResponse(response) = response {
+                        tracing::info!("Sending response {:?} to session", response);
                         if let Err(e) = sender.send(response) {
                             tracing::error!("Error sending response: {:?}", e);
+                        } else {
+                            tracing::info!("Sent response to session");
                         }
                     } else {
                         tracing::error!("Invalid response: {:?}", response);
                     }
+                } else {
+                    tracing::error!("Request id {:?} not found in request mapping", request_id);
                 }
             }
             SwarmEvent::Behaviour(CoorBehaviourEvent::Sig2coor(
@@ -392,6 +398,11 @@ impl<VI: ValidatorIdentity + 'static> Coordinator<VI> {
                         reader.get_mut().write_all(b"\n").await?;
                     }
                     Command::StartDkg(min_signers, crypto_type) => {
+                        tracing::debug!(
+                            "Starting DKG with min_signers: {}, crypto_type: {:?}",
+                            min_signers,
+                            crypto_type
+                        );
                         let mut participants = Vec::new();
                         if min_signers > self.valid_validators.len() as u16 {
                             let msg = format!(
@@ -399,6 +410,7 @@ impl<VI: ValidatorIdentity + 'static> Coordinator<VI> {
                                 min_signers,
                                 self.valid_validators.len()
                             );
+                            tracing::debug!("{}", msg);
                             reader.get_mut().write_all(msg.as_bytes()).await?;
                             reader.get_mut().write_all(b"\n").await?;
                             return Err(anyhow::anyhow!(msg));
@@ -408,6 +420,7 @@ impl<VI: ValidatorIdentity + 'static> Coordinator<VI> {
                                 "Too many validators to start DKG, max is 255, got {}",
                                 self.valid_validators.len()
                             );
+                            tracing::debug!("{}", msg);
                             reader.get_mut().write_all(msg.as_bytes()).await?;
                             reader.get_mut().write_all(b"\n").await?;
                             return Err(anyhow::anyhow!(msg));
@@ -420,14 +433,25 @@ impl<VI: ValidatorIdentity + 'static> Coordinator<VI> {
                                 min_signers,
                                 self.valid_validators.len()
                             );
+                            tracing::debug!("{}", msg);
                             reader.get_mut().write_all(msg.as_bytes()).await?;
                             reader.get_mut().write_all(b"\n").await?;
                             return Err(anyhow::anyhow!(msg));
                         }
+                        tracing::debug!(
+                            "Adding {} validators as participants",
+                            self.valid_validators.len()
+                        );
                         for (i, validator) in self.valid_validators.values().enumerate() {
+                            tracing::debug!(
+                                "Adding validator {} with peer id {}",
+                                i + 1,
+                                validator.validator_peer_id.to_fmt_string()
+                            );
                             participants
                                 .push(((i + 1) as u16, validator.validator_peer_id.clone()));
                         }
+                        tracing::debug!("Creating new session");
                         let session = Session::<VI>::new(
                             crypto_type,
                             participants.clone(),
@@ -437,11 +461,13 @@ impl<VI: ValidatorIdentity + 'static> Coordinator<VI> {
 
                         if let Err(e) = session {
                             let msg = format!("Error creating session: {}", e);
+                            tracing::debug!("{}", msg);
                             reader.get_mut().write_all(msg.as_bytes()).await?;
                             reader.get_mut().write_all(b"\n").await?;
                             return Err(anyhow::anyhow!(msg));
                         }
                         let session = session.unwrap();
+                        tracing::debug!("Starting session");
                         session.start().await;
                         // accept ctrl+c to stop
                     }

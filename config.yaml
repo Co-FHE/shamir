@@ -1,6 +1,6 @@
 logging:
   console:
-    level: "debug"
+    level: "info"
   file:
     level: "info"
     dir_path: "logs"

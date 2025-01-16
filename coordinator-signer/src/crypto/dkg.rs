@@ -1,5 +1,4 @@
 use crate::crypto::ValidatorIdentityIdentity;
-use frost_core::keys::KeyPackage;
 use futures::stream::FuturesUnordered;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -7,8 +6,8 @@ use tokio::sync::oneshot;
 
 use super::{
     CryptoError, CryptoPackageTrait, CryptoType, DKGPackage, DKGRound1Package,
-    DKGRound1SecretPackage, DKGRound2Package, DKGRound2SecretPackage, Session, SessionId,
-    ValidatorIdentity,
+    DKGRound1SecretPackage, DKGRound2Package, DKGRound2Packages, DKGRound2SecretPackage,
+    KeyPackage, PublicKeyPackage, Session, SessionId, ValidatorIdentity,
 };
 
 #[derive(Debug, Clone)]
@@ -26,15 +25,17 @@ pub(crate) enum DKGState<VII: ValidatorIdentityIdentity> {
         participants: BTreeMap<u16, VII>,
         round1_packages: BTreeMap<u16, DKGRound1Package>,
     },
-    Part3 {
+    GenPublicKey {
         crypto_type: CryptoType,
         min_signers: u16,
         session_id: SessionId<VII>,
         participants: BTreeMap<u16, VII>,
         round1_packages: BTreeMap<u16, DKGRound1Package>,
-        round2_packages: BTreeMap<u16, DKGRound2Package>,
+        round2_packagess: BTreeMap<u16, DKGRound2Packages>,
     },
-    Completed,
+    Completed {
+        public_key: PublicKeyPackage,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -47,7 +48,7 @@ pub(crate) enum DKGSignerState<VII: ValidatorIdentityIdentity> {
         identifier: u16,
         identity: VII,
         round1_secret_package: DKGRound1SecretPackage,
-        round1_package: DKGRound1Package,
+        // round1_package: DKGRound1Package,
     },
     Part2 {
         crypto_type: CryptoType,
@@ -56,11 +57,21 @@ pub(crate) enum DKGSignerState<VII: ValidatorIdentityIdentity> {
         participants: BTreeMap<u16, VII>,
         identifier: u16,
         identity: VII,
-        round1_secret_package: DKGRound1SecretPackage,
-        round1_package: DKGRound2Package,
-        round1_packages: BTreeMap<u16, DKGRound2Package>,
+        // round1_secret_package: DKGRound1SecretPackage,
+        // round1_package: DKGRound1Package,
+        round1_packages: BTreeMap<u16, DKGRound1Package>,
         round2_secret_package: DKGRound2SecretPackage,
-        round2_package: DKGRound2Package,
+        // round2_packages: DKGRound2Packages,
+    },
+    Completed {
+        crypto_type: CryptoType,
+        min_signers: u16,
+        session_id: SessionId<VII>,
+        participants: BTreeMap<u16, VII>,
+        identifier: u16,
+        identity: VII,
+        key_package: KeyPackage,
+        public_key_package: PublicKeyPackage,
     },
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -75,14 +86,16 @@ pub(crate) enum DKGSingleRequest<VII: ValidatorIdentityIdentity> {
     },
     Part2 {
         crypto_type: CryptoType,
+        session_id: SessionId<VII>,
         min_signers: u16,
         max_signers: u16,
         identifier: u16,
         identity: VII,
         round1_packages: BTreeMap<u16, DKGRound1Package>,
     },
-    Part3 {
+    GenPublicKey {
         crypto_type: CryptoType,
+        session_id: SessionId<VII>,
         min_signers: u16,
         max_signers: u16,
         identifier: u16,
@@ -107,7 +120,7 @@ pub(crate) enum DKGSingleResponse<VII: ValidatorIdentityIdentity> {
         identity: VII,
         crypto_package: DKGPackage,
     },
-    Part3 {
+    GenPublicKey {
         min_signers: u16,
         max_signers: u16,
         identifier: u16,
@@ -123,7 +136,15 @@ impl<VII: ValidatorIdentityIdentity> SingleRequest for DKGSingleRequest<VII> {
         match self {
             DKGSingleRequest::Part1 { identity, .. } => identity,
             DKGSingleRequest::Part2 { identity, .. } => identity,
-            DKGSingleRequest::Part3 { identity, .. } => identity,
+            DKGSingleRequest::GenPublicKey { identity, .. } => identity,
+        }
+    }
+
+    fn get_session_id(&self) -> SessionId<Self::Identity> {
+        match self {
+            DKGSingleRequest::Part1 { session_id, .. } => session_id.clone(),
+            DKGSingleRequest::Part2 { session_id, .. } => session_id.clone(),
+            DKGSingleRequest::GenPublicKey { session_id, .. } => session_id.clone(),
         }
     }
 }
@@ -134,7 +155,7 @@ impl<VII: ValidatorIdentityIdentity> SingleResponse for DKGSingleResponse<VII> {
         match self {
             DKGSingleResponse::Part1 { identifier, .. } => *identifier,
             DKGSingleResponse::Part2 { identifier, .. } => *identifier,
-            DKGSingleResponse::Part3 { identifier, .. } => *identifier,
+            DKGSingleResponse::GenPublicKey { identifier, .. } => *identifier,
             DKGSingleResponse::Failure(_) => todo!(),
         }
     }
@@ -143,7 +164,7 @@ impl<VII: ValidatorIdentityIdentity> SingleResponse for DKGSingleResponse<VII> {
         match self {
             DKGSingleResponse::Part1 { crypto_package, .. } => crypto_package.clone(),
             DKGSingleResponse::Part2 { crypto_package, .. } => crypto_package.clone(),
-            DKGSingleResponse::Part3 { crypto_package, .. } => crypto_package.clone(),
+            DKGSingleResponse::GenPublicKey { crypto_package, .. } => crypto_package.clone(),
             DKGSingleResponse::Failure(_) => todo!(),
         }
     }
@@ -163,6 +184,7 @@ pub(crate) trait State<VII: ValidatorIdentityIdentity> {
 pub(crate) trait SingleRequest {
     type Response;
     type Identity: ValidatorIdentityIdentity;
+    fn get_session_id(&self) -> SessionId<Self::Identity>;
     fn get_identity(&self) -> &Self::Identity;
 }
 pub(crate) trait SingleResponse
@@ -219,11 +241,75 @@ impl<VII: ValidatorIdentityIdentity> State<VII> for DKGState<VII> {
                     crypto_type: *crypto_type,
                 })
                 .collect(),
-            _ => vec![],
+            DKGState::Part2 {
+                min_signers,
+                participants,
+                session_id,
+                crypto_type,
+                round1_packages,
+            } => participants
+                .iter()
+                .map(|(id, identity)| DKGSingleRequest::Part2 {
+                    min_signers: *min_signers,
+                    max_signers: participants.len() as u16,
+                    identifier: *id,
+                    identity: identity.clone(),
+                    round1_packages: round1_packages.clone(),
+                    crypto_type: *crypto_type,
+                    session_id: session_id.clone(),
+                })
+                .collect(),
+            DKGState::GenPublicKey {
+                min_signers,
+                participants,
+                session_id,
+                crypto_type,
+                round1_packages,
+                round2_packagess,
+            } => participants
+                .iter()
+                .map(|(id, identity)| {
+                    let mut round2_packages = BTreeMap::new();
+                    for (oid, round2_package) in round2_packagess.iter() {
+                        if oid == id {
+                            continue;
+                        }
+                        let package = match round2_package {
+                            DKGRound2Packages::Ed25519(package) => {
+                                let tid = frost_ed25519::Identifier::try_from(*id).unwrap();
+                                let package = package.get(&tid).unwrap();
+                                DKGRound2Package::Ed25519(package.clone())
+                            }
+                            DKGRound2Packages::Secp256k1(package) => {
+                                let tid = frost_secp256k1::Identifier::try_from(*id).unwrap();
+                                let package = package.get(&tid).unwrap();
+                                DKGRound2Package::Secp256k1(package.clone())
+                            }
+                            DKGRound2Packages::Secp256k1Tr(package) => {
+                                let tid = frost_secp256k1_tr::Identifier::try_from(*id).unwrap();
+                                let package = package.get(&tid).unwrap();
+                                DKGRound2Package::Secp256k1Tr(package.clone())
+                            }
+                        };
+                        round2_packages.insert(*oid, package);
+                    }
+                    DKGSingleRequest::GenPublicKey {
+                        min_signers: *min_signers,
+                        max_signers: participants.len() as u16,
+                        identifier: *id,
+                        identity: identity.clone(),
+                        round1_packages: round1_packages.clone(),
+                        round2_packages: round2_packages.clone(),
+                        crypto_type: *crypto_type,
+                        session_id: session_id.clone(),
+                    }
+                })
+                .collect(),
+            DKGState::Completed { .. } => vec![],
         }
     }
     fn completed(&self) -> bool {
-        matches!(self, DKGState::Completed)
+        matches!(self, DKGState::Completed { .. })
     }
 
     fn handle_response(
@@ -259,7 +345,7 @@ impl<VII: ValidatorIdentityIdentity> State<VII> for DKGState<VII> {
                         DKGPackage::Round1(package) => {
                             packages.insert(*id, package);
                         }
-                        DKGPackage::Round2(_) => {
+                        _ => {
                             return Err(CryptoError::InvalidResponse(format!(
                                 "need round 1 package but got round 2 package"
                             )));
@@ -274,7 +360,106 @@ impl<VII: ValidatorIdentityIdentity> State<VII> for DKGState<VII> {
                     crypto_type: *crypto_type,
                 })
             }
-            _ => todo!(),
+            DKGState::Part2 {
+                crypto_type,
+                min_signers,
+                session_id,
+                participants,
+                round1_packages,
+            } => {
+                let mut packagess = BTreeMap::new();
+                for (id, _) in participants.iter() {
+                    let response =
+                        response
+                            .get(id)
+                            .ok_or(CryptoError::InvalidResponse(format!(
+                                "response not found for id: {}",
+                                id
+                            )))?;
+                    // TODO: need more checks
+                    let package = response.get_crypto_package();
+                    if !package.is_crypto_type(*crypto_type) {
+                        return Err(CryptoError::InvalidResponse(format!(
+                            "crypto type mismatch: expected {:?}, got {:?}",
+                            crypto_type,
+                            package.get_crypto_type()
+                        )));
+                    }
+                    match package {
+                        DKGPackage::Round2(packages) => {
+                            packagess.insert(*id, packages);
+                        }
+                        _ => {
+                            return Err(CryptoError::InvalidResponse(format!(
+                                "need round 1 package but got round 2 package"
+                            )));
+                        }
+                    }
+                }
+                Ok(DKGState::GenPublicKey {
+                    crypto_type: *crypto_type,
+                    min_signers: *min_signers,
+                    session_id: session_id.clone(),
+                    participants: participants.clone(),
+                    round1_packages: round1_packages.clone(),
+                    round2_packagess: packagess,
+                })
+            }
+            DKGState::GenPublicKey {
+                crypto_type,
+                min_signers,
+                session_id,
+                participants,
+                round1_packages,
+                round2_packagess,
+            } => {
+                let mut public_key = None;
+                for (id, _) in participants.iter() {
+                    let response =
+                        response
+                            .get(id)
+                            .ok_or(CryptoError::InvalidResponse(format!(
+                                "response not found for id: {}",
+                                id
+                            )))?;
+                    let package = response.get_crypto_package();
+                    if !package.is_crypto_type(*crypto_type) {
+                        return Err(CryptoError::InvalidResponse(format!(
+                            "crypto type mismatch: expected {:?}, got {:?}",
+                            crypto_type,
+                            package.get_crypto_type()
+                        )));
+                    }
+                    match package {
+                        DKGPackage::PublicKey(package) => match public_key {
+                            None => public_key = Some(package.clone()),
+                            Some(ref pk) => {
+                                if &package != pk {
+                                    return Err(CryptoError::InvalidResponse(format!(
+                                        "public key packages do not match {:?}, {:?}",
+                                        pk, package
+                                    )));
+                                }
+                            }
+                        },
+                        _ => {
+                            return Err(CryptoError::InvalidResponse(format!(
+                                "need public key package but got round 2 package"
+                            )));
+                        }
+                    }
+                    // TODO: check public key package is the same
+                }
+                if let Some(public_key) = public_key {
+                    tracing::info!("DKG state completed, public key: {:?}", public_key);
+                    Ok(DKGState::Completed { public_key })
+                } else {
+                    Err(CryptoError::InvalidResponse(
+                        "public key package not found".to_string(),
+                    ))
+                }
+            }
+            DKGState::Completed { .. } => Ok(self.clone()),
         }
     }
 }

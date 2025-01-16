@@ -1,12 +1,10 @@
 mod dkg;
 mod session;
 mod traits;
+use std::collections::BTreeMap;
+
 pub(crate) use crate::crypto::traits::*;
 pub(crate) use dkg::*;
-use frost_core::Ciphersuite;
-use frost_ed25519::Ed25519Sha512;
-use frost_secp256k1::Secp256K1Sha256;
-use frost_secp256k1_tr::Secp256K1Sha256TR;
 use libp2p::{Multiaddr, PeerId};
 use serde::{Deserialize, Serialize};
 pub(crate) use session::*;
@@ -47,7 +45,8 @@ impl From<frost_secp256k1_tr::Error> for CryptoError {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum DKGPackage {
     Round1(DKGRound1Package),
-    Round2(DKGRound2Package),
+    Round2(DKGRound2Packages),
+    PublicKey(PublicKeyPackage),
 }
 pub(crate) trait CryptoPackageTrait {
     fn get_crypto_type(&self) -> CryptoType;
@@ -61,11 +60,31 @@ pub(crate) enum DKGRound1Package {
     Secp256k1(frost_secp256k1::keys::dkg::round1::Package),
     Secp256k1Tr(frost_secp256k1_tr::keys::dkg::round1::Package),
 }
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) enum PublicKeyPackage {
+    Ed25519(frost_ed25519::keys::PublicKeyPackage),
+    Secp256k1(frost_secp256k1::keys::PublicKeyPackage),
+    Secp256k1Tr(frost_secp256k1_tr::keys::PublicKeyPackage),
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) enum KeyPackage {
+    Ed25519(frost_ed25519::keys::KeyPackage),
+    Secp256k1(frost_secp256k1::keys::KeyPackage),
+    Secp256k1Tr(frost_secp256k1_tr::keys::KeyPackage),
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum DKGRound2Package {
     Ed25519(frost_ed25519::keys::dkg::round2::Package),
     Secp256k1(frost_secp256k1::keys::dkg::round2::Package),
     Secp256k1Tr(frost_secp256k1_tr::keys::dkg::round2::Package),
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) enum DKGRound2Packages {
+    Ed25519(BTreeMap<frost_ed25519::Identifier, frost_ed25519::keys::dkg::round2::Package>),
+    Secp256k1(BTreeMap<frost_secp256k1::Identifier, frost_secp256k1::keys::dkg::round2::Package>),
+    Secp256k1Tr(
+        BTreeMap<frost_secp256k1_tr::Identifier, frost_secp256k1_tr::keys::dkg::round2::Package>,
+    ),
 }
 #[derive(Debug, Clone)]
 pub(crate) enum DKGRound1SecretPackage {
@@ -85,9 +104,12 @@ impl CryptoPackageTrait for DKGPackage {
             DKGPackage::Round1(DKGRound1Package::Ed25519(_)) => CryptoType::Ed25519,
             DKGPackage::Round1(DKGRound1Package::Secp256k1(_)) => CryptoType::Secp256k1,
             DKGPackage::Round1(DKGRound1Package::Secp256k1Tr(_)) => CryptoType::Secp256k1Tr,
-            DKGPackage::Round2(DKGRound2Package::Ed25519(_)) => CryptoType::Ed25519,
-            DKGPackage::Round2(DKGRound2Package::Secp256k1(_)) => CryptoType::Secp256k1,
-            DKGPackage::Round2(DKGRound2Package::Secp256k1Tr(_)) => CryptoType::Secp256k1Tr,
+            DKGPackage::Round2(DKGRound2Packages::Ed25519(_)) => CryptoType::Ed25519,
+            DKGPackage::Round2(DKGRound2Packages::Secp256k1(_)) => CryptoType::Secp256k1,
+            DKGPackage::Round2(DKGRound2Packages::Secp256k1Tr(_)) => CryptoType::Secp256k1Tr,
+            DKGPackage::PublicKey(PublicKeyPackage::Ed25519(_)) => CryptoType::Ed25519,
+            DKGPackage::PublicKey(PublicKeyPackage::Secp256k1(_)) => CryptoType::Secp256k1,
+            DKGPackage::PublicKey(PublicKeyPackage::Secp256k1Tr(_)) => CryptoType::Secp256k1Tr,
         }
     }
 }

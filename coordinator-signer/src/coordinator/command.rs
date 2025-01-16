@@ -20,7 +20,7 @@ impl Command {
         match parts.as_slice() {
             ["peer", "id"] | ["peerid"] | ["pid"] => Command::PeerId,
             ["help"] | ["h"] => Command::Help,
-            ["list", "signer", "info"] | ["ls"] => Command::ListSignerAddr,
+            ["list", "signer", "info"] | ["ls"] | ["list"] => Command::ListSignerAddr,
             ["start", "dkg", num, crypto_type] | ["dkg", num, crypto_type] => {
                 if let Ok(n) = num.parse::<u16>() {
                     if let Ok(c) = crypto_type.parse::<u8>() {

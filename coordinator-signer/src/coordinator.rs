@@ -35,11 +35,11 @@ pub struct Coordinator<VI: ValidatorIdentity> {
     p2ppeerid_2_endpoint: HashMap<PeerId, Multiaddr>,
     session_receiver: UnboundedReceiver<(
         DKGSingleRequest<VI::Identity>,
-        oneshot::Sender<DKSingleResponse<VI::Identity>>,
+        oneshot::Sender<DKGSingleResponse<VI::Identity>>,
     )>,
     session_sender: UnboundedSender<(
         DKGSingleRequest<VI::Identity>,
-        oneshot::Sender<DKSingleResponse<VI::Identity>>,
+        oneshot::Sender<DKGSingleResponse<VI::Identity>>,
     )>,
 }
 impl<VI: ValidatorIdentity + 'static> Coordinator<VI> {

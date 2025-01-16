@@ -45,58 +45,37 @@ impl From<frost_secp256k1_tr::Error> for CryptoError {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct CryptoRound1<C: Ciphersuite> {
-    ciphersuite: C,
-    dkg_round1_package: Option<frost_core::keys::dkg::round1::Package<C>>,
+pub(crate) enum DKGPackage {
+    Round1(DKGRound1Package),
+    Round2(DKGRound2Package),
 }
-#[derive(Debug, Clone)]
-pub(crate) struct CryptoRound2<C: Ciphersuite> {
-    ciphersuite: C,
-    dkg_round2_package: Option<frost_core::keys::dkg::round2::Package<C>>,
-}
-#[derive(Debug, Clone)]
-pub(crate) enum CryptoRound1Package {
-    Ed25519(CryptoRound1<Ed25519Sha512>),
-    Secp256k1(CryptoRound1<Secp256K1Sha256>),
-    Secp256k1Tr(CryptoRound1<Secp256K1Sha256TR>),
-}
-#[derive(Debug, Clone)]
-pub(crate) enum CryptoRound2Package {
-    Ed25519(CryptoRound2<Ed25519Sha512>),
-    Secp256k1(CryptoRound2<Secp256K1Sha256>),
-    Secp256k1Tr(CryptoRound2<Secp256K1Sha256TR>),
-}
-impl CryptoRound1Package {
-    pub(crate) fn is_crypto_type(&self, crypto_type: CryptoType) -> bool {
-        match crypto_type {
-            CryptoType::Ed25519 => matches!(self, CryptoRound1Package::Ed25519(_)),
-            CryptoType::Secp256k1 => matches!(self, CryptoRound1Package::Secp256k1(_)),
-            CryptoType::Secp256k1Tr => matches!(self, CryptoRound1Package::Secp256k1Tr(_)),
-        }
+pub(crate) trait CryptoPackageTrait {
+    fn get_crypto_type(&self) -> CryptoType;
+    fn is_crypto_type(&self, crypto_type: CryptoType) -> bool {
+        self.get_crypto_type() == crypto_type
     }
-    pub(crate) fn get_crypto_type(&self) -> CryptoType {
+}
+#[derive(Debug, Clone)]
+pub(crate) enum DKGRound1Package {
+    Ed25519(frost_ed25519::keys::dkg::round1::Package),
+    Secp256k1(frost_secp256k1::keys::dkg::round1::Package),
+    Secp256k1Tr(frost_secp256k1_tr::keys::dkg::round1::Package),
+}
+#[derive(Debug, Clone)]
+pub(crate) enum DKGRound2Package {
+    Ed25519(frost_ed25519::keys::dkg::round2::Package),
+    Secp256k1(frost_secp256k1::keys::dkg::round2::Package),
+    Secp256k1Tr(frost_secp256k1_tr::keys::dkg::round2::Package),
+}
+impl CryptoPackageTrait for DKGPackage {
+    fn get_crypto_type(&self) -> CryptoType {
         match self {
-            CryptoRound1Package::Ed25519(_) => CryptoType::Ed25519,
-            CryptoRound1Package::Secp256k1(_) => CryptoType::Secp256k1,
-            CryptoRound1Package::Secp256k1Tr(_) => CryptoType::Secp256k1Tr,
-        }
-    }
-}
-
-impl CryptoRound2Package {
-    pub(crate) fn is_crypto_type(&self, crypto_type: CryptoType) -> bool {
-        match crypto_type {
-            CryptoType::Ed25519 => matches!(self, CryptoRound2Package::Ed25519(_)),
-            CryptoType::Secp256k1 => matches!(self, CryptoRound2Package::Secp256k1(_)),
-            CryptoType::Secp256k1Tr => matches!(self, CryptoRound2Package::Secp256k1Tr(_)),
-        }
-    }
-
-    pub(crate) fn get_crypto_type(&self) -> CryptoType {
-        match self {
-            CryptoRound2Package::Ed25519(_) => CryptoType::Ed25519,
-            CryptoRound2Package::Secp256k1(_) => CryptoType::Secp256k1,
-            CryptoRound2Package::Secp256k1Tr(_) => CryptoType::Secp256k1Tr,
+            DKGPackage::Round1(DKGRound1Package::Ed25519(_)) => CryptoType::Ed25519,
+            DKGPackage::Round1(DKGRound1Package::Secp256k1(_)) => CryptoType::Secp256k1,
+            DKGPackage::Round1(DKGRound1Package::Secp256k1Tr(_)) => CryptoType::Secp256k1Tr,
+            DKGPackage::Round2(DKGRound2Package::Ed25519(_)) => CryptoType::Ed25519,
+            DKGPackage::Round2(DKGRound2Package::Secp256k1(_)) => CryptoType::Secp256k1,
+            DKGPackage::Round2(DKGRound2Package::Secp256k1Tr(_)) => CryptoType::Secp256k1Tr,
         }
     }
 }

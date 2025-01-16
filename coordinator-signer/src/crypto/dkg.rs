@@ -6,8 +6,8 @@ use std::collections::BTreeMap;
 use tokio::sync::oneshot;
 
 use super::{
-    CryptoError, CryptoRound1Package, CryptoRound2Package, CryptoType, Session, SessionId,
-    ValidatorIdentity,
+    CryptoError, CryptoPackageTrait, CryptoType, DKGPackage, DKGRound1Package, DKGRound2Package,
+    Session, SessionId, ValidatorIdentity,
 };
 
 #[derive(Debug, Clone)]
@@ -23,15 +23,15 @@ pub(crate) enum DKGState<VII: ValidatorIdentityIdentity> {
         min_signers: u16,
         session_id: SessionId<VII>,
         participants: BTreeMap<u16, VII>,
-        round1_packages: BTreeMap<u16, CryptoRound1Package>,
+        round1_packages: BTreeMap<u16, DKGRound1Package>,
     },
     Part3 {
         crypto_type: CryptoType,
         min_signers: u16,
         session_id: SessionId<VII>,
         participants: BTreeMap<u16, VII>,
-        round1_packages: BTreeMap<u16, CryptoRound1Package>,
-        round2_packages: BTreeMap<u16, CryptoRound2Package>,
+        round1_packages: BTreeMap<u16, DKGRound1Package>,
+        round2_packages: BTreeMap<u16, DKGRound2Package>,
     },
     Completed,
 }
@@ -47,34 +47,53 @@ pub(crate) enum DKGSingleRequest<VII: ValidatorIdentityIdentity> {
     Part2,
     Part3,
 }
-pub(crate) enum DKSingleResponse<VII: ValidatorIdentityIdentity> {
+pub(crate) enum DKGSingleResponse<VII: ValidatorIdentityIdentity> {
     Part1 {
         min_signers: u16,
         max_signers: u16,
         identifier: u16,
         identity: VII,
-        crypto_package: CryptoRound1Package,
+        crypto_package: DKGPackage,
     },
-    Part2,
-    Part3,
+    Part2 {
+        min_signers: u16,
+        max_signers: u16,
+        identifier: u16,
+        identity: VII,
+        crypto_package: DKGPackage,
+    },
+    Part3 {
+        min_signers: u16,
+        max_signers: u16,
+        identifier: u16,
+        identity: VII,
+        crypto_package: DKGPackage,
+    },
 }
 impl<VII: ValidatorIdentityIdentity> SingleRequest for DKGSingleRequest<VII> {
-    type Response = DKSingleResponse<VII>;
-    fn response_channel(self) -> oneshot::Sender<DKSingleResponse<VII>> {
+    type Response = DKGSingleResponse<VII>;
+    fn response_channel(self) -> oneshot::Sender<DKGSingleResponse<VII>> {
         todo!()
     }
 }
-impl<VII: ValidatorIdentityIdentity> SingleResponse for DKSingleResponse<VII> {
+impl<VII: ValidatorIdentityIdentity> SingleResponse for DKGSingleResponse<VII> {
     type Error = CryptoError;
+    type CryptoPackage = DKGPackage;
     fn get_identifier(&self) -> u16 {
         match self {
-            DKSingleResponse::Part1 { identifier, .. } => *identifier,
-            DKSingleResponse::Part2 => 0,
-            DKSingleResponse::Part3 => 0,
+            DKGSingleResponse::Part1 { identifier, .. } => *identifier,
+            DKGSingleResponse::Part2 { identifier, .. } => *identifier,
+            DKGSingleResponse::Part3 { identifier, .. } => *identifier,
         }
     }
 
-    fn get_crypto_package(&self) -> CryptoRound1Package {}
+    fn get_crypto_package(&self) -> Self::CryptoPackage {
+        match self {
+            DKGSingleResponse::Part1 { crypto_package, .. } => crypto_package.clone(),
+            DKGSingleResponse::Part2 { crypto_package, .. } => crypto_package.clone(),
+            DKGSingleResponse::Part3 { crypto_package, .. } => crypto_package.clone(),
+        }
+    }
 }
 pub(crate) trait State<VII: ValidatorIdentityIdentity> {
     type SingleRequest: SingleRequest;
@@ -97,8 +116,9 @@ where
     Self: Sized,
 {
     type Error: std::error::Error;
+    type CryptoPackage: CryptoPackageTrait;
     fn get_identifier(&self) -> u16;
-    fn get_crypto_package(&self) -> CryptoRound1Package;
+    fn get_crypto_package(&self) -> Self::CryptoPackage;
 }
 
 pub(crate) struct DKGPart1SingleRequest<VII: ValidatorIdentityIdentity> {
@@ -109,10 +129,10 @@ pub(crate) struct DKGPart1SingleRequest<VII: ValidatorIdentityIdentity> {
 }
 impl<VII: ValidatorIdentityIdentity> DKGState<VII> {
     pub(crate) fn new(
+        crypto_type: CryptoType,
         min_signers: u16,
         participants: BTreeMap<u16, VII>,
         session_id: SessionId<VII>,
-        crypto_type: CryptoType,
     ) -> Self {
         Self::Part1 {
             min_signers,
@@ -126,7 +146,7 @@ impl<VII: ValidatorIdentityIdentity> State<VII> for DKGState<VII> {
     type SingleRequest = DKGSingleRequest<VII>;
     type NextState = DKGState<VII>;
     type Error = CryptoError;
-    type Response = DKSingleResponse<VII>;
+    type Response = DKGSingleResponse<VII>;
     fn split_into_single_requests(&self) -> Vec<DKGSingleRequest<VII>> {
         match self {
             DKGState::Part1 {
@@ -181,13 +201,22 @@ impl<VII: ValidatorIdentityIdentity> State<VII> for DKGState<VII> {
                             package.get_crypto_type()
                         )));
                     }
-                    packages.insert(*id, package);
+                    match package {
+                        DKGPackage::Round1(package) => {
+                            packages.insert(*id, package);
+                        }
+                        DKGPackage::Round2(_) => {
+                            return Err(CryptoError::InvalidResponse(format!(
+                                "need round 1 package but got round 2 package"
+                            )));
+                        }
+                    }
                 }
                 Ok(DKGState::Part2 {
                     min_signers: *min_signers,
                     session_id: session_id.clone(),
                     participants: participants.clone(),
-                    packages,
+                    round1_packages: packages,
                     crypto_type: *crypto_type,
                 })
             }

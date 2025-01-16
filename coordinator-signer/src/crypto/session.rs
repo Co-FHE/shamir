@@ -43,7 +43,7 @@ pub(crate) struct Session<VI: ValidatorIdentity> {
     signing_state: HashMap<Uuid, SigningState>,
     dkg_sender: UnboundedSender<(
         DKGSingleRequest<VI::Identity>,
-        oneshot::Sender<DKSingleResponse<VI::Identity>>,
+        oneshot::Sender<DKGSingleResponse<VI::Identity>>,
     )>,
 }
 
@@ -54,7 +54,7 @@ impl<VI: ValidatorIdentity + 'static> Session<VI> {
         min_signers: u16,
         dkg_sender: UnboundedSender<(
             DKGSingleRequest<VI::Identity>,
-            oneshot::Sender<DKSingleResponse<VI::Identity>>,
+            oneshot::Sender<DKGSingleResponse<VI::Identity>>,
         )>,
     ) -> Result<Self, SessionError> {
         let mut participants_map = BTreeMap::new();
@@ -90,7 +90,12 @@ impl<VI: ValidatorIdentity + 'static> Session<VI> {
             )));
         }
         let session_id = SessionId::new(crypto_type, min_signers, &participants_map)?;
-        let dkg_state = DKGState::new(min_signers, participants_map.clone());
+        let dkg_state = DKGState::new(
+            crypto_type,
+            min_signers,
+            participants_map.clone(),
+            session_id.clone(),
+        );
 
         Ok(Session {
             session_id,

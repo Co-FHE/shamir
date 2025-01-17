@@ -4,8 +4,8 @@ pub(crate) mod subsession;
 use super::signing_session::SigningSession;
 use super::{
     DKGPackage, DKGRound1Package, DKGRound1SecretPackage, DKGRound2Package, DKGRound2Packages,
-    DKGRound2SecretPackage, KeyPackage, PublicKeyPackage, SigningSingleRequest,
-    SigningSingleResponse, ValidatorIdentityIdentity,
+    DKGRound2SecretPackage, KeyPackage, PublicKeyPackage, SigningSignerSession,
+    SigningSingleRequest, SigningSingleResponse, ValidatorIdentityIdentity,
 };
 use crate::crypto::dkg::*;
 use crate::crypto::{CryptoType, ValidatorIdentity};
@@ -19,7 +19,7 @@ use rand::thread_rng;
 use serde::{Deserialize, Serialize};
 pub(crate) use session_id::SessionId;
 use std::collections::{BTreeMap, HashMap};
-use subsession::{SubSession, SubSessionId};
+use subsession::{SignatureSuite, SubSession, SubSessionId};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 use uuid::Uuid;
@@ -626,6 +626,25 @@ impl<VI: ValidatorIdentity> SignerSession<VI> {
             }
         }
     }
+    pub(crate) fn is_completed(&self) -> Option<Result<SigningSignerSession<VI>, SessionError>> {
+        match self.dkg_state.clone() {
+            DKGSignerState::Completed {
+                key_package,
+                public_key_package,
+                ..
+            } => Some(SigningSignerSession::new(
+                self.session_id.clone(),
+                public_key_package,
+                self.min_signers,
+                self.participants.clone(),
+                self.crypto_type,
+                key_package,
+                self.identifier,
+                self.identity.clone(),
+            )),
+            _ => None,
+        }
+    }
 }
 
 pub(crate) struct Session<VI: ValidatorIdentity> {
@@ -708,6 +727,7 @@ impl<VI: ValidatorIdentity> Session<VI> {
             SigningSingleRequest<VI::Identity>,
             oneshot::Sender<SigningSingleResponse<VI::Identity>>,
         )>,
+        signature_sender: UnboundedSender<SignatureSuite<VI>>,
     ) {
         tracing::debug!("Starting DKG session with id: {:?}", self.session_id);
         tokio::spawn(async move {
@@ -720,6 +740,7 @@ impl<VI: ValidatorIdentity> Session<VI> {
                         self.participants.clone(),
                         self.crypto_type,
                         signing_sender,
+                        signature_sender,
                     );
                     if let Err(e) = signing_session {
                         return Err(e);

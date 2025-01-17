@@ -22,7 +22,6 @@ pub(crate) enum SigningState<VII: ValidatorIdentityIdentity> {
         subsession_id: SubSessionId<VII>,
         pk: PublicKeyPackage,
         participants: BTreeMap<u16, VII>,
-        identity: VII,
     },
     Round2 {
         crypto_type: CryptoType,
@@ -88,12 +87,14 @@ pub(crate) enum SigningSingleRequest<VII: ValidatorIdentityIdentity> {
         pkid: Vec<u8>,
         message: Vec<u8>,
         subsession_id: SubSessionId<VII>,
+        identifier: u16,
         identity: VII,
     },
     Round2 {
         pkid: Vec<u8>,
         subsession_id: SubSessionId<VII>,
         signing_package: SigningPackage,
+        identifier: u16,
         identity: VII,
     },
 }
@@ -112,6 +113,15 @@ pub(crate) enum SigningSingleResponse<VII: ValidatorIdentityIdentity> {
         identifier: u16,
     },
     Failure(String),
+}
+impl<VII: ValidatorIdentityIdentity> SigningSingleResponse<VII> {
+    pub(crate) fn get_identity(&self) -> u16 {
+        match self {
+            SigningSingleResponse::Round1 { identifier, .. } => *identifier,
+            SigningSingleResponse::Round2 { identifier, .. } => *identifier,
+            SigningSingleResponse::Failure(_) => todo!(),
+        }
+    }
 }
 impl<VII: ValidatorIdentityIdentity> SigningSingleRequest<VII> {
     pub(crate) fn get_identity(&self) -> &VII {
@@ -147,13 +157,12 @@ impl<VII: ValidatorIdentityIdentity> SigningState<VII> {
             subsession_id,
             pk,
             participants,
-            identity,
         }
     }
 }
 
 impl<VII: ValidatorIdentityIdentity> SigningState<VII> {
-    fn split_into_single_requests(&self) -> Vec<SigningSingleRequest<VII>> {
+    pub(crate) fn split_into_single_requests(&self) -> Vec<SigningSingleRequest<VII>> {
         match self {
             SigningState::Round1 {
                 crypto_type,
@@ -163,13 +172,13 @@ impl<VII: ValidatorIdentityIdentity> SigningState<VII> {
                 subsession_id,
                 pk,
                 participants,
-                identity,
             } => participants
                 .iter()
                 .map(|(id, identity)| SigningSingleRequest::Round1 {
                     pkid: pkid.clone(),
                     message: message.clone(),
                     subsession_id: subsession_id.clone(),
+                    identifier: *id,
                     identity: identity.clone(),
                 })
                 .collect(),
@@ -188,13 +197,14 @@ impl<VII: ValidatorIdentityIdentity> SigningState<VII> {
                     pkid: pkid.clone(),
                     subsession_id: subsession_id.clone(),
                     signing_package: signing_package.clone(),
+                    identifier: *id,
                     identity: identity.clone(),
                 })
                 .collect(),
             SigningState::Completed { .. } => vec![],
         }
     }
-    fn completed(&self) -> Option<Signature> {
+    pub(crate) fn completed(&self) -> Option<Signature> {
         match self {
             SigningState::Completed {
                 signature,
@@ -205,7 +215,7 @@ impl<VII: ValidatorIdentityIdentity> SigningState<VII> {
         }
     }
 
-    fn handle_response(
+    pub(crate) fn handle_response(
         &self,
         response: BTreeMap<u16, SigningSingleResponse<VII>>,
     ) -> Result<Self, CryptoError> {
@@ -218,7 +228,6 @@ impl<VII: ValidatorIdentityIdentity> SigningState<VII> {
                 subsession_id,
                 pk,
                 participants,
-                identity,
             } => {
                 for (id, _) in participants.iter() {
                     let _ = response

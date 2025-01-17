@@ -24,8 +24,8 @@ use crate::behaviour::{
     SigToCoorResponse, ValidatorIdentityRequest,
 };
 use crate::crypto::{
-    DKGSingleRequest, DKGSingleResponse, SessionId, SignerSession, SingleRequest,
-    ValidatorIdentity, ValidatorIdentityIdentity, ValidatorIdentityKeypair,
+    DKGSingleRequest, DKGSingleResponse, SessionId, SignerSession, SigningSignerSession,
+    SingleRequest, ValidatorIdentity, ValidatorIdentityIdentity, ValidatorIdentityKeypair,
     ValidatorIdentityPublicKey,
 };
 mod command;
@@ -38,6 +38,7 @@ pub struct Signer<VI: ValidatorIdentity> {
     swarm: libp2p::Swarm<SigBehaviour<VI::Identity>>,
     coordinator_addr: Multiaddr,
     sessions: HashMap<SessionId<VI::Identity>, SignerSession<VI>>,
+    signing_sessions: HashMap<Vec<u8>, SigningSignerSession<VI>>,
     ipc_path: PathBuf,
     coordinator_peer_id: PeerId,
     register_request_id: Option<request_response::OutboundRequestId>,
@@ -96,6 +97,7 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                     .to_fmt_string()
             )),
             sessions: HashMap::new(),
+            signing_sessions: HashMap::new(),
             coordinator_peer_id: <PeerId as FromStr>::from_str(
                 &Settings::global().coordinator.peer_id,
             )
@@ -269,6 +271,25 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                         if let Some(existing_session) = self.sessions.get_mut(&session_id) {
                             match existing_session.update_from_request(request) {
                                 Ok(response) => {
+                                    if let Some(signing_session) = existing_session.is_completed() {
+                                        tracing::info!("DKG is completed");
+                                        match signing_session {
+                                            Ok(signing_session) => {
+                                                tracing::info!("Signing session is completed");
+                                                self.signing_sessions.insert(
+                                                    signing_session.pkid.clone(),
+                                                    signing_session,
+                                                );
+                                                self.sessions.remove(&session_id);
+                                            }
+                                            Err(e) => {
+                                                tracing::error!(
+                                                    "Failed to create signing session: {}",
+                                                    e
+                                                );
+                                            }
+                                        }
+                                    }
                                     tracing::info!("Sent {:?} to coordinator", response);
                                     if let Err(e) =
                                         self.swarm.behaviour_mut().coor2sig.send_response(

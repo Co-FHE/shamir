@@ -78,6 +78,7 @@ pub(crate) enum PublicKeyPackage {
     Secp256k1(frost_secp256k1::keys::PublicKeyPackage),
     Secp256k1Tr(frost_secp256k1_tr::keys::PublicKeyPackage),
 }
+//todo pk.hash()->pkid
 impl PublicKeyPackage {
     pub(crate) fn public_key(&self) -> Vec<u8> {
         match self {

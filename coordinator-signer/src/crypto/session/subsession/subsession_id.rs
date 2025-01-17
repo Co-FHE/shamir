@@ -17,7 +17,7 @@ use super::SessionId;
 // 16 bytes: sign message hash
 // 16 bytes: uuid of subsession
 // The SessionId cannot be used in any consensus
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub(crate) struct SubSessionId<VI: ValidatorIdentityIdentity>([u8; 85], PhantomData<VI>);
 
 impl<VII: ValidatorIdentityIdentity> Serialize for SubSessionId<VII> {
@@ -38,8 +38,9 @@ impl<VII: ValidatorIdentityIdentity> SubSessionId<VII> {
         crypto_type: CryptoType,
         min_signers: u16,
         participants: &BTreeMap<u16, VII>,
-        sign_message: &[u8],
+        sign_message: Vec<u8>,
         session_id: &SessionId<VII>,
+        pkid: Vec<u8>,
     ) -> Result<Self, SessionError> {
         let mut bytes = [0u8; 85];
 

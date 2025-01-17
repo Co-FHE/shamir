@@ -21,6 +21,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
+use subsession::SignatureSuite;
 use tokio::io::AsyncWriteExt;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::unix::SocketAddr;
@@ -57,6 +58,8 @@ pub struct Coordinator<VI: ValidatorIdentity> {
         oneshot::Sender<SigningSingleResponse<VI::Identity>>,
     )>,
     signing_sessions: HashMap<Vec<u8>, SigningSession<VI>>,
+    signature_sender: UnboundedSender<SignatureSuite<VI>>,
+    signature_receiver: UnboundedReceiver<SignatureSuite<VI>>,
 }
 impl<VI: ValidatorIdentity> Coordinator<VI> {
     pub fn new(p2p_keypair: libp2p::identity::Keypair) -> anyhow::Result<Self> {
@@ -94,6 +97,7 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
         let (session_sender, session_receiver) = tokio::sync::mpsc::unbounded_channel();
         let (signing_session_sender, signing_session_receiver) =
             tokio::sync::mpsc::unbounded_channel();
+        let (signature_sender, signature_receiver) = tokio::sync::mpsc::unbounded_channel();
         Ok(Self {
             p2p_keypair,
             swarm,
@@ -108,6 +112,8 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
             signing_session_receiver,
             signing_session_futures: FuturesUnordered::new(),
             signing_sessions: HashMap::new(),
+            signature_sender,
+            signature_receiver,
         })
     }
 
@@ -136,6 +142,11 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                 command_result = listener.accept()=> {
                     if let Err(e) = self.handle_command(command_result).await {
                         tracing::error!("Error handling command: {}", e);
+                    }
+                }
+                signature_result = self.signature_receiver.recv() => {
+                    if let Some(signature_suite) = signature_result {
+                        tracing::info!("Received signature suite {:?}", signature_suite.pkid.clone().encode_hex::<String>());
                     }
                 }
                 signing_session_future = self.signing_session_futures.next() => {
@@ -540,7 +551,13 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                         tracing::debug!("Starting session");
                         let (tx, rx) = oneshot::channel();
                         self.signing_session_futures.push(rx);
-                        session.start(tx, self.signing_session_sender.clone()).await;
+                        session
+                            .start(
+                                tx,
+                                self.signing_session_sender.clone(),
+                                self.signature_sender.clone(),
+                            )
+                            .await;
                         // accept ctrl+c to stop
                     }
                 }

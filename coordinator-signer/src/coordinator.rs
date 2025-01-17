@@ -5,8 +5,10 @@ use crate::behaviour::{
 use crate::crypto::*;
 use crate::utils::*;
 use common::Settings;
+use futures::stream::FuturesUnordered;
 use futures::StreamExt;
-use libp2p::request_response::{OutboundRequestId, ProtocolSupport};
+use hex::ToHex;
+use libp2p::request_response::{OutboundFailure, OutboundRequestId, ProtocolSupport};
 use libp2p::{
     identify::{self},
     noise,
@@ -16,6 +18,7 @@ use libp2p::{
 use libp2p::{ping, rendezvous, request_response, PeerId, StreamProtocol};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
@@ -33,7 +36,10 @@ pub struct Coordinator<VI: ValidatorIdentity> {
     sessions: HashMap<SessionId<VI::Identity>, Session<VI>>,
     valid_validators: HashMap<VI::Identity, ValidValidator<VI>>,
     p2ppeerid_2_endpoint: HashMap<PeerId, Multiaddr>,
-    request_mapping: HashMap<OutboundRequestId, oneshot::Sender<DKGSingleResponse<VI::Identity>>>,
+    request_mapping:
+        HashMap<OutboundRequestId, (oneshot::Sender<DKGSingleResponse<VI::Identity>>, PeerId)>,
+    signing_session_futures:
+        futures::stream::FuturesUnordered<oneshot::Receiver<SigningSession<VI>>>,
     session_receiver: UnboundedReceiver<(
         DKGSingleRequest<VI::Identity>,
         oneshot::Sender<DKGSingleResponse<VI::Identity>>,
@@ -42,8 +48,9 @@ pub struct Coordinator<VI: ValidatorIdentity> {
         DKGSingleRequest<VI::Identity>,
         oneshot::Sender<DKGSingleResponse<VI::Identity>>,
     )>,
+    signing_sessions: HashMap<Vec<u8>, SigningSession<VI>>,
 }
-impl<VI: ValidatorIdentity + 'static> Coordinator<VI> {
+impl<VI: ValidatorIdentity> Coordinator<VI> {
     pub fn new(p2p_keypair: libp2p::identity::Keypair) -> anyhow::Result<Self> {
         let swarm = libp2p::SwarmBuilder::with_existing_identity(p2p_keypair.clone())
             .with_tokio()
@@ -74,7 +81,7 @@ impl<VI: ValidatorIdentity + 'static> Coordinator<VI> {
                         .with_request_timeout(Duration::from_secs(100)),
                 ),
             })?
-            .with_swarm_config(|cfg| cfg.with_idle_connection_timeout(Duration::from_secs(5)))
+            .with_swarm_config(|cfg| cfg.with_idle_connection_timeout(Duration::from_secs(1000)))
             .build();
         let (session_sender, session_receiver) = tokio::sync::mpsc::unbounded_channel();
         Ok(Self {
@@ -87,6 +94,8 @@ impl<VI: ValidatorIdentity + 'static> Coordinator<VI> {
             request_mapping: HashMap::new(),
             session_sender,
             session_receiver,
+            signing_session_futures: FuturesUnordered::new(),
+            signing_sessions: HashMap::new(),
         })
     }
 
@@ -97,25 +106,38 @@ impl<VI: ValidatorIdentity + 'static> Coordinator<VI> {
         let listener = self.start_ipc_listening().await?;
         loop {
             tokio::select! {
-                    event = self.swarm.select_next_some()=> {
-                        if let Err(e) = self.handle_swarm_event(event).await{
-                            tracing::error!("Error handling swarm event: {}", e);
+                event = self.swarm.select_next_some()=> {
+                    if let Err(e) = self.handle_swarm_event(event).await{
+                        tracing::error!("Error handling swarm event: {}", e);
+                    }
+                },
+                recv_data = self.session_receiver.recv()=> {
+                    tracing::info!("Received DKG request from session");
+                    if let Some((request, sender)) = recv_data {
+                        if let Err(e) = self.handle_dkg_request(request, sender).await {
+                            tracing::error!("Error handling DKG request: {}", e);
                         }
-                    },
-                    recv_data = self.session_receiver.recv()=> {
-                        tracing::info!("Received DKG request from session");
-                        if let Some((request, sender)) = recv_data {
-                            if let Err(e) = self.handle_dkg_request(request, sender).await {
-                                tracing::error!("Error handling DKG request: {}", e);
+                    } else {
+                        tracing::error!("Error receiving DKG request");
+                    }
+                }
+                command_result = listener.accept()=> {
+                    if let Err(e) = self.handle_command(command_result).await {
+                        tracing::error!("Error handling command: {}", e);
+                    }
+                }
+                signing_session_future = self.signing_session_futures.next() => {
+                    if let Some(signing_session) = signing_session_future {
+                        match signing_session {
+                            Ok(signing_session) => {
+                                tracing::info!("Received signing session {:?}", signing_session.pkid.clone().encode_hex::<String>());
+                                self.signing_sessions.insert(signing_session.pkid.clone(), signing_session);
                             }
-                        } else {
-                            tracing::error!("Error receiving DKG request");
+                            Err(e) => {
+                                tracing::error!("Error receiving signing session: {}", e);
+                            }
                         }
                     }
-                    command_result = listener.accept()=> {
-                        if let Err(e) = self.handle_command(command_result).await {
-                            tracing::error!("Error handling command: {}", e);
-                        }
                 }
             }
         }
@@ -134,12 +156,19 @@ impl<VI: ValidatorIdentity + 'static> Coordinator<VI> {
                     "Sending DKG request to validator: {:?}",
                     validator.p2p_peer_id
                 );
+                if let Some(addr) = validator.address {
+                    self.swarm
+                        .behaviour_mut()
+                        .sig2coor
+                        .add_address(&validator.p2p_peer_id, addr);
+                }
                 let outbound_request_id = self.swarm.behaviour_mut().coor2sig.send_request(
                     &validator.p2p_peer_id,
                     CoorToSigRequest::DKGRequest(request),
                 );
                 tracing::info!("Outbound request id: {:?}", outbound_request_id);
-                self.request_mapping.insert(outbound_request_id, sender);
+                self.request_mapping
+                    .insert(outbound_request_id, (sender, validator.p2p_peer_id.clone()));
             }
             None => {
                 tracing::error!("Validator not found");
@@ -170,7 +199,7 @@ impl<VI: ValidatorIdentity + 'static> Coordinator<VI> {
             }
             SwarmEvent::ConnectionClosed { peer_id, .. } => {
                 tracing::warn!("Disconnected from {}", peer_id);
-                self.p2ppeerid_2_endpoint.remove(&peer_id);
+                // self.p2ppeerid_2_endpoint.remove(&peer_id);
             }
             SwarmEvent::Behaviour(CoorBehaviourEvent::Rendezvous(
                 rendezvous::server::Event::PeerRegistered { peer, registration },
@@ -209,7 +238,12 @@ impl<VI: ValidatorIdentity + 'static> Coordinator<VI> {
                     peer,
                     request_id
                 );
-                if let Some(sender) = self.request_mapping.remove(&request_id) {
+                let (_, validator_peer_id) = self.request_mapping.get(&request_id).unwrap();
+                if *validator_peer_id != peer {
+                    tracing::warn!("Invalid validator peer id: {:?}", validator_peer_id);
+                    return Ok(());
+                }
+                if let Some((sender, _)) = self.request_mapping.remove(&request_id) {
                     if let CoorToSigResponse::DKGResponse(response) = response {
                         tracing::info!("Sending response {:?} to session", response);
                         if let Err(e) = sender.send(response) {
@@ -336,6 +370,13 @@ impl<VI: ValidatorIdentity + 'static> Coordinator<VI> {
                     }
                 }
             }
+            SwarmEvent::OutgoingConnectionError {
+                peer_id,
+                connection_id,
+                error,
+            } => {
+                tracing::error!("Outbound failure: {:?}", error);
+            }
             other => {
                 tracing::debug!("Unhandled {:?}", other);
             }
@@ -396,6 +437,23 @@ impl<VI: ValidatorIdentity + 'static> Coordinator<VI> {
                             .write_all(Command::help_text().as_bytes())
                             .await?;
                         reader.get_mut().write_all(b"\n").await?;
+                    }
+                    Command::Dial(peer_id) => {
+                        tracing::info!("Dialing to peer {}", peer_id);
+                        if let Ok(peer_id) = PeerId::from_str(&peer_id) {
+                            if let Err(e) = self.swarm.dial(peer_id) {
+                                tracing::error!("Error dialing to peer {}: {}", peer_id, e);
+                            }
+                        } else if let Ok(address) = Multiaddr::from_str(&peer_id) {
+                            if let Err(e) = self.swarm.dial(address) {
+                                tracing::error!("Error dialing to peer {}: {}", peer_id, e);
+                            }
+                        } else {
+                            tracing::error!("Invalid peer id: {}", peer_id);
+                        }
+                    }
+                    Command::Sign(msg) => {
+                        tracing::info!("Received sign request: {}", msg);
                     }
                     Command::StartDkg(min_signers, crypto_type) => {
                         tracing::debug!(
@@ -468,7 +526,9 @@ impl<VI: ValidatorIdentity + 'static> Coordinator<VI> {
                         }
                         let session = session.unwrap();
                         tracing::debug!("Starting session");
-                        session.start().await;
+                        let (tx, rx) = oneshot::channel();
+                        self.signing_session_futures.push(rx);
+                        session.start(tx).await;
                         // accept ctrl+c to stop
                     }
                 }

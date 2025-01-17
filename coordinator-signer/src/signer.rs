@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::u64;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::unix::SocketAddr;
 use tokio::net::{UnixListener, UnixStream};
@@ -70,7 +71,7 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                 ),
                 rendezvous: rendezvous::client::Behaviour::new(key.clone()),
             })?
-            .with_swarm_config(|cfg| cfg.with_idle_connection_timeout(Duration::from_secs(5)))
+            .with_swarm_config(|cfg| cfg.with_idle_connection_timeout(Duration::from_secs(1000)))
             .build();
         let coordinator_addr: Multiaddr = format!(
             "/ip4/{}/tcp/{}/p2p/{}",
@@ -143,12 +144,11 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                 ..
             } if peer_id == self.coordinator_peer_id => {
                 tracing::warn!("Lost connection to rendezvous point {}", error);
+                self.dial_coordinator()?;
             }
             SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
                 tracing::error!("Outgoing connection to {:?} error: {:?}", peer_id, error);
-                tracing::info!("Dialing coordinator after 3 seconds");
-                tokio::time::sleep(Duration::from_secs(3)).await;
-                self.dial_coordinator()?;
+                // self.dial_coordinator()?;
             }
             SwarmEvent::ConnectionEstablished { peer_id, .. }
                 if peer_id == self.coordinator_peer_id =>
@@ -254,6 +254,10 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                     connection_id,
                 },
             )) => {
+                if peer != self.coordinator_peer_id {
+                    tracing::warn!("Received request from invalid peer: {}", peer);
+                    return Ok(());
+                }
                 tracing::info!(
                     "Received request from {:?} with request {:?}",
                     peer,

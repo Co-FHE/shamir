@@ -11,4 +11,6 @@ pub(crate) enum SessionError {
     InvalidMinSigners(u16, u16),
     #[error("Invalid session id format: {0}, {1}")]
     InvalidSessionIdFormat(String, String),
+    #[error("Invalid subsession id format: {0}, {1}")]
+    InvalidSubSessionIdFormat(String, String),
 }

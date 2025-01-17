@@ -5,63 +5,68 @@ use std::collections::BTreeMap;
 use tokio::sync::oneshot;
 
 use super::{
-    CryptoError, CryptoPackageTrait, CryptoType, DKGPackage, DKGRound1Package,
-    DKGRound1SecretPackage, DKGRound2Package, DKGRound2Packages, DKGRound2SecretPackage,
-    KeyPackage, PublicKeyPackage, Session, SessionId, ValidatorIdentity,
+    subsession::SubSessionId, CryptoError, CryptoPackageTrait, CryptoType, DKGPackage,
+    DKGRound1Package, DKGRound1SecretPackage, DKGRound2Package, DKGRound2Packages,
+    DKGRound2SecretPackage, KeyPackage, PublicKeyPackage, Session, SessionId, Signature,
+    SignatureShare, SigningCommitments, SigningNonces, SigningPackage, State, ValidatorIdentity,
 };
 
 #[derive(Debug, Clone)]
-pub(crate) enum DKGState<VII: ValidatorIdentityIdentity> {
-    Part1 {
+pub(crate) enum SigningState<VII: ValidatorIdentityIdentity> {
+    Round1 {
         crypto_type: CryptoType,
+        message: Vec<u8>,
         min_signers: u16,
-        session_id: SessionId<VII>,
+        pkid: Vec<u8>,
+        subsession_id: SubSessionId<VII>,
+        pk: PublicKeyPackage,
         participants: BTreeMap<u16, VII>,
     },
-    Part2 {
+    Round2 {
         crypto_type: CryptoType,
+        message: Vec<u8>,
+        pkid: Vec<u8>,
+        subsession_id: SubSessionId<VII>,
         min_signers: u16,
-        session_id: SessionId<VII>,
         participants: BTreeMap<u16, VII>,
-        round1_packages: BTreeMap<u16, DKGRound1Package>,
-    },
-    GenPublicKey {
-        crypto_type: CryptoType,
-        min_signers: u16,
-        session_id: SessionId<VII>,
-        participants: BTreeMap<u16, VII>,
-        round1_packages: BTreeMap<u16, DKGRound1Package>,
-        round2_packagess: BTreeMap<u16, DKGRound2Packages>,
+        pk: PublicKeyPackage,
+        signing_commitments: BTreeMap<u16, SigningCommitments>,
     },
     Completed {
-        public_key: PublicKeyPackage,
+        signature: Signature,
+        pk: PublicKeyPackage,
+        subsession_id: SubSessionId<VII>,
     },
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum DKGSignerState<VII: ValidatorIdentityIdentity> {
-    Part1 {
+pub(crate) enum SignerSigningState<VII: ValidatorIdentityIdentity> {
+    Round1 {
+        pkid: Vec<u8>,
+        message: Vec<u8>,
         crypto_type: CryptoType,
+        key_package: KeyPackage,
+        public_key_package: PublicKeyPackage,
         min_signers: u16,
-        session_id: SessionId<VII>,
         participants: BTreeMap<u16, VII>,
         identifier: u16,
         identity: VII,
-        round1_secret_package: DKGRound1SecretPackage,
-        // round1_package: DKGRound1Package,
+        signing_commitments: SigningCommitments,
+        nonces: SigningNonces,
     },
-    Part2 {
+    Round2 {
+        pkid: Vec<u8>,
+        message: Vec<u8>,
         crypto_type: CryptoType,
+        key_package: KeyPackage,
+        public_key_package: PublicKeyPackage,
         min_signers: u16,
-        session_id: SessionId<VII>,
         participants: BTreeMap<u16, VII>,
         identifier: u16,
         identity: VII,
-        // round1_secret_package: DKGRound1SecretPackage,
-        // round1_package: DKGRound1Package,
-        round1_packages: BTreeMap<u16, DKGRound1Package>,
-        round2_secret_package: DKGRound2SecretPackage,
-        // round2_packages: DKGRound2Packages,
+        signing_package: SigningPackage,
+        nonces: SigningNonces,
+        signature_share: SignatureShare,
     },
     Completed {
         crypto_type: CryptoType,
@@ -72,149 +77,77 @@ pub(crate) enum DKGSignerState<VII: ValidatorIdentityIdentity> {
         identity: VII,
         key_package: KeyPackage,
         public_key_package: PublicKeyPackage,
+        signature: Signature,
     },
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) enum DKGSingleRequest<VII: ValidatorIdentityIdentity> {
-    Part1 {
-        crypto_type: CryptoType,
-        session_id: SessionId<VII>,
-        min_signers: u16,
-        participants: BTreeMap<u16, VII>,
-        identifier: u16,
+pub(crate) enum SigningSingleRequest<VII: ValidatorIdentityIdentity> {
+    Round1 {
+        pkid: Vec<u8>,
+        message: Vec<u8>,
+        subsession_id: SubSessionId<VII>,
         identity: VII,
     },
-    Part2 {
-        crypto_type: CryptoType,
-        session_id: SessionId<VII>,
-        min_signers: u16,
-        max_signers: u16,
-        identifier: u16,
+    Round2 {
+        pkid: Vec<u8>,
+        subsession_id: SubSessionId<VII>,
+        signing_package: SigningPackage,
         identity: VII,
-        round1_packages: BTreeMap<u16, DKGRound1Package>,
-    },
-    GenPublicKey {
-        crypto_type: CryptoType,
-        session_id: SessionId<VII>,
-        min_signers: u16,
-        max_signers: u16,
-        identifier: u16,
-        identity: VII,
-        round1_packages: BTreeMap<u16, DKGRound1Package>,
-        round2_packages: BTreeMap<u16, DKGRound2Package>,
     },
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) enum DKGSingleResponse<VII: ValidatorIdentityIdentity> {
-    Part1 {
-        min_signers: u16,
-        max_signers: u16,
-        identifier: u16,
-        identity: VII,
-        crypto_package: DKGPackage,
+pub(crate) enum SigningSingleResponse<VII: ValidatorIdentityIdentity> {
+    Round1 {
+        pkid: Vec<u8>,
+        subsession_id: SubSessionId<VII>,
+        commitments: SigningCommitments,
     },
-    Part2 {
-        min_signers: u16,
-        max_signers: u16,
-        identifier: u16,
-        identity: VII,
-        crypto_package: DKGPackage,
-    },
-    GenPublicKey {
-        min_signers: u16,
-        max_signers: u16,
-        identifier: u16,
-        identity: VII,
-        crypto_package: DKGPackage,
+    Round2 {
+        pkid: Vec<u8>,
+        subsession_id: SubSessionId<VII>,
+        signature_share: SignatureShare,
     },
     Failure(String),
 }
-impl<VII: ValidatorIdentityIdentity> SingleRequest for DKGSingleRequest<VII> {
-    type Identity = VII;
-    type Response = DKGSingleResponse<VII>;
-    fn get_identity(&self) -> &Self::Identity {
+impl<VII: ValidatorIdentityIdentity> SigningSingleRequest<VII> {
+    pub(crate) fn get_identity(&self) -> &VII {
         match self {
-            DKGSingleRequest::Part1 { identity, .. } => identity,
-            DKGSingleRequest::Part2 { identity, .. } => identity,
-            DKGSingleRequest::GenPublicKey { identity, .. } => identity,
+            SigningSingleRequest::Round1 { identity, .. } => identity,
+            SigningSingleRequest::Round2 { identity, .. } => identity,
         }
     }
-
-    fn get_session_id(&self) -> SessionId<Self::Identity> {
+    pub(crate) fn get_subsession_id(&self) -> SubSessionId<VII> {
         match self {
-            DKGSingleRequest::Part1 { session_id, .. } => session_id.clone(),
-            DKGSingleRequest::Part2 { session_id, .. } => session_id.clone(),
-            DKGSingleRequest::GenPublicKey { session_id, .. } => session_id.clone(),
+            SigningSingleRequest::Round1 { subsession_id, .. } => subsession_id.clone(),
+            SigningSingleRequest::Round2 { subsession_id, .. } => subsession_id.clone(),
         }
     }
-}
-impl<VII: ValidatorIdentityIdentity> SingleResponse for DKGSingleResponse<VII> {
-    type Error = CryptoError;
-    type CryptoPackage = DKGPackage;
-    fn get_identifier(&self) -> u16 {
-        match self {
-            DKGSingleResponse::Part1 { identifier, .. } => *identifier,
-            DKGSingleResponse::Part2 { identifier, .. } => *identifier,
-            DKGSingleResponse::GenPublicKey { identifier, .. } => *identifier,
-            DKGSingleResponse::Failure(_) => todo!(),
-        }
-    }
-
-    fn get_crypto_package(&self) -> Self::CryptoPackage {
-        match self {
-            DKGSingleResponse::Part1 { crypto_package, .. } => crypto_package.clone(),
-            DKGSingleResponse::Part2 { crypto_package, .. } => crypto_package.clone(),
-            DKGSingleResponse::GenPublicKey { crypto_package, .. } => crypto_package.clone(),
-            DKGSingleResponse::Failure(_) => todo!(),
-        }
-    }
-}
-pub(crate) trait State<VII: ValidatorIdentityIdentity> {
-    type SingleRequest: SingleRequest;
-    type NextState: State<VII>;
-    type Error: std::error::Error;
-    type Response: SingleResponse;
-    fn split_into_single_requests(&self) -> Vec<Self::SingleRequest>;
-    fn handle_response(
-        &self,
-        response: BTreeMap<u16, Self::Response>,
-    ) -> Result<Self::NextState, Self::Error>;
-    fn completed(&self) -> Option<PublicKeyPackage>;
-}
-pub(crate) trait SingleRequest {
-    type Response;
-    type Identity: ValidatorIdentityIdentity;
-    fn get_session_id(&self) -> SessionId<Self::Identity>;
-    fn get_identity(&self) -> &Self::Identity;
-}
-pub(crate) trait SingleResponse
-where
-    Self: Sized,
-{
-    type Error: std::error::Error;
-    type CryptoPackage: CryptoPackageTrait;
-    fn get_identifier(&self) -> u16;
-    fn get_crypto_package(&self) -> Self::CryptoPackage;
 }
 
-impl<VII: ValidatorIdentityIdentity> DKGState<VII> {
+impl<VII: ValidatorIdentityIdentity> SigningState<VII> {
     pub(crate) fn new(
         crypto_type: CryptoType,
+        message: Vec<u8>,
         min_signers: u16,
+        pkid: Vec<u8>,
+        pk: PublicKeyPackage,
+        subsession_id: SubSessionId<VII>,
         participants: BTreeMap<u16, VII>,
-        session_id: SessionId<VII>,
     ) -> Self {
-        Self::Part1 {
-            min_signers,
-            participants,
-            session_id,
+        Self::Round1 {
             crypto_type,
+            message,
+            min_signers,
+            pkid,
+            subsession_id,
+            pk,
+            participants,
         }
     }
 }
-impl<VII: ValidatorIdentityIdentity> State<VII> for DKGState<VII> {
-    type SingleRequest = DKGSingleRequest<VII>;
-    type NextState = DKGState<VII>;
+impl<VII: ValidatorIdentityIdentity> State<VII> for SigningState<VII> {
+    type SingleRequest = SigningSingleRequest<VII>;
+    type NextState = SigningState<VII>;
     type Error = CryptoError;
     type Response = DKGSingleResponse<VII>;
     fn split_into_single_requests(&self) -> Vec<DKGSingleRequest<VII>> {

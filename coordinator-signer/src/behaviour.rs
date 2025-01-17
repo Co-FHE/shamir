@@ -11,7 +11,7 @@ use crate::crypto::{
 
 #[derive(NetworkBehaviour)]
 pub(crate) struct CoorBehaviour<
-    VII: ValidatorIdentityIdentity + Serialize + for<'de> Deserialize<'de> + 'static,
+    VII: ValidatorIdentityIdentity + Serialize + for<'de> Deserialize<'de>,
 > {
     pub(crate) identify: identify::Behaviour,
     pub(crate) ping: ping::Behaviour,
@@ -23,7 +23,7 @@ pub(crate) struct CoorBehaviour<
 
 #[derive(NetworkBehaviour)]
 pub(crate) struct SigBehaviour<
-    VII: ValidatorIdentityIdentity + Serialize + for<'de> Deserialize<'de> + 'static,
+    VII: ValidatorIdentityIdentity + Serialize + for<'de> Deserialize<'de>,
 > {
     pub(crate) identify: identify::Behaviour,
     pub(crate) ping: ping::Behaviour,
@@ -45,12 +45,12 @@ pub(crate) enum SigToCoorResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) enum CoorToSigRequest<VII: ValidatorIdentityIdentity + 'static> {
+pub(crate) enum CoorToSigRequest<VII: ValidatorIdentityIdentity> {
     DKGRequest(DKGSingleRequest<VII>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) enum CoorToSigResponse<VII: ValidatorIdentityIdentity + 'static> {
+pub(crate) enum CoorToSigResponse<VII: ValidatorIdentityIdentity> {
     DKGResponse(DKGSingleResponse<VII>),
 }
 

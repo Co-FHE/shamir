@@ -1,5 +1,7 @@
 mod dkg;
 mod session;
+mod signing;
+mod signing_session;
 mod traits;
 use std::collections::BTreeMap;
 
@@ -8,7 +10,8 @@ pub(crate) use dkg::*;
 use libp2p::{Multiaddr, PeerId};
 use serde::{Deserialize, Serialize};
 pub(crate) use session::*;
-
+pub(crate) use signing::*;
+pub(crate) use signing_session::*;
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub(crate) enum CryptoType {
     Ed25519,
@@ -48,6 +51,13 @@ pub(crate) enum DKGPackage {
     Round2(DKGRound2Packages),
     PublicKey(PublicKeyPackage),
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) enum SigningPackage {
+    Round1(DKGRound1Package),
+    Round2(DKGRound2Packages),
+    PublicKey(PublicKeyPackage),
+}
 pub(crate) trait CryptoPackageTrait {
     fn get_crypto_type(&self) -> CryptoType;
     fn is_crypto_type(&self, crypto_type: CryptoType) -> bool {
@@ -65,6 +75,15 @@ pub(crate) enum PublicKeyPackage {
     Ed25519(frost_ed25519::keys::PublicKeyPackage),
     Secp256k1(frost_secp256k1::keys::PublicKeyPackage),
     Secp256k1Tr(frost_secp256k1_tr::keys::PublicKeyPackage),
+}
+impl PublicKeyPackage {
+    pub(crate) fn public_key(&self) -> Vec<u8> {
+        match self {
+            PublicKeyPackage::Ed25519(pk) => pk.serialize().unwrap(),
+            PublicKeyPackage::Secp256k1(pk) => pk.serialize().unwrap(),
+            PublicKeyPackage::Secp256k1Tr(pk) => pk.serialize().unwrap(),
+        }
+    }
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) enum KeyPackage {
@@ -113,6 +132,25 @@ impl CryptoPackageTrait for DKGPackage {
         }
     }
 }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) enum Signature {
+    Ed25519(frost_ed25519::Signature),
+    Secp256k1(frost_secp256k1::Signature),
+    Secp256k1Tr(frost_secp256k1_tr::Signature),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) enum SigningCommitments {
+    Ed25519(frost_ed25519::round1::SigningCommitments),
+    Secp256k1(frost_secp256k1::round1::SigningCommitments),
+    Secp256k1Tr(frost_secp256k1_tr::round1::SigningCommitments),
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) enum SigningNonces {
+    Ed25519(frost_ed25519::round1::SigningNonces),
+    Secp256k1(frost_secp256k1::round1::SigningNonces),
+    Secp256k1Tr(frost_secp256k1_tr::round1::SigningNonces),
+}
 
 pub(crate) struct Validator<VI: ValidatorIdentity> {
     pub(crate) p2p_peer_id: PeerId,
@@ -120,4 +158,11 @@ pub(crate) struct Validator<VI: ValidatorIdentity> {
     pub(crate) validator_public_key: VI::PublicKey,
     pub(crate) nonce: u64,
     pub(crate) address: Option<Multiaddr>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) enum SignatureShare {
+    Ed25519(frost_ed25519::round2::SignatureShare),
+    Secp256k1(frost_secp256k1::round2::SignatureShare),
+    Secp256k1Tr(frost_secp256k1_tr::round2::SignatureShare),
 }

@@ -1,5 +1,7 @@
 mod error;
 mod session_id;
+pub(crate) mod subsession;
+use super::signing_session::SigningSession;
 use super::{
     DKGPackage, DKGRound1Package, DKGRound1SecretPackage, DKGRound2Package, DKGRound2Packages,
     DKGRound2SecretPackage, KeyPackage, PublicKeyPackage, ValidatorIdentityIdentity,
@@ -15,35 +17,18 @@ use rand::rngs::ThreadRng;
 use rand::thread_rng;
 use serde::{Deserialize, Serialize};
 pub(crate) use session_id::SessionId;
-use sha2::{Digest, Sha256};
-use std::thread;
-use std::{
-    collections::{BTreeMap, HashMap},
-    marker::PhantomData,
-};
-use tokio::sync::mpsc::{self, unbounded_channel, Sender, UnboundedReceiver, UnboundedSender};
+use std::collections::{BTreeMap, HashMap};
+use subsession::{SubSession, SubSessionId};
+use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub(crate) enum SigningState {
-    Round1,
-    PreRound2,
-    Round2,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) enum TSSState<VI: ValidatorIdentity> {
-    DKG(DKGState<VI::Identity>),
-    Signing(HashMap<Uuid, SigningState>),
-}
 pub(crate) struct SignerSession<VI: ValidatorIdentity> {
     session_id: SessionId<VI::Identity>,
     crypto_type: CryptoType,
     min_signers: u16,
     participants: BTreeMap<u16, VI::Identity>,
     dkg_state: DKGSignerState<VI::Identity>,
-    signing_state: HashMap<Uuid, SigningState>,
     identity: VI::Identity,
     identifier: u16,
     rng: ThreadRng,
@@ -166,7 +151,6 @@ impl<VI: ValidatorIdentity> SignerSession<VI> {
                         round1_secret_package,
                     },
                     participants: participants.clone(),
-                    signing_state: HashMap::new(),
                     identity: identity.clone(),
                     identifier,
                     rng,
@@ -649,11 +633,11 @@ pub(crate) struct Session<VI: ValidatorIdentity> {
     min_signers: u16,
     dkg_state: DKGState<VI::Identity>,
     participants: BTreeMap<u16, VI::Identity>,
-    signing_state: HashMap<Uuid, SigningState>,
     dkg_sender: UnboundedSender<(
         DKGSingleRequest<VI::Identity>,
         oneshot::Sender<DKGSingleResponse<VI::Identity>>,
     )>,
+    subsessions: BTreeMap<SubSessionId<VI::Identity>, SubSession<VI>>,
 }
 
 impl<VI: ValidatorIdentity> Session<VI> {
@@ -712,17 +696,23 @@ impl<VI: ValidatorIdentity> Session<VI> {
             min_signers,
             dkg_state,
             participants: participants_map,
-            signing_state: HashMap::new(),
             dkg_sender,
+            subsessions: BTreeMap::new(),
         })
     }
-    pub(crate) async fn start(mut self) {
+    pub(crate) async fn start(mut self, sender: oneshot::Sender<SigningSession<VI>>) {
         tracing::debug!("Starting DKG session with id: {:?}", self.session_id);
         tokio::spawn(async move {
-            loop {
-                if self.dkg_state.completed() {
-                    tracing::info!("DKG state completed, exiting loop");
-                    break;
+            let signing_session = loop {
+                if let Some(public_key_package) = self.dkg_state.completed() {
+                    let signing_session = SigningSession::<VI>::new(
+                        self.session_id.clone(),
+                        public_key_package,
+                        self.min_signers,
+                        self.participants.clone(),
+                        self.crypto_type,
+                    );
+                    break signing_session;
                 }
                 tracing::info!("Starting new DKG round");
                 let mut futures = FuturesUnordered::new();
@@ -793,6 +783,16 @@ impl<VI: ValidatorIdentity> Session<VI> {
                     ))
                     .await;
                     continue;
+                }
+            };
+            match signing_session {
+                Ok(signing_session) => {
+                    if let Err(_) = sender.send(signing_session) {
+                        tracing::error!("Error sending signing session");
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("Error creating signing session: {}", e);
                 }
             }
         });

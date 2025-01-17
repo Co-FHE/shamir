@@ -6,10 +6,13 @@ pub(crate) enum Command {
     ListSignerAddr,
     StartDkg(u16, CryptoType),
     Unknown(String),
+    Dial(String),
+    Sign(String),
 }
 
 impl Command {
     pub(crate) fn parse(input: &str) -> Self {
+        let origin = input.trim().split_whitespace().collect::<Vec<&str>>();
         let binding = input
             .trim()
             .to_lowercase()
@@ -20,7 +23,12 @@ impl Command {
         match parts.as_slice() {
             ["peer", "id"] | ["peerid"] | ["pid"] => Command::PeerId,
             ["help"] | ["h"] => Command::Help,
+            ["dial", _] => {
+                let peer_id = origin[1].to_string();
+                Command::Dial(peer_id.to_string())
+            }
             ["list", "signer", "info"] | ["ls"] | ["list"] => Command::ListSignerAddr,
+            ["sign", _] => Command::Sign(origin[1].to_string()),
             ["start", "dkg", num, crypto_type] | ["dkg", num, crypto_type] => {
                 if let Ok(n) = num.parse::<u16>() {
                     if let Ok(c) = crypto_type.parse::<u8>() {

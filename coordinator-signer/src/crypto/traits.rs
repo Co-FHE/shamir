@@ -7,13 +7,12 @@ mod p2p_identity;
 pub(crate) use ed25519::*;
 pub(crate) use p2p_identity::*;
 use std::{cmp, fmt};
-pub trait ValidatorIdentity: fmt::Debug + Clone {
+pub trait ValidatorIdentity: fmt::Debug + Clone + 'static {
     type Keypair: ValidatorIdentityKeypair<PublicKey = Self::PublicKey>;
     type PublicKey: ValidatorIdentityPublicKey<Identity = Self::Identity, Keypair = Self::Keypair>;
     type Identity: ValidatorIdentityIdentity<PublicKey = Self::PublicKey>
         + Serialize
-        + for<'de> Deserialize<'de>
-        + 'static;
+        + for<'de> Deserialize<'de>;
 }
 pub trait ValidatorIdentityPublicKey
 where
@@ -40,7 +39,7 @@ where
 }
 pub trait ValidatorIdentityIdentity
 where
-    Self: Sized + Hash + cmp::Eq + cmp::Ord + Send + Sync + Clone + fmt::Debug,
+    Self: Sized + Hash + cmp::Eq + cmp::Ord + Send + Sync + Clone + fmt::Debug + 'static,
 {
     type PublicKey: ValidatorIdentityPublicKey;
     type DecodeError: std::error::Error + std::marker::Send + std::marker::Sync + 'static;

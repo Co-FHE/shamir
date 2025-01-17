@@ -23,6 +23,7 @@ use crate::behaviour::{
     CoorToSigRequest, CoorToSigResponse, SigBehaviour, SigBehaviourEvent, SigToCoorRequest,
     SigToCoorResponse, ValidatorIdentityRequest,
 };
+use crate::crypto::subsession::PKID;
 use crate::crypto::{
     DKGSingleRequest, DKGSingleResponse, SessionId, SignerSession, SigningSignerSession,
     SingleRequest, ValidatorIdentity, ValidatorIdentityIdentity, ValidatorIdentityKeypair,
@@ -38,7 +39,7 @@ pub struct Signer<VI: ValidatorIdentity> {
     swarm: libp2p::Swarm<SigBehaviour<VI::Identity>>,
     coordinator_addr: Multiaddr,
     sessions: HashMap<SessionId<VI::Identity>, SignerSession<VI>>,
-    signing_sessions: HashMap<Vec<u8>, SigningSignerSession<VI>>,
+    signing_sessions: HashMap<PKID, SigningSignerSession<VI>>,
     ipc_path: PathBuf,
     coordinator_peer_id: PeerId,
     register_request_id: Option<request_response::OutboundRequestId>,
@@ -113,6 +114,7 @@ impl<VI: ValidatorIdentity> Signer<VI> {
         loop {
             tokio::select! {
                 event = self.swarm.select_next_some()=> {
+                    // tracing::info!("{:?}",event);
                     if let Err(e) = self.handle_swarm_event(event).await {
                         tracing::error!("Error handling behaviour event: {}", e);
                     }
@@ -365,6 +367,32 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                                         ));
                                     }
                                     return Ok(());
+                                }
+                            }
+                        }
+                    }
+                    CoorToSigRequest::SigningRequest(request) => {
+                        tracing::info!("Received signing request: {:?}", request);
+                        let pkid = request.get_pkid();
+                        if let Some(existing_session) = self.signing_sessions.get_mut(&pkid) {
+                            match existing_session.apply_request(request) {
+                                Ok(response) => {
+                                    if let Err(e) =
+                                        self.swarm.behaviour_mut().coor2sig.send_response(
+                                            channel,
+                                            CoorToSigResponse::SigningResponse(response.clone()),
+                                        )
+                                    {
+                                        tracing::error!("Failed to send response: {:?}", e);
+                                        return Err(anyhow::anyhow!(
+                                            "Failed to send response: {:?}",
+                                            e
+                                        ));
+                                    }
+                                    tracing::info!("Sent {:?} to coordinator", response);
+                                }
+                                Err(e) => {
+                                    tracing::error!("Failed to apply request: {}", e);
                                 }
                             }
                         }

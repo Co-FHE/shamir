@@ -5,6 +5,7 @@ use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, marker::PhantomData};
 use uuid::Uuid;
 
+use super::pkid::PKID;
 use super::SessionId;
 
 // SubSessionId format:
@@ -40,7 +41,7 @@ impl<VII: ValidatorIdentityIdentity> SubSessionId<VII> {
         participants: &BTreeMap<u16, VII>,
         sign_message: Vec<u8>,
         session_id: &SessionId<VII>,
-        pkid: Vec<u8>,
+        pkid: PKID,
     ) -> Result<Self, SessionError> {
         let mut bytes = [0u8; 85];
 

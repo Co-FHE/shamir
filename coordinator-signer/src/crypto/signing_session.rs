@@ -1,7 +1,7 @@
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot;
 
-use super::subsession::{SignatureSuite, SignerSubsession};
+use super::subsession::{SignatureSuite, SignerSubsession, PKID};
 use super::{
     CryptoType, KeyPackage, PublicKeyPackage, SessionError, SessionId, Signature,
     SigningSingleRequest, SigningSingleResponse,
@@ -10,7 +10,7 @@ use crate::crypto::session::subsession::{SubSession, SubSessionId};
 use crate::crypto::traits::ValidatorIdentity;
 use std::collections::{BTreeMap, HashMap};
 pub(crate) struct SigningSession<VI: ValidatorIdentity> {
-    pub(crate) pkid: Vec<u8>,
+    pub(crate) pkid: PKID,
     pub(crate) session_id: SessionId<VI::Identity>,
     pub(crate) crypto_type: CryptoType,
     pub(crate) public_key_package: PublicKeyPackage,
@@ -40,7 +40,7 @@ impl<VI: ValidatorIdentity> SigningSession<VI> {
         hasher.update(public_key_package.public_key());
         let pkid = hasher.finalize().to_vec();
         Ok(Self {
-            pkid,
+            pkid: PKID::new(pkid),
             session_id,
             crypto_type,
             public_key_package,
@@ -53,7 +53,7 @@ impl<VI: ValidatorIdentity> SigningSession<VI> {
     pub(crate) async fn start_new_signing<T: AsRef<[u8]>>(
         &mut self,
         msg: T,
-    ) -> Result<(), SessionError> {
+    ) -> Result<SubSessionId<VI::Identity>, SessionError> {
         let msg = msg.as_ref().to_vec();
         let subsession = SubSession::<VI>::new(
             self.session_id.clone(),
@@ -66,13 +66,14 @@ impl<VI: ValidatorIdentity> SigningSession<VI> {
             self.signing_sender.clone(),
             self.signature_sender.clone(),
         )?;
+        let subsession_id = subsession.get_subsession_id();
         subsession.start_signing(msg).await;
-        Ok(())
+        Ok(subsession_id)
     }
 }
 
 pub(crate) struct SigningSignerSession<VI: ValidatorIdentity> {
-    pub(crate) pkid: Vec<u8>,
+    pub(crate) pkid: PKID,
     pub(crate) session_id: SessionId<VI::Identity>,
     pub(crate) crypto_type: CryptoType,
     pub(crate) key_package: KeyPackage,
@@ -99,7 +100,7 @@ impl<VI: ValidatorIdentity> SigningSignerSession<VI> {
         hasher.update(public_key_package.public_key());
         let pkid = hasher.finalize().to_vec();
         Ok(Self {
-            pkid,
+            pkid: PKID::new(pkid),
             session_id,
             crypto_type,
             key_package,
@@ -114,11 +115,11 @@ impl<VI: ValidatorIdentity> SigningSignerSession<VI> {
     pub(crate) fn apply_request(
         &mut self,
         request: SigningSingleRequest<VI::Identity>,
-    ) -> Result<(), SessionError> {
+    ) -> Result<SigningSingleResponse<VI::Identity>, SessionError> {
         let subsession_id = request.get_subsession_id();
         let subsession = self.subsessions.get_mut(&subsession_id);
         if let Some(subsession) = subsession {
-            subsession.update_from_request(request);
+            Ok(subsession.update_from_request(request)?)
         } else {
             let (subsession, response) = SignerSubsession::<VI>::new_from_request(
                 request,
@@ -131,7 +132,8 @@ impl<VI: ValidatorIdentity> SigningSignerSession<VI> {
                 self.min_signers,
                 self.crypto_type,
             )?;
+            self.subsessions.insert(subsession_id, subsession);
+            Ok(response)
         }
-        Ok(())
     }
 }

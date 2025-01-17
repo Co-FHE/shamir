@@ -7,7 +7,7 @@ use crate::utils::*;
 use common::Settings;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
-use hex::ToHex;
+use hex::{FromHex, ToHex};
 use libp2p::request_response::{OutboundFailure, OutboundRequestId, ProtocolSupport};
 use libp2p::{
     identify::{self},
@@ -21,7 +21,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
-use subsession::SignatureSuite;
+use subsession::{SignatureSuite, SubSessionId, PKID};
 use tokio::io::AsyncWriteExt;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::unix::SocketAddr;
@@ -37,8 +37,10 @@ pub struct Coordinator<VI: ValidatorIdentity> {
     sessions: HashMap<SessionId<VI::Identity>, Session<VI>>,
     valid_validators: HashMap<VI::Identity, ValidValidator<VI>>,
     p2ppeerid_2_endpoint: HashMap<PeerId, Multiaddr>,
-    request_mapping:
+    dkg_request_mapping:
         HashMap<OutboundRequestId, (oneshot::Sender<DKGSingleResponse<VI::Identity>>, PeerId)>,
+    signing_request_mapping:
+        HashMap<OutboundRequestId, (oneshot::Sender<SigningSingleResponse<VI::Identity>>, PeerId)>,
     signing_session_futures:
         futures::stream::FuturesUnordered<oneshot::Receiver<SigningSession<VI>>>,
     session_receiver: UnboundedReceiver<(
@@ -57,9 +59,11 @@ pub struct Coordinator<VI: ValidatorIdentity> {
         SigningSingleRequest<VI::Identity>,
         oneshot::Sender<SigningSingleResponse<VI::Identity>>,
     )>,
-    signing_sessions: HashMap<Vec<u8>, SigningSession<VI>>,
+    signing_sessions: HashMap<PKID, SigningSession<VI>>,
     signature_sender: UnboundedSender<SignatureSuite<VI>>,
     signature_receiver: UnboundedReceiver<SignatureSuite<VI>>,
+
+    reply_sender: HashMap<SubSessionId<VI::Identity>, oneshot::Sender<SignatureSuite<VI>>>,
 }
 impl<VI: ValidatorIdentity> Coordinator<VI> {
     pub fn new(p2p_keypair: libp2p::identity::Keypair) -> anyhow::Result<Self> {
@@ -105,7 +109,8 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
             sessions: HashMap::new(),
             valid_validators: HashMap::new(),
             p2ppeerid_2_endpoint: HashMap::new(),
-            request_mapping: HashMap::new(),
+            dkg_request_mapping: HashMap::new(),
+            signing_request_mapping: HashMap::new(),
             session_sender,
             session_receiver,
             signing_session_sender,
@@ -114,6 +119,7 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
             signing_sessions: HashMap::new(),
             signature_sender,
             signature_receiver,
+            reply_sender: HashMap::new(),
         })
     }
 
@@ -139,6 +145,15 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                         tracing::error!("Error receiving DKG request");
                     }
                 }
+                recv_data = self.signing_session_receiver.recv()=> {
+                    if let Some((request, sender)) = recv_data {
+                        if let Err(e) = self.handle_signing_request(request, sender).await {
+                            tracing::error!("Error handling signing request: {}", e);
+                        }
+                    } else {
+                        tracing::error!("Error receiving signing request");
+                    }
+                }
                 command_result = listener.accept()=> {
                     if let Err(e) = self.handle_command(command_result).await {
                         tracing::error!("Error handling command: {}", e);
@@ -146,14 +161,16 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                 }
                 signature_result = self.signature_receiver.recv() => {
                     if let Some(signature_suite) = signature_result {
-                        tracing::info!("Received signature suite {:?}", signature_suite.pkid.clone().encode_hex::<String>());
+                        tracing::info!("Received signature suite {}", signature_suite);
+                        self.reply_sender.remove(&signature_suite.subsession_id).unwrap().send(signature_suite).unwrap();
+
                     }
                 }
                 signing_session_future = self.signing_session_futures.next() => {
                     if let Some(signing_session) = signing_session_future {
                         match signing_session {
                             Ok(signing_session) => {
-                                tracing::info!("Received signing session {:?}", signing_session.pkid.clone().encode_hex::<String>());
+                                tracing::info!("Received signing session {:?}", signing_session.pkid.clone());
                                 self.signing_sessions.insert(signing_session.pkid.clone(), signing_session);
                             }
                             Err(e) => {
@@ -190,12 +207,55 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                     CoorToSigRequest::DKGRequest(request),
                 );
                 tracing::info!("Outbound request id: {:?}", outbound_request_id);
-                self.request_mapping
+                self.dkg_request_mapping
                     .insert(outbound_request_id, (sender, validator.p2p_peer_id.clone()));
             }
             None => {
                 tracing::error!("Validator not found");
                 if let Err(e) = sender.send(DKGSingleResponse::Failure(format!(
+                    "Validator not found: {}",
+                    peer.to_fmt_string()
+                ))) {
+                    tracing::error!("Error sending failure response: {:?}", e);
+                    return Err(anyhow::anyhow!("Error sending failure response: {:?}", e));
+                }
+                return Ok(());
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn handle_signing_request(
+        &mut self,
+        request: SigningSingleRequest<VI::Identity>,
+        sender: oneshot::Sender<SigningSingleResponse<VI::Identity>>,
+    ) -> Result<(), anyhow::Error> {
+        tracing::info!("Received Signing request From Session: {:?}", request);
+        let peer = request.get_identity();
+        let validator = self.valid_validators.get(peer).cloned();
+        match validator {
+            Some(validator) => {
+                tracing::info!(
+                    "Sending Signing request to validator: {:?}",
+                    validator.p2p_peer_id
+                );
+                if let Some(addr) = validator.address {
+                    self.swarm
+                        .behaviour_mut()
+                        .sig2coor
+                        .add_address(&validator.p2p_peer_id, addr);
+                }
+                let outbound_request_id = self.swarm.behaviour_mut().coor2sig.send_request(
+                    &validator.p2p_peer_id,
+                    CoorToSigRequest::SigningRequest(request),
+                );
+                tracing::info!("Outbound request id: {:?}", outbound_request_id);
+                self.signing_request_mapping
+                    .insert(outbound_request_id, (sender, validator.p2p_peer_id.clone()));
+            }
+            None => {
+                tracing::error!("Validator not found");
+                if let Err(e) = sender.send(SigningSingleResponse::Failure(format!(
                     "Validator not found: {}",
                     peer.to_fmt_string()
                 ))) {
@@ -223,6 +283,24 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
             SwarmEvent::ConnectionClosed { peer_id, .. } => {
                 tracing::warn!("Disconnected from {}", peer_id);
                 // self.p2ppeerid_2_endpoint.remove(&peer_id);
+            }
+            SwarmEvent::OutgoingConnectionError {
+                connection_id,
+                peer_id,
+                error,
+            } => {
+                tracing::error!("Outgoing connection error: {:?}", error);
+            }
+            SwarmEvent::IncomingConnectionError {
+                connection_id,
+                local_addr,
+                send_back_addr,
+                error,
+            } => {
+                tracing::error!("Incoming connection error: {:?}", error);
+            }
+            SwarmEvent::ListenerError { listener_id, error } => {
+                tracing::error!("Listener error: {:?}", error);
             }
             SwarmEvent::Behaviour(CoorBehaviourEvent::Rendezvous(
                 rendezvous::server::Event::PeerRegistered { peer, registration },
@@ -255,19 +333,19 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                         },
                     connection_id,
                 },
-            )) => {
-                tracing::info!(
-                    "Received response from {:?} with request_id {:?}",
-                    peer,
-                    request_id
-                );
-                let (_, validator_peer_id) = self.request_mapping.get(&request_id).unwrap();
-                if *validator_peer_id != peer {
-                    tracing::warn!("Invalid validator peer id: {:?}", validator_peer_id);
-                    return Ok(());
-                }
-                if let Some((sender, _)) = self.request_mapping.remove(&request_id) {
-                    if let CoorToSigResponse::DKGResponse(response) = response {
+            )) => match response {
+                CoorToSigResponse::DKGResponse(response) => {
+                    tracing::info!(
+                        "Received response from {:?} with request_id {:?}",
+                        peer,
+                        request_id
+                    );
+                    let (_, validator_peer_id) = self.dkg_request_mapping.get(&request_id).unwrap();
+                    if *validator_peer_id != peer {
+                        tracing::warn!("Invalid validator peer id: {:?}", validator_peer_id);
+                        return Ok(());
+                    }
+                    if let Some((sender, _)) = self.dkg_request_mapping.remove(&request_id) {
                         tracing::info!("Sending response {:?} to session", response);
                         if let Err(e) = sender.send(response) {
                             tracing::error!("Error sending response: {:?}", e);
@@ -275,12 +353,29 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                             tracing::info!("Sent response to session");
                         }
                     } else {
-                        tracing::error!("Invalid response: {:?}", response);
+                        tracing::error!("Request id {:?} not found in request mapping", request_id);
                     }
-                } else {
-                    tracing::error!("Request id {:?} not found in request mapping", request_id);
                 }
-            }
+                CoorToSigResponse::SigningResponse(response) => {
+                    tracing::info!(
+                        "Received response from {:?} with request_id {:?}",
+                        peer,
+                        request_id
+                    );
+                    let (_, validator_peer_id) =
+                        self.signing_request_mapping.get(&request_id).unwrap();
+                    if *validator_peer_id != peer {
+                        tracing::warn!("Invalid validator peer id: {:?}", validator_peer_id);
+                        return Ok(());
+                    }
+                    if let Some((sender, _)) = self.signing_request_mapping.remove(&request_id) {
+                        tracing::info!("Sending response {:?} to session", response);
+                        if let Err(e) = sender.send(response) {
+                            tracing::error!("Error sending response: {:?}", e);
+                        }
+                    }
+                }
+            },
             SwarmEvent::Behaviour(CoorBehaviourEvent::Sig2coor(
                 request_response::Event::Message {
                     peer,
@@ -475,8 +570,49 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                             tracing::error!("Invalid peer id: {}", peer_id);
                         }
                     }
-                    Command::Sign(msg) => {
+                    Command::Sign(pkid, msg) => {
                         tracing::info!("Received sign request: {}", msg);
+                        let pkid = PKID::from(pkid);
+                        let (sender, receiver) = oneshot::channel();
+                        if let Some(session) = self.signing_sessions.get_mut(&pkid) {
+                            match session.start_new_signing(msg).await {
+                                Ok(subsession_id) => {
+                                    reader
+                                        .get_mut()
+                                        .write_all(
+                                            format!("Subsession id: {}", subsession_id.to_string())
+                                                .as_bytes(),
+                                        )
+                                        .await?;
+                                    self.reply_sender.insert(subsession_id, sender);
+                                    tokio::spawn(async move {
+                                        let recv = receiver.await.unwrap();
+                                        reader
+                                            .get_mut()
+                                            .write_all(recv.to_string().as_bytes())
+                                            .await
+                                            .unwrap();
+                                        reader.get_mut().write_all(b"\n").await.unwrap();
+                                    });
+                                }
+                                Err(e) => {
+                                    reader
+                                        .get_mut()
+                                        .write_all(
+                                            format!("Error starting new signing: {}", e).as_bytes(),
+                                        )
+                                        .await?;
+                                }
+                            }
+                        } else {
+                            reader.get_mut().write_all(b"Session not found\n").await?;
+                        }
+                    }
+                    Command::ListPkId => {
+                        tracing::info!("Received list pkid request");
+                        for pkid in self.signing_sessions.keys() {
+                            tracing::info!("PKID: {}", pkid);
+                        }
                     }
                     Command::StartDkg(min_signers, crypto_type) => {
                         tracing::debug!(

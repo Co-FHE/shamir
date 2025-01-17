@@ -4,10 +4,11 @@ pub(crate) enum Command {
     PeerId,
     Help,
     ListSignerAddr,
+    ListPkId,
     StartDkg(u16, CryptoType),
     Unknown(String),
     Dial(String),
-    Sign(String),
+    Sign(String, String),
 }
 
 impl Command {
@@ -28,7 +29,10 @@ impl Command {
                 Command::Dial(peer_id.to_string())
             }
             ["list", "signer", "info"] | ["ls"] | ["list"] => Command::ListSignerAddr,
-            ["sign", _] => Command::Sign(origin[1].to_string()),
+            ["sign", public_key, message] => {
+                Command::Sign(origin[1].to_string(), origin[2].to_string())
+            }
+            ["lspk"] => Command::ListPkId,
             ["start", "dkg", num, crypto_type] | ["dkg", num, crypto_type] => {
                 if let Ok(n) = num.parse::<u16>() {
                     if let Ok(c) = crypto_type.parse::<u8>() {
@@ -54,6 +58,8 @@ impl Command {
         - peer id | peerid | pid: Show the peer ID
         - help | h: Show this help message
         - list signer info | ls: List signer info
+        - lspk: List pkid
+        - sign <public_key> <message>: Sign a message with the given public key
         - start dkg <n> <crypto_type> | dkg <n> <crypto_type>: Start DKG with min n signers and crypto type:
           0: Ed25519
           1: Secp256k1 

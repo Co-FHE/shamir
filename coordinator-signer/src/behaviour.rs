@@ -6,7 +6,8 @@ use libp2p::{
 use serde::{Deserialize, Serialize};
 
 use crate::crypto::{
-    DKGSingleRequest, DKGSingleResponse, ValidatorIdentity, ValidatorIdentityIdentity,
+    DKGSingleRequest, DKGSingleResponse, SigningSingleRequest, SigningSingleResponse,
+    ValidatorIdentity, ValidatorIdentityIdentity,
 };
 
 #[derive(NetworkBehaviour)]
@@ -47,11 +48,13 @@ pub(crate) enum SigToCoorResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum CoorToSigRequest<VII: ValidatorIdentityIdentity> {
     DKGRequest(DKGSingleRequest<VII>),
+    SigningRequest(SigningSingleRequest<VII>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum CoorToSigResponse<VII: ValidatorIdentityIdentity> {
     DKGResponse(DKGSingleResponse<VII>),
+    SigningResponse(SigningSingleResponse<VII>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -6,10 +6,11 @@ use tokio::sync::oneshot;
 use veritss::frost;
 
 use super::{
-    subsession::SubSessionId, CryptoError, CryptoPackageTrait, CryptoType, DKGPackage,
-    DKGRound1Package, DKGRound1SecretPackage, DKGRound2Package, DKGRound2Packages,
-    DKGRound2SecretPackage, KeyPackage, PublicKeyPackage, Session, SessionId, Signature,
-    SignatureShare, SigningCommitments, SigningNonces, SigningPackage, State, ValidatorIdentity,
+    subsession::{SubSessionId, PKID},
+    CryptoError, CryptoPackageTrait, CryptoType, DKGPackage, DKGRound1Package,
+    DKGRound1SecretPackage, DKGRound2Package, DKGRound2Packages, DKGRound2SecretPackage,
+    KeyPackage, PublicKeyPackage, Session, SessionId, Signature, SignatureShare,
+    SigningCommitments, SigningNonces, SigningPackage, State, ValidatorIdentity,
 };
 
 #[derive(Debug, Clone)]
@@ -18,7 +19,7 @@ pub(crate) enum SigningState<VII: ValidatorIdentityIdentity> {
         crypto_type: CryptoType,
         message: Vec<u8>,
         min_signers: u16,
-        pkid: Vec<u8>,
+        pkid: PKID,
         subsession_id: SubSessionId<VII>,
         pk: PublicKeyPackage,
         participants: BTreeMap<u16, VII>,
@@ -26,7 +27,7 @@ pub(crate) enum SigningState<VII: ValidatorIdentityIdentity> {
     Round2 {
         crypto_type: CryptoType,
         message: Vec<u8>,
-        pkid: Vec<u8>,
+        pkid: PKID,
         subsession_id: SubSessionId<VII>,
         min_signers: u16,
         participants: BTreeMap<u16, VII>,
@@ -43,7 +44,7 @@ pub(crate) enum SigningState<VII: ValidatorIdentityIdentity> {
 #[derive(Debug, Clone)]
 pub(crate) enum SignerSigningState<VII: ValidatorIdentityIdentity> {
     Round1 {
-        pkid: Vec<u8>,
+        pkid: PKID,
         message: Vec<u8>,
         crypto_type: CryptoType,
         key_package: KeyPackage,
@@ -56,7 +57,7 @@ pub(crate) enum SignerSigningState<VII: ValidatorIdentityIdentity> {
         nonces: SigningNonces,
     },
     Round2 {
-        pkid: Vec<u8>,
+        pkid: PKID,
         message: Vec<u8>,
         crypto_type: CryptoType,
         key_package: KeyPackage,
@@ -84,14 +85,14 @@ pub(crate) enum SignerSigningState<VII: ValidatorIdentityIdentity> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum SigningSingleRequest<VII: ValidatorIdentityIdentity> {
     Round1 {
-        pkid: Vec<u8>,
+        pkid: PKID,
         message: Vec<u8>,
         subsession_id: SubSessionId<VII>,
         identifier: u16,
         identity: VII,
     },
     Round2 {
-        pkid: Vec<u8>,
+        pkid: PKID,
         subsession_id: SubSessionId<VII>,
         signing_package: SigningPackage,
         identifier: u16,
@@ -101,13 +102,13 @@ pub(crate) enum SigningSingleRequest<VII: ValidatorIdentityIdentity> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum SigningSingleResponse<VII: ValidatorIdentityIdentity> {
     Round1 {
-        pkid: Vec<u8>,
+        pkid: PKID,
         subsession_id: SubSessionId<VII>,
         commitments: SigningCommitments,
         identifier: u16,
     },
     Round2 {
-        pkid: Vec<u8>,
+        pkid: PKID,
         subsession_id: SubSessionId<VII>,
         signature_share: SignatureShare,
         identifier: u16,
@@ -136,6 +137,12 @@ impl<VII: ValidatorIdentityIdentity> SigningSingleRequest<VII> {
             SigningSingleRequest::Round2 { subsession_id, .. } => subsession_id.clone(),
         }
     }
+    pub(crate) fn get_pkid(&self) -> PKID {
+        match self {
+            SigningSingleRequest::Round1 { pkid, .. } => pkid.clone(),
+            SigningSingleRequest::Round2 { pkid, .. } => pkid.clone(),
+        }
+    }
 }
 
 impl<VII: ValidatorIdentityIdentity> SigningState<VII> {
@@ -143,7 +150,7 @@ impl<VII: ValidatorIdentityIdentity> SigningState<VII> {
         crypto_type: CryptoType,
         message: Vec<u8>,
         min_signers: u16,
-        pkid: Vec<u8>,
+        pkid: PKID,
         pk: PublicKeyPackage,
         subsession_id: SubSessionId<VII>,
         participants: BTreeMap<u16, VII>,

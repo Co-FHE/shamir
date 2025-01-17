@@ -3,6 +3,8 @@ use crate::crypto::{
     SigningNonces, SigningPackage, SigningState, ValidatorIdentityIdentity,
 };
 use std::collections::BTreeMap;
+mod pkid;
+pub(crate) use pkid::PKID;
 mod signature_suite;
 mod subsession_id;
 use super::{
@@ -22,7 +24,7 @@ pub(crate) struct SubSession<VI: ValidatorIdentity> {
     pub(crate) participants: BTreeMap<u16, VI::Identity>,
     pub(crate) state: SigningState<VI::Identity>,
     pub(crate) pk: PublicKeyPackage,
-    pub(crate) pkid: Vec<u8>,
+    pub(crate) pkid: PKID,
     pub(crate) signing_sender: UnboundedSender<(
         SigningSingleRequest<VI::Identity>,
         oneshot::Sender<SigningSingleResponse<VI::Identity>>,
@@ -32,7 +34,7 @@ pub(crate) struct SubSession<VI: ValidatorIdentity> {
 impl<VI: ValidatorIdentity> SubSession<VI> {
     pub(crate) fn new(
         session_id: SessionId<VI::Identity>,
-        pkid: Vec<u8>,
+        pkid: PKID,
         pk: PublicKeyPackage,
         min_signers: u16,
         participants: BTreeMap<u16, VI::Identity>,
@@ -161,7 +163,7 @@ impl<VI: ValidatorIdentity> SubSession<VI> {
         });
     }
 
-    pub(crate) fn subsession_id(&self) -> SubSessionId<VI::Identity> {
+    pub(crate) fn get_subsession_id(&self) -> SubSessionId<VI::Identity> {
         self.subsession_id.clone()
     }
 }
@@ -169,7 +171,7 @@ impl<VI: ValidatorIdentity> SubSession<VI> {
 pub(crate) struct SignerSubsession<VI: ValidatorIdentity> {
     pub(crate) pk: PublicKeyPackage,
     pub(crate) subsession_id: SubSessionId<VI::Identity>,
-    pub(crate) pkid: Vec<u8>,
+    pub(crate) pkid: PKID,
     key_package: KeyPackage,
     pub(crate) crypto_type: CryptoType,
     pub(crate) min_signers: u16,
@@ -184,7 +186,7 @@ impl<VI: ValidatorIdentity> SignerSubsession<VI> {
     pub(crate) fn new_from_request(
         request: SigningSingleRequest<VI::Identity>,
         pk: PublicKeyPackage,
-        _pkid: Vec<u8>,
+        _pkid: PKID,
         key_package: KeyPackage,
         _identity: VI::Identity,
         _identifier: u16,
@@ -490,5 +492,8 @@ impl<VI: ValidatorIdentity> SignerSubsession<VI> {
                 }
             }
         }
+    }
+    pub(crate) fn get_subsession_id(&self) -> SubSessionId<VI::Identity> {
+        self.subsession_id.clone()
     }
 }

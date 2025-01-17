@@ -1,7 +1,10 @@
-use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot;
 
-use super::{CryptoType, PublicKeyPackage, SessionError, SessionId, Signature};
+use super::{
+    CryptoType, PublicKeyPackage, SessionError, SessionId, Signature, SigningSingleRequest,
+    SigningSingleResponse,
+};
 use crate::crypto::session::subsession::{SubSession, SubSessionId, SubSessionState};
 use crate::crypto::traits::ValidatorIdentity;
 use std::collections::BTreeMap;
@@ -24,24 +27,24 @@ impl<VI: ValidatorIdentity> SigningSession<VI> {
         min_signers: u16,
         participants: BTreeMap<u16, VI::Identity>,
         crypto_type: CryptoType,
-    ) -> Result<(Self, UnboundedSender<SigningSingleRequest<VI::Identity>>), SessionError> {
+        signing_sender: UnboundedSender<(
+            SigningSingleRequest<VI::Identity>,
+            oneshot::Sender<SigningSingleResponse<VI::Identity>>,
+        )>,
+    ) -> Result<Self, SessionError> {
         use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         hasher.update(public_key_package.public_key());
         let pkid = hasher.finalize().to_vec();
-        let (signing_sender, signing_receiver) = unbounded_channel();
-        Ok((
-            Self {
-                pkid,
-                session_id,
-                crypto_type,
-                public_key_package,
-                min_signers,
-                participants,
-                signing_sender,
-            },
-            signing_receiver,
-        ))
+        Ok(Self {
+            pkid,
+            session_id,
+            crypto_type,
+            public_key_package,
+            min_signers,
+            participants,
+            signing_sender,
+        })
     }
     pub(crate) fn start_new_signing<T: AsRef<[u8]>>(
         &self,

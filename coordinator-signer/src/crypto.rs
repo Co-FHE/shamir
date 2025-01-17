@@ -3,10 +3,12 @@ mod session;
 mod signing;
 mod signing_session;
 mod traits;
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, fmt};
 
 pub(crate) use crate::crypto::traits::*;
 pub(crate) use dkg::*;
+use frost_core::Ciphersuite;
+use frost_ed25519::Ed25519Sha512;
 use libp2p::{Multiaddr, PeerId};
 use serde::{Deserialize, Serialize};
 pub(crate) use session::*;
@@ -54,9 +56,9 @@ pub(crate) enum DKGPackage {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum SigningPackage {
-    Round1(DKGRound1Package),
-    Round2(DKGRound2Packages),
-    PublicKey(PublicKeyPackage),
+    Ed25519(frost_ed25519::SigningPackage),
+    Secp256k1(frost_secp256k1::SigningPackage),
+    Secp256k1Tr(frost_secp256k1_tr::SigningPackage),
 }
 pub(crate) trait CryptoPackageTrait {
     fn get_crypto_type(&self) -> CryptoType;
@@ -85,12 +87,48 @@ impl PublicKeyPackage {
         }
     }
 }
+// pub trait Cipher: Ciphersuite + Clone + fmt::Debug + Send + Sync + 'static {
+//     type KeyPackage;
+//     type DKGRound1Package;
+//     type DKGRound2Package;
+//     type SigningPackage;
+//     fn get_crypto_type() -> CryptoType;
+// }
+// impl Cipher for frost_ed25519::Ed25519Sha512 {
+//     type KeyPackage = frost_ed25519::keys::KeyPackage;
+//     type DKGRound1Package = frost_ed25519::keys::dkg::round1::Package;
+//     type DKGRound2Package = frost_ed25519::keys::dkg::round2::Package;
+//     type SigningPackage = frost_ed25519::SigningPackage;
+//     fn get_crypto_type() -> CryptoType {
+//         CryptoType::Ed25519
+//     }
+// }
+// impl Cipher for frost_secp256k1::Secp256K1Sha256 {
+//     type KeyPackage = frost_secp256k1::keys::KeyPackage;
+//     type DKGRound1Package = frost_secp256k1::keys::dkg::round1::Package;
+//     type DKGRound2Package = frost_secp256k1::keys::dkg::round2::Package;
+//     type SigningPackage = frost_secp256k1::SigningPackage;
+//     fn get_crypto_type() -> CryptoType {
+//         CryptoType::Secp256k1
+//     }
+// }
+// impl Cipher for frost_secp256k1_tr::Secp256K1Sha256TR {
+//     type KeyPackage = frost_secp256k1_tr::keys::KeyPackage;
+//     type DKGRound1Package = frost_secp256k1_tr::keys::dkg::round1::Package;
+//     type DKGRound2Package = frost_secp256k1_tr::keys::dkg::round2::Package;
+//     type SigningPackage = frost_secp256k1_tr::SigningPackage;
+//     fn get_crypto_type() -> CryptoType {
+//         CryptoType::Secp256k1Tr
+//     }
+// }
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) enum KeyPackage {
     Ed25519(frost_ed25519::keys::KeyPackage),
     Secp256k1(frost_secp256k1::keys::KeyPackage),
     Secp256k1Tr(frost_secp256k1_tr::keys::KeyPackage),
 }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum DKGRound2Package {
     Ed25519(frost_ed25519::keys::dkg::round2::Package),

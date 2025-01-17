@@ -1,3 +1,5 @@
+use frost_core::Ciphersuite;
+use frost_ed25519::Ed25519Sha512;
 use libp2p::identity::ParseError;
 use serde::{Deserialize, Serialize};
 use std::hash::Hash;

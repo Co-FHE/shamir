@@ -48,6 +48,14 @@ pub struct Coordinator<VI: ValidatorIdentity> {
         DKGSingleRequest<VI::Identity>,
         oneshot::Sender<DKGSingleResponse<VI::Identity>>,
     )>,
+    signing_session_sender: UnboundedSender<(
+        SigningSingleRequest<VI::Identity>,
+        oneshot::Sender<SigningSingleResponse<VI::Identity>>,
+    )>,
+    signing_session_receiver: UnboundedReceiver<(
+        SigningSingleRequest<VI::Identity>,
+        oneshot::Sender<SigningSingleResponse<VI::Identity>>,
+    )>,
     signing_sessions: HashMap<Vec<u8>, SigningSession<VI>>,
 }
 impl<VI: ValidatorIdentity> Coordinator<VI> {
@@ -84,6 +92,8 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
             .with_swarm_config(|cfg| cfg.with_idle_connection_timeout(Duration::from_secs(1000)))
             .build();
         let (session_sender, session_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let (signing_session_sender, signing_session_receiver) =
+            tokio::sync::mpsc::unbounded_channel();
         Ok(Self {
             p2p_keypair,
             swarm,
@@ -94,6 +104,8 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
             request_mapping: HashMap::new(),
             session_sender,
             session_receiver,
+            signing_session_sender,
+            signing_session_receiver,
             signing_session_futures: FuturesUnordered::new(),
             signing_sessions: HashMap::new(),
         })
@@ -528,7 +540,7 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                         tracing::debug!("Starting session");
                         let (tx, rx) = oneshot::channel();
                         self.signing_session_futures.push(rx);
-                        session.start(tx).await;
+                        session.start(tx, self.signing_session_sender.clone()).await;
                         // accept ctrl+c to stop
                     }
                 }

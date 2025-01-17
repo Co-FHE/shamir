@@ -4,7 +4,8 @@ pub(crate) mod subsession;
 use super::signing_session::SigningSession;
 use super::{
     DKGPackage, DKGRound1Package, DKGRound1SecretPackage, DKGRound2Package, DKGRound2Packages,
-    DKGRound2SecretPackage, KeyPackage, PublicKeyPackage, ValidatorIdentityIdentity,
+    DKGRound2SecretPackage, KeyPackage, PublicKeyPackage, SigningSingleRequest,
+    SigningSingleResponse, ValidatorIdentityIdentity,
 };
 use crate::crypto::dkg::*;
 use crate::crypto::{CryptoType, ValidatorIdentity};
@@ -700,7 +701,14 @@ impl<VI: ValidatorIdentity> Session<VI> {
             subsessions: BTreeMap::new(),
         })
     }
-    pub(crate) async fn start(mut self, sender: oneshot::Sender<SigningSession<VI>>) {
+    pub(crate) async fn start(
+        mut self,
+        sender: oneshot::Sender<SigningSession<VI>>,
+        signing_sender: UnboundedSender<(
+            SigningSingleRequest<VI::Identity>,
+            oneshot::Sender<SigningSingleResponse<VI::Identity>>,
+        )>,
+    ) {
         tracing::debug!("Starting DKG session with id: {:?}", self.session_id);
         tokio::spawn(async move {
             let signing_session = loop {
@@ -711,7 +719,12 @@ impl<VI: ValidatorIdentity> Session<VI> {
                         self.min_signers,
                         self.participants.clone(),
                         self.crypto_type,
+                        signing_sender,
                     );
+                    if let Err(e) = signing_session {
+                        return Err(e);
+                    }
+                    let signing_session = signing_session.unwrap();
                     break signing_session;
                 }
                 tracing::info!("Starting new DKG round");
@@ -785,16 +798,10 @@ impl<VI: ValidatorIdentity> Session<VI> {
                     continue;
                 }
             };
-            match signing_session {
-                Ok(signing_session) => {
-                    if let Err(_) = sender.send(signing_session) {
-                        tracing::error!("Error sending signing session");
-                    }
-                }
-                Err(e) => {
-                    tracing::error!("Error creating signing session: {}", e);
-                }
+            if let Err(e) = sender.send(signing_session) {
+                tracing::error!("Error sending signing session: {:?}", e.pkid);
             }
+            return Ok(());
         });
     }
 

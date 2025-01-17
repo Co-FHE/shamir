@@ -3,6 +3,7 @@ use futures::stream::FuturesUnordered;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use tokio::sync::oneshot;
+use veritss::frost;
 
 use super::{
     subsession::SubSessionId, CryptoError, CryptoPackageTrait, CryptoType, DKGPackage,
@@ -21,6 +22,7 @@ pub(crate) enum SigningState<VII: ValidatorIdentityIdentity> {
         subsession_id: SubSessionId<VII>,
         pk: PublicKeyPackage,
         participants: BTreeMap<u16, VII>,
+        identity: VII,
     },
     Round2 {
         crypto_type: CryptoType,
@@ -30,7 +32,7 @@ pub(crate) enum SigningState<VII: ValidatorIdentityIdentity> {
         min_signers: u16,
         participants: BTreeMap<u16, VII>,
         pk: PublicKeyPackage,
-        signing_commitments: BTreeMap<u16, SigningCommitments>,
+        signing_package: SigningPackage,
     },
     Completed {
         signature: Signature,
@@ -101,11 +103,13 @@ pub(crate) enum SigningSingleResponse<VII: ValidatorIdentityIdentity> {
         pkid: Vec<u8>,
         subsession_id: SubSessionId<VII>,
         commitments: SigningCommitments,
+        identifier: u16,
     },
     Round2 {
         pkid: Vec<u8>,
         subsession_id: SubSessionId<VII>,
         signature_share: SignatureShare,
+        identifier: u16,
     },
     Failure(String),
 }
@@ -133,6 +137,7 @@ impl<VII: ValidatorIdentityIdentity> SigningState<VII> {
         pk: PublicKeyPackage,
         subsession_id: SubSessionId<VII>,
         participants: BTreeMap<u16, VII>,
+        identity: VII,
     ) -> Self {
         Self::Round1 {
             crypto_type,
@@ -142,162 +147,161 @@ impl<VII: ValidatorIdentityIdentity> SigningState<VII> {
             subsession_id,
             pk,
             participants,
+            identity,
         }
     }
 }
-impl<VII: ValidatorIdentityIdentity> State<VII> for SigningState<VII> {
-    type SingleRequest = SigningSingleRequest<VII>;
-    type NextState = SigningState<VII>;
-    type Error = CryptoError;
-    type Response = DKGSingleResponse<VII>;
-    fn split_into_single_requests(&self) -> Vec<DKGSingleRequest<VII>> {
+
+impl<VII: ValidatorIdentityIdentity> SigningState<VII> {
+    fn split_into_single_requests(&self) -> Vec<SigningSingleRequest<VII>> {
         match self {
-            DKGState::Part1 {
-                min_signers,
-                participants,
-                session_id,
+            SigningState::Round1 {
                 crypto_type,
+                message,
+                min_signers,
+                pkid,
+                subsession_id,
+                pk,
+                participants,
+                identity,
             } => participants
                 .iter()
-                .map(|(id, identity)| DKGSingleRequest::Part1 {
-                    min_signers: *min_signers,
-                    participants: participants.clone(),
-                    identifier: *id,
+                .map(|(id, identity)| SigningSingleRequest::Round1 {
+                    pkid: pkid.clone(),
+                    message: message.clone(),
+                    subsession_id: subsession_id.clone(),
                     identity: identity.clone(),
-                    session_id: session_id.clone(),
-                    crypto_type: *crypto_type,
                 })
                 .collect(),
-            DKGState::Part2 {
+            SigningState::Round2 {
+                crypto_type,
+                message,
+                pkid,
+                subsession_id,
                 min_signers,
                 participants,
-                session_id,
-                crypto_type,
-                round1_packages,
+                pk,
+                signing_package,
             } => participants
                 .iter()
-                .map(|(id, identity)| DKGSingleRequest::Part2 {
-                    min_signers: *min_signers,
-                    max_signers: participants.len() as u16,
-                    identifier: *id,
+                .map(|(id, identity)| SigningSingleRequest::Round2 {
+                    pkid: pkid.clone(),
+                    subsession_id: subsession_id.clone(),
+                    signing_package: signing_package.clone(),
                     identity: identity.clone(),
-                    round1_packages: round1_packages.clone(),
-                    crypto_type: *crypto_type,
-                    session_id: session_id.clone(),
                 })
                 .collect(),
-            DKGState::GenPublicKey {
-                min_signers,
-                participants,
-                session_id,
-                crypto_type,
-                round1_packages,
-                round2_packagess,
-            } => participants
-                .iter()
-                .map(|(id, identity)| {
-                    let mut round2_packages = BTreeMap::new();
-                    for (oid, round2_package) in round2_packagess.iter() {
-                        if oid == id {
-                            continue;
-                        }
-                        let package = match round2_package {
-                            DKGRound2Packages::Ed25519(package) => {
-                                let tid = frost_ed25519::Identifier::try_from(*id).unwrap();
-                                let package = package.get(&tid).unwrap();
-                                DKGRound2Package::Ed25519(package.clone())
-                            }
-                            DKGRound2Packages::Secp256k1(package) => {
-                                let tid = frost_secp256k1::Identifier::try_from(*id).unwrap();
-                                let package = package.get(&tid).unwrap();
-                                DKGRound2Package::Secp256k1(package.clone())
-                            }
-                            DKGRound2Packages::Secp256k1Tr(package) => {
-                                let tid = frost_secp256k1_tr::Identifier::try_from(*id).unwrap();
-                                let package = package.get(&tid).unwrap();
-                                DKGRound2Package::Secp256k1Tr(package.clone())
-                            }
-                        };
-                        round2_packages.insert(*oid, package);
-                    }
-                    DKGSingleRequest::GenPublicKey {
-                        min_signers: *min_signers,
-                        max_signers: participants.len() as u16,
-                        identifier: *id,
-                        identity: identity.clone(),
-                        round1_packages: round1_packages.clone(),
-                        round2_packages: round2_packages.clone(),
-                        crypto_type: *crypto_type,
-                        session_id: session_id.clone(),
-                    }
-                })
-                .collect(),
-            DKGState::Completed { .. } => vec![],
+            SigningState::Completed { .. } => vec![],
         }
     }
-    fn completed(&self) -> Option<PublicKeyPackage> {
+    fn completed(&self) -> Option<Signature> {
         match self {
-            DKGState::Completed { public_key, .. } => Some(public_key.clone()),
+            SigningState::Completed {
+                signature,
+                pk,
+                subsession_id,
+            } => Some(signature.clone()),
             _ => None,
         }
     }
 
     fn handle_response(
         &self,
-        response: BTreeMap<u16, Self::Response>,
-    ) -> Result<Self::NextState, Self::Error> {
+        response: BTreeMap<u16, SigningSingleResponse<VII>>,
+    ) -> Result<Self, CryptoError> {
         match self {
-            DKGState::Part1 {
-                min_signers,
-                participants,
-                session_id,
+            SigningState::Round1 {
                 crypto_type,
+                message,
+                min_signers,
+                pkid,
+                subsession_id,
+                pk,
+                participants,
+                identity,
             } => {
-                let mut packages = BTreeMap::new();
                 for (id, _) in participants.iter() {
-                    // find in response
-                    let response =
-                        response
-                            .get(id)
-                            .ok_or(CryptoError::InvalidResponse(format!(
-                                "response not found for id: {}",
-                                id
-                            )))?;
-                    let package = response.get_crypto_package();
-                    if !package.is_crypto_type(*crypto_type) {
-                        return Err(CryptoError::InvalidResponse(format!(
-                            "crypto type mismatch: expected {:?}, got {:?}",
-                            crypto_type,
-                            package.get_crypto_type()
-                        )));
-                    }
-                    match package {
-                        DKGPackage::Round1(package) => {
-                            packages.insert(*id, package);
-                        }
-                        _ => {
-                            return Err(CryptoError::InvalidResponse(format!(
-                                "need round 1 package but got round 2 package"
-                            )));
-                        }
-                    }
+                    let _ = response
+                        .get(id)
+                        .ok_or(CryptoError::InvalidResponse(format!(
+                            "response not found for id: {}",
+                            id
+                        )))?;
                 }
-                Ok(DKGState::Part2 {
-                    min_signers: *min_signers,
-                    session_id: session_id.clone(),
-                    participants: participants.clone(),
-                    round1_packages: packages,
+                let signing_package = match crypto_type {
+                    CryptoType::Ed25519 => {
+                        let mut commitmentss = BTreeMap::new();
+                        for (id, resp) in response.iter() {
+                            let identifier =
+                                frost_core::Identifier::try_from(*id).expect("should be nonzero");
+                            if let SigningSingleResponse::Round1 { commitments, .. } = resp {
+                                if let SigningCommitments::Ed25519(signing_commitments) =
+                                    commitments
+                                {
+                                    commitmentss.insert(identifier, signing_commitments.clone());
+                                }
+                            }
+                        }
+                        let signature_packge =
+                            frost_ed25519::SigningPackage::new(commitmentss, message);
+                        SigningPackage::Ed25519(signature_packge)
+                    }
+                    CryptoType::Secp256k1 => {
+                        let mut commitmentss = BTreeMap::new();
+                        for (id, resp) in response.iter() {
+                            let identifier =
+                                frost_core::Identifier::try_from(*id).expect("should be nonzero");
+                            if let SigningSingleResponse::Round1 { commitments, .. } = resp {
+                                if let SigningCommitments::Secp256k1(signing_commitments) =
+                                    commitments
+                                {
+                                    commitmentss.insert(identifier, signing_commitments.clone());
+                                }
+                            }
+                        }
+                        let signature_packge =
+                            frost_secp256k1::SigningPackage::new(commitmentss, message);
+                        SigningPackage::Secp256k1(signature_packge)
+                    }
+                    CryptoType::Secp256k1Tr => {
+                        let mut commitmentss = BTreeMap::new();
+                        for (id, resp) in response.iter() {
+                            let identifier =
+                                frost_core::Identifier::try_from(*id).expect("should be nonzero");
+                            if let SigningSingleResponse::Round1 { commitments, .. } = resp {
+                                if let SigningCommitments::Secp256k1Tr(signing_commitments) =
+                                    commitments
+                                {
+                                    commitmentss.insert(identifier, signing_commitments.clone());
+                                }
+                            }
+                        }
+                        let signature_packge =
+                            frost_secp256k1_tr::SigningPackage::new(commitmentss, message);
+                        SigningPackage::Secp256k1Tr(signature_packge)
+                    }
+                };
+                Ok(SigningState::Round2 {
                     crypto_type: *crypto_type,
+                    message: message.clone(),
+                    pkid: pkid.clone(),
+                    subsession_id: subsession_id.clone(),
+                    min_signers: *min_signers,
+                    participants: participants.clone(),
+                    pk: pk.clone(),
+                    signing_package,
                 })
             }
-            DKGState::Part2 {
+            SigningState::Round2 {
                 crypto_type,
+                message,
+                pkid,
+                subsession_id,
                 min_signers,
-                session_id,
                 participants,
-                round1_packages,
+                pk,
+                signing_package,
             } => {
-                let mut packagess = BTreeMap::new();
                 for (id, _) in participants.iter() {
                     let response =
                         response
@@ -306,90 +310,158 @@ impl<VII: ValidatorIdentityIdentity> State<VII> for SigningState<VII> {
                                 "response not found for id: {}",
                                 id
                             )))?;
-                    // TODO: need more checks
-                    let package = response.get_crypto_package();
-                    if !package.is_crypto_type(*crypto_type) {
-                        return Err(CryptoError::InvalidResponse(format!(
-                            "crypto type mismatch: expected {:?}, got {:?}",
-                            crypto_type,
-                            package.get_crypto_type()
-                        )));
-                    }
-                    match package {
-                        DKGPackage::Round2(packages) => {
-                            packagess.insert(*id, packages);
-                        }
-                        _ => {
-                            return Err(CryptoError::InvalidResponse(format!(
-                                "need round 1 package but got round 2 package"
-                            )));
-                        }
-                    }
                 }
-                Ok(DKGState::GenPublicKey {
-                    crypto_type: *crypto_type,
-                    min_signers: *min_signers,
-                    session_id: session_id.clone(),
-                    participants: participants.clone(),
-                    round1_packages: round1_packages.clone(),
-                    round2_packagess: packagess,
-                })
-            }
-            DKGState::GenPublicKey {
-                crypto_type,
-                min_signers,
-                session_id,
-                participants,
-                round1_packages,
-                round2_packagess,
-            } => {
-                let mut public_key = None;
-                for (id, _) in participants.iter() {
-                    let response =
-                        response
-                            .get(id)
-                            .ok_or(CryptoError::InvalidResponse(format!(
-                                "response not found for id: {}",
-                                id
-                            )))?;
-                    let package = response.get_crypto_package();
-                    if !package.is_crypto_type(*crypto_type) {
-                        return Err(CryptoError::InvalidResponse(format!(
-                            "crypto type mismatch: expected {:?}, got {:?}",
-                            crypto_type,
-                            package.get_crypto_type()
-                        )));
-                    }
-                    match package {
-                        DKGPackage::PublicKey(package) => match public_key {
-                            None => public_key = Some(package.clone()),
-                            Some(ref pk) => {
-                                if &package != pk {
+                let signature = match crypto_type {
+                    CryptoType::Ed25519 => {
+                        let mut signature_shares = BTreeMap::new();
+                        for (id, resp) in response.iter() {
+                            match resp {
+                                SigningSingleResponse::Round2 {
+                                    signature_share, ..
+                                } => {
+                                    let identifier = frost_core::Identifier::try_from(*id)
+                                        .expect("should be nonzero");
+                                    if let SignatureShare::Ed25519(signature_share) =
+                                        signature_share
+                                    {
+                                        signature_shares
+                                            .insert(identifier, signature_share.clone());
+                                    }
+                                }
+                                _ => {
                                     return Err(CryptoError::InvalidResponse(format!(
-                                        "public key packages do not match {:?}, {:?}",
-                                        pk, package
+                                        "need round 2 package but got round 1 package"
                                     )));
                                 }
                             }
-                        },
-                        _ => {
+                        }
+                        if let PublicKeyPackage::Ed25519(public_package) = pk {
+                            if let SigningPackage::Ed25519(signing_package) = signing_package {
+                                let group_signature = frost_ed25519::aggregate(
+                                    &signing_package,
+                                    &signature_shares,
+                                    &public_package,
+                                )?;
+                                Signature::Ed25519(group_signature)
+                            } else {
+                                return Err(CryptoError::InvalidResponse(format!(
+                                    "crypto type mismatch: expected {:?}, got {:?}",
+                                    CryptoType::Ed25519,
+                                    crypto_type
+                                )));
+                            }
+                        } else {
                             return Err(CryptoError::InvalidResponse(format!(
-                                "need public key package but got round 2 package"
+                                "crypto type mismatch: expected {:?}, got {:?}",
+                                CryptoType::Ed25519,
+                                crypto_type
                             )));
                         }
                     }
-                    // TODO: check public key package is the same
-                }
-                if let Some(public_key) = public_key {
-                    tracing::info!("DKG state completed, public key: {:?}", public_key);
-                    Ok(DKGState::Completed { public_key })
-                } else {
-                    Err(CryptoError::InvalidResponse(
-                        "public key package not found".to_string(),
-                    ))
-                }
+                    CryptoType::Secp256k1 => {
+                        let mut signature_shares = BTreeMap::new();
+                        for (id, resp) in response.iter() {
+                            match resp {
+                                SigningSingleResponse::Round2 {
+                                    signature_share, ..
+                                } => {
+                                    let identifier = frost_core::Identifier::try_from(*id)
+                                        .expect("should be nonzero");
+                                    if let SignatureShare::Secp256k1(signature_share) =
+                                        signature_share
+                                    {
+                                        signature_shares
+                                            .insert(identifier, signature_share.clone());
+                                    }
+                                }
+                                _ => {
+                                    return Err(CryptoError::InvalidResponse(format!(
+                                        "need round 2 package but got round 1 package"
+                                    )));
+                                }
+                            }
+                        }
+                        if let PublicKeyPackage::Secp256k1(public_package) = pk {
+                            if let SigningPackage::Secp256k1(signing_package) = signing_package {
+                                let group_signature = frost_secp256k1::aggregate(
+                                    &signing_package,
+                                    &signature_shares,
+                                    &public_package,
+                                )?;
+                                Signature::Secp256k1(group_signature)
+                            } else {
+                                return Err(CryptoError::InvalidResponse(format!(
+                                    "crypto type mismatch: expected {:?}, got {:?}",
+                                    CryptoType::Secp256k1,
+                                    crypto_type
+                                )));
+                            }
+                        } else {
+                            return Err(CryptoError::InvalidResponse(format!(
+                                "crypto type mismatch: expected {:?}, got {:?}",
+                                CryptoType::Secp256k1,
+                                crypto_type
+                            )));
+                        }
+                    }
+                    CryptoType::Secp256k1Tr => {
+                        let mut signature_shares = BTreeMap::new();
+                        for (id, resp) in response.iter() {
+                            match resp {
+                                SigningSingleResponse::Round2 {
+                                    signature_share, ..
+                                } => {
+                                    let identifier = frost_core::Identifier::try_from(*id)
+                                        .expect("should be nonzero");
+                                    if let SignatureShare::Secp256k1Tr(signature_share) =
+                                        signature_share
+                                    {
+                                        signature_shares
+                                            .insert(identifier, signature_share.clone());
+                                    }
+                                }
+                                _ => {
+                                    return Err(CryptoError::InvalidResponse(format!(
+                                        "need round 2 package but got round 1 package"
+                                    )));
+                                }
+                            }
+                        }
+                        if let PublicKeyPackage::Secp256k1Tr(public_package) = pk {
+                            if let SigningPackage::Secp256k1Tr(signing_package) = signing_package {
+                                let group_signature = frost_secp256k1_tr::aggregate(
+                                    &signing_package,
+                                    &signature_shares,
+                                    &public_package,
+                                )?;
+                                Signature::Secp256k1Tr(group_signature)
+                            } else {
+                                return Err(CryptoError::InvalidResponse(format!(
+                                    "crypto type mismatch: expected {:?}, got {:?}",
+                                    CryptoType::Secp256k1Tr,
+                                    crypto_type
+                                )));
+                            }
+                        } else {
+                            return Err(CryptoError::InvalidResponse(format!(
+                                "crypto type mismatch: expected {:?}, got {:?}",
+                                CryptoType::Secp256k1Tr,
+                                crypto_type
+                            )));
+                        }
+                    }
+                };
+                Ok(SigningState::Completed {
+                    signature,
+                    pk: pk.clone(),
+                    subsession_id: subsession_id.clone(),
+                })
             }
-            DKGState::Completed { .. } => Ok(self.clone()),
+            SigningState::Completed { .. } => {
+                return Err(CryptoError::InvalidResponse(format!(
+                    "signing already completed"
+                )));
+            }
         }
     }
 }

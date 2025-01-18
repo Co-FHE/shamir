@@ -11,15 +11,18 @@ pub(crate) struct SignatureSuite<VI: ValidatorIdentity> {
     pub(crate) pk: PublicKeyPackage,
     pub(crate) subsession_id: SubSessionId<VI::Identity>,
     pub(crate) pkid: PKID,
+    pub(crate) message: Vec<u8>,
 }
 impl<VI: ValidatorIdentity> SignatureSuite<VI> {
     pub(crate) fn pretty_print(&self) -> String {
         format!(
-            "Signature: {}\nPK: {}\nSubsession ID: {}\nPKID: \"{}\"",
+            "Signature: {}\nPK: {}\nSubsession ID: {}\nPKID: \"{}\"\nMessage: \"{}\"\nVerification: {}",
             serde_json::to_string_pretty(&self.signature).unwrap(),
             serde_json::to_string_pretty(&self.pk).unwrap(),
             serde_json::to_string_pretty(&self.subsession_id).unwrap(),
-            self.pkid
+            self.pkid,
+            String::from_utf8_lossy(&self.message),
+            self.verify(&self.message)
         )
     }
 }

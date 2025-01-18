@@ -488,13 +488,6 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                     }
                 }
             }
-            SwarmEvent::OutgoingConnectionError {
-                peer_id,
-                connection_id,
-                error,
-            } => {
-                tracing::error!("Outbound failure: {:?}", error);
-            }
             other => {
                 tracing::debug!("Unhandled {:?}", other);
             }

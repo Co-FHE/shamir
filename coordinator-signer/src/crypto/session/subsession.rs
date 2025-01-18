@@ -76,6 +76,7 @@ impl<VI: ValidatorIdentity> SubSession<VI> {
     }
     pub(crate) async fn start_signing<T: AsRef<[u8]>>(mut self, msg: T) {
         tracing::debug!("Starting Signing session with id: {:?}", self.subsession_id);
+        let msg_v = msg.as_ref().to_vec();
         tokio::spawn(async move {
             let signature = loop {
                 if let Some(signature) = self.state.completed() {
@@ -157,6 +158,7 @@ impl<VI: ValidatorIdentity> SubSession<VI> {
                 pk: self.pk.clone(),
                 subsession_id: self.subsession_id.clone(),
                 pkid: self.pkid.clone(),
+                message: msg_v,
             }) {
                 tracing::error!("Error sending signing session: {:?}", e);
             }

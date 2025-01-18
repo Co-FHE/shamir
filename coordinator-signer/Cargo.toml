@@ -8,8 +8,8 @@ edition = "2021"
 [dependencies]
 pem = { version = "3" }
 # frost-core = { path = "../frost-core" }
-veritss = { path = "../veritss" }
 common = { path = "../common" }
+veritss = { path = "../veritss" }
 tokio = { version = "1.37.0", features = ["full"] }
 futures = "0.3.31"
 libp2p = { version = "0.55", features = [

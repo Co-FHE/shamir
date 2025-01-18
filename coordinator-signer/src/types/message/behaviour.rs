@@ -1,14 +1,13 @@
 use libp2p::{
     identify, ping, rendezvous,
-    request_response::{self, Codec},
+    request_response::{self},
     swarm::NetworkBehaviour,
 };
 use serde::{Deserialize, Serialize};
 
-use crate::crypto::{
-    DKGSingleRequest, DKGSingleResponse, SigningSingleRequest, SigningSingleResponse,
-    ValidatorIdentity, ValidatorIdentityIdentity,
-};
+use crate::crypto::ValidatorIdentityIdentity;
+
+use super::{DKGRequestWrap, DKGResponseWrap, SigningRequestWrap, SigningResponseWrap};
 
 #[derive(NetworkBehaviour)]
 pub(crate) struct CoorBehaviour<
@@ -47,14 +46,14 @@ pub(crate) enum SigToCoorResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum CoorToSigRequest<VII: ValidatorIdentityIdentity> {
-    DKGRequest(DKGSingleRequest<VII>),
-    SigningRequest(SigningSingleRequest<VII>),
+    DKGRequest(DKGRequestWrap<VII>),
+    SigningRequest(SigningRequestWrap<VII>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum CoorToSigResponse<VII: ValidatorIdentityIdentity> {
-    DKGResponse(DKGSingleResponse<VII>),
-    SigningResponse(SigningSingleResponse<VII>),
+    DKGResponse(DKGResponseWrap<VII>),
+    SigningResponse(SigningResponseWrap<VII>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

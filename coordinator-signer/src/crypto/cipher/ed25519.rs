@@ -17,6 +17,7 @@ impl Cipher for frost_ed25519::Ed25519Sha512 {
 
     type DKGRound1SecretPackage = frost_ed25519::keys::dkg::round1::SecretPackage;
     type DKGRound1Package = frost_ed25519::keys::dkg::round1::Package;
+    type DKGRound1PackageMap = BTreeMap<Self::Identifier, Self::DKGRound1Package>;
     type DKGRound2SecretPackage = frost_ed25519::keys::dkg::round2::SecretPackage;
     type DKGRound2Package = frost_ed25519::keys::dkg::round2::Package;
     type DKGRound2PackageMap = BTreeMap<Self::Identifier, Self::DKGRound2Package>;
@@ -25,6 +26,8 @@ impl Cipher for frost_ed25519::Ed25519Sha512 {
     fn get_crypto_type() -> CryptoType {
         CryptoType::Ed25519
     }
+
+    type DKGRound2PackageMapMap = BTreeMap<Self::Identifier, Self::DKGRound2PackageMap>;
 }
 
 impl TryFrom<frost_ed25519::keys::PublicKeyPackage> for PkId {

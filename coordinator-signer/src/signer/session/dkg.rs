@@ -1,0 +1,36 @@
+#[derive(Debug, Clone)]
+pub(crate) enum SignerDKGState<VII: ValidatorIdentityIdentity> {
+    Part1 {
+        crypto_type: CryptoType,
+        min_signers: u16,
+        session_id: SessionId<VII>,
+        participants: BTreeMap<u16, VII>,
+        identifier: u16,
+        identity: VII,
+        round1_secret_package: DKGRound1SecretPackage,
+        // round1_package: DKGRound1Package,
+    },
+    Part2 {
+        crypto_type: CryptoType,
+        min_signers: u16,
+        session_id: SessionId<VII>,
+        participants: BTreeMap<u16, VII>,
+        identifier: u16,
+        identity: VII,
+        // round1_secret_package: DKGRound1SecretPackage,
+        // round1_package: DKGRound1Package,
+        round1_packages: BTreeMap<u16, DKGRound1Package>,
+        round2_secret_package: DKGRound2SecretPackage,
+        // round2_packages: DKGRound2Packages,
+    },
+    Completed {
+        crypto_type: CryptoType,
+        min_signers: u16,
+        session_id: SessionId<VII>,
+        participants: BTreeMap<u16, VII>,
+        identifier: u16,
+        identity: VII,
+        key_package: KeyPackage,
+        public_key_package: PublicKeyPackage,
+    },
+}

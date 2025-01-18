@@ -5,10 +5,9 @@ use std::{
 };
 mod commands;
 mod coordinator;
-// mod dkgp;
-mod behaviour;
 mod crypto;
 mod signer;
+pub(crate) mod types;
 mod utils;
 use common::Settings;
 use coordinator::Coordinator;

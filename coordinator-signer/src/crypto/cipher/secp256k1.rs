@@ -16,6 +16,7 @@ impl Cipher for frost_secp256k1::Secp256K1Sha256 {
 
     type DKGRound1SecretPackage = frost_secp256k1::keys::dkg::round1::SecretPackage;
     type DKGRound1Package = frost_secp256k1::keys::dkg::round1::Package;
+    type DKGRound1PackageMap = BTreeMap<Self::Identifier, Self::DKGRound1Package>;
     type DKGRound2SecretPackage = frost_secp256k1::keys::dkg::round2::SecretPackage;
     type DKGRound2Package = frost_secp256k1::keys::dkg::round2::Package;
     type DKGRound2PackageMap = BTreeMap<Self::Identifier, Self::DKGRound2Package>;
@@ -24,6 +25,8 @@ impl Cipher for frost_secp256k1::Secp256K1Sha256 {
     fn get_crypto_type() -> CryptoType {
         CryptoType::Secp256k1
     }
+
+    type DKGRound2PackageMapMap = BTreeMap<Self::Identifier, Self::DKGRound2PackageMap>;
 }
 
 impl TryFrom<frost_secp256k1::keys::PublicKeyPackage> for PkId {

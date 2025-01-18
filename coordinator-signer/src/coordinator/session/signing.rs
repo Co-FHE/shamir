@@ -1,18 +1,4 @@
-use crate::crypto::ValidatorIdentityIdentity;
-use futures::stream::FuturesUnordered;
-use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-use tokio::sync::oneshot;
-use veritss::frost;
-
-use super::{
-    subsession::{SubSessionId, PKID},
-    CryptoError, CryptoPackageTrait, CryptoType, DKGPackage, DKGRound1Package,
-    DKGRound1SecretPackage, DKGRound2Package, DKGRound2Packages, DKGRound2SecretPackage,
-    KeyPackage, PublicKeyPackage, Session, SessionId, Signature, SignatureShare,
-    SigningCommitments, SigningNonces, SigningPackage, State, ValidatorIdentity,
-};
-
+mod subsession;
 #[derive(Debug, Clone)]
 pub(crate) enum SigningState<VII: ValidatorIdentityIdentity> {
     Round1 {
@@ -40,112 +26,70 @@ pub(crate) enum SigningState<VII: ValidatorIdentityIdentity> {
         subsession_id: SubSessionId<VII>,
     },
 }
-
-#[derive(Debug, Clone)]
-pub(crate) enum SignerSigningState<VII: ValidatorIdentityIdentity> {
-    Round1 {
-        pkid: PKID,
-        message: Vec<u8>,
-        crypto_type: CryptoType,
-        key_package: KeyPackage,
+pub(crate) struct CoordinatorSigningSession<VI: ValidatorIdentity> {
+    pub(crate) pkid: PKID,
+    pub(crate) session_id: SessionId<VI::Identity>,
+    pub(crate) crypto_type: CryptoType,
+    pub(crate) public_key_package: PublicKeyPackage,
+    pub(crate) min_signers: u16,
+    pub(crate) participants: BTreeMap<u16, VI::Identity>,
+    signing_sender: UnboundedSender<(
+        SigningSingleRequest<VI::Identity>,
+        oneshot::Sender<SigningSingleResponse<VI::Identity>>,
+    )>,
+    signature_sender: UnboundedSender<SignatureSuite<VI>>,
+}
+impl<VI: ValidatorIdentity> SigningSession<VI> {
+    pub(crate) fn new(
+        session_id: SessionId<VI::Identity>,
         public_key_package: PublicKeyPackage,
         min_signers: u16,
-        participants: BTreeMap<u16, VII>,
-        identifier: u16,
-        identity: VII,
-        signing_commitments: SigningCommitments,
-        nonces: SigningNonces,
-    },
-    Round2 {
-        pkid: PKID,
-        message: Vec<u8>,
+        participants: BTreeMap<u16, VI::Identity>,
         crypto_type: CryptoType,
-        key_package: KeyPackage,
-        public_key_package: PublicKeyPackage,
-        min_signers: u16,
-        participants: BTreeMap<u16, VII>,
-        identifier: u16,
-        identity: VII,
-        signing_package: SigningPackage,
-        nonces: SigningNonces,
-        signature_share: SignatureShare,
-    },
-    Completed {
-        crypto_type: CryptoType,
-        min_signers: u16,
-        session_id: SessionId<VII>,
-        participants: BTreeMap<u16, VII>,
-        identifier: u16,
-        identity: VII,
-        key_package: KeyPackage,
-        public_key_package: PublicKeyPackage,
-        signature: Signature,
-    },
-}
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) enum SigningSingleRequest<VII: ValidatorIdentityIdentity> {
-    Round1 {
-        pkid: PKID,
-        message: Vec<u8>,
-        subsession_id: SubSessionId<VII>,
-        identifier: u16,
-        identity: VII,
-    },
-    Round2 {
-        pkid: PKID,
-        subsession_id: SubSessionId<VII>,
-        signing_package: SigningPackage,
-        identifier: u16,
-        identity: VII,
-    },
-}
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) enum SigningSingleResponse<VII: ValidatorIdentityIdentity> {
-    Round1 {
-        pkid: PKID,
-        subsession_id: SubSessionId<VII>,
-        commitments: SigningCommitments,
-        identifier: u16,
-    },
-    Round2 {
-        pkid: PKID,
-        subsession_id: SubSessionId<VII>,
-        signature_share: SignatureShare,
-        identifier: u16,
-    },
-    Failure(String),
-}
-impl<VII: ValidatorIdentityIdentity> SigningSingleResponse<VII> {
-    pub(crate) fn get_identity(&self) -> u16 {
-        match self {
-            SigningSingleResponse::Round1 { identifier, .. } => *identifier,
-            SigningSingleResponse::Round2 { identifier, .. } => *identifier,
-            SigningSingleResponse::Failure(_) => todo!(),
-        }
+        signing_sender: UnboundedSender<(
+            SigningSingleRequest<VI::Identity>,
+            oneshot::Sender<SigningSingleResponse<VI::Identity>>,
+        )>,
+        signature_sender: UnboundedSender<SignatureSuite<VI>>,
+    ) -> Result<Self, SessionError> {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(public_key_package.public_key());
+        let pkid = hasher.finalize().to_vec();
+        Ok(Self {
+            pkid: PKID::new(pkid),
+            session_id,
+            crypto_type,
+            public_key_package,
+            min_signers,
+            participants,
+            signing_sender,
+            signature_sender,
+        })
     }
-}
-impl<VII: ValidatorIdentityIdentity> SigningSingleRequest<VII> {
-    pub(crate) fn get_identity(&self) -> &VII {
-        match self {
-            SigningSingleRequest::Round1 { identity, .. } => identity,
-            SigningSingleRequest::Round2 { identity, .. } => identity,
-        }
-    }
-    pub(crate) fn get_subsession_id(&self) -> SubSessionId<VII> {
-        match self {
-            SigningSingleRequest::Round1 { subsession_id, .. } => subsession_id.clone(),
-            SigningSingleRequest::Round2 { subsession_id, .. } => subsession_id.clone(),
-        }
-    }
-    pub(crate) fn get_pkid(&self) -> PKID {
-        match self {
-            SigningSingleRequest::Round1 { pkid, .. } => pkid.clone(),
-            SigningSingleRequest::Round2 { pkid, .. } => pkid.clone(),
-        }
+    pub(crate) async fn start_new_signing<T: AsRef<[u8]>>(
+        &mut self,
+        msg: T,
+    ) -> Result<SubSessionId<VI::Identity>, SessionError> {
+        let msg = msg.as_ref().to_vec();
+        let subsession = SubSession::<VI>::new(
+            self.session_id.clone(),
+            self.pkid.clone(),
+            self.public_key_package.clone(),
+            self.min_signers,
+            self.participants.clone(),
+            self.crypto_type,
+            msg.clone(),
+            self.signing_sender.clone(),
+            self.signature_sender.clone(),
+        )?;
+        let subsession_id = subsession.get_subsession_id();
+        subsession.start_signing(msg).await;
+        Ok(subsession_id)
     }
 }
 
-impl<VII: ValidatorIdentityIdentity> SigningState<VII> {
+impl<VII: ValidatorIdentityIdentity> CoordinatorSigningState<VII> {
     pub(crate) fn new(
         crypto_type: CryptoType,
         message: Vec<u8>,
@@ -168,12 +112,12 @@ impl<VII: ValidatorIdentityIdentity> SigningState<VII> {
     }
 }
 
-impl<VII: ValidatorIdentityIdentity> SigningState<VII> {
+impl<VII: ValidatorIdentityIdentity> CoordinatorSigningState<VII> {
     pub(crate) fn split_into_single_requests(&self) -> Vec<SigningSingleRequest<VII>> {
         match self {
             SigningState::Round1 {
                 crypto_type,
-                message,
+                message,c
                 min_signers,
                 pkid,
                 subsession_id,

@@ -1,9 +1,12 @@
+mod command;
+mod session;
 use crate::behaviour::{
     CoorBehaviour, CoorBehaviourEvent, CoorToSigRequest, CoorToSigResponse, SigToCoorRequest,
     SigToCoorResponse, ValidatorIdentityRequest,
 };
 use crate::crypto::*;
 use crate::utils::*;
+use command::Command;
 use common::Settings;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
@@ -28,8 +31,6 @@ use tokio::net::unix::SocketAddr;
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::mpsc::{Receiver, Sender, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, RwLock};
-mod command;
-use command::Command;
 pub struct Coordinator<VI: ValidatorIdentity> {
     p2p_keypair: libp2p::identity::Keypair,
     swarm: libp2p::Swarm<CoorBehaviour<VI::Identity>>,

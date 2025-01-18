@@ -170,7 +170,7 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                     if let Some(signing_session) = signing_session_future {
                         match signing_session {
                             Ok(signing_session) => {
-                                tracing::info!("Received signing session {:?}", signing_session.pkid.clone());
+                                tracing::info!("Received signing session {}", signing_session.pkid.clone());
                                 self.signing_sessions.insert(signing_session.pkid.clone(), signing_session);
                             }
                             Err(e) => {
@@ -575,7 +575,7 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                         let pkid = PKID::from(pkid);
                         let (sender, receiver) = oneshot::channel();
                         if let Some(session) = self.signing_sessions.get_mut(&pkid) {
-                            match session.start_new_signing(msg).await {
+                            match session.start_new_signing(msg.clone()).await {
                                 Ok(subsession_id) => {
                                     reader
                                         .get_mut()
@@ -584,12 +584,20 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                                                 .as_bytes(),
                                         )
                                         .await?;
+                                    reader.get_mut().write_all(b"\n").await?;
                                     self.reply_sender.insert(subsession_id, sender);
                                     tokio::spawn(async move {
                                         let recv = receiver.await.unwrap();
                                         reader
                                             .get_mut()
                                             .write_all(recv.to_string().as_bytes())
+                                            .await
+                                            .unwrap();
+                                        reader.get_mut().write_all(b"\n").await.unwrap();
+                                        let verified = recv.verify(&msg.as_bytes());
+                                        reader
+                                            .get_mut()
+                                            .write_all(format!("Verified: {}", verified).as_bytes())
                                             .await
                                             .unwrap();
                                         reader.get_mut().write_all(b"\n").await.unwrap();

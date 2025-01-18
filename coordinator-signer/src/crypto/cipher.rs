@@ -18,7 +18,7 @@ pub trait Cipher: Ciphersuite + Clone + std::fmt::Debug + Send + Sync + 'static 
 
     type KeyPackage;
     type SigningPackage;
-    type PublicKeyPackage: Into<PkId>;
+    type PublicKeyPackage: TryInto<PkId, Error = Self::CryptoError>;
 
     type DKGRound1SecretPackage;
     type DKGRound1Package;

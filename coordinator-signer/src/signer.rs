@@ -23,10 +23,9 @@ use crate::behaviour::{
     CoorToSigRequest, CoorToSigResponse, SigBehaviour, SigBehaviourEvent, SigToCoorRequest,
     SigToCoorResponse, ValidatorIdentityRequest,
 };
-use crate::crypto::subsession::PKID;
+use crate::crypto::PkId;
 use crate::crypto::{
-    DKGSingleRequest, DKGSingleResponse, SessionId, SignerSession, SigningSignerSession,
-    SingleRequest, ValidatorIdentity, ValidatorIdentityIdentity, ValidatorIdentityKeypair,
+    ValidatorIdentity, ValidatorIdentityIdentity, ValidatorIdentityKeypair,
     ValidatorIdentityPublicKey,
 };
 mod command;

@@ -1,3 +1,5 @@
+use sha2::{Digest, Sha256};
+
 use super::{Cipher, CryptoType, PkId};
 use std::collections::BTreeMap;
 
@@ -24,8 +26,11 @@ impl Cipher for frost_secp256k1::Secp256K1Sha256 {
     }
 }
 
-impl From<frost_secp256k1::keys::PublicKeyPackage> for PkId {
-    fn from(pk: frost_secp256k1::keys::PublicKeyPackage) -> Self {
-        PkId::new(pk.pkid().to_bytes())
+impl TryFrom<frost_secp256k1::keys::PublicKeyPackage> for PkId {
+    type Error = frost_secp256k1::Error;
+    fn try_from(pk: frost_secp256k1::keys::PublicKeyPackage) -> Result<Self, Self::Error> {
+        Ok(PkId::new(
+            Sha256::digest(&pk.serialize()?.to_vec()).to_vec(),
+        ))
     }
 }

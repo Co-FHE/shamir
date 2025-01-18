@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
 
+use sha2::{Digest, Sha256};
+
 use super::{Cipher, CryptoType, PkId};
 
 impl Cipher for frost_ed25519::Ed25519Sha512 {
@@ -25,8 +27,11 @@ impl Cipher for frost_ed25519::Ed25519Sha512 {
     }
 }
 
-impl From<frost_ed25519::keys::PublicKeyPackage> for PkId {
-    fn from(pk: frost_ed25519::keys::PublicKeyPackage) -> Self {
-        PkId::new(pk.pkid().to_bytes())
+impl TryFrom<frost_ed25519::keys::PublicKeyPackage> for PkId {
+    type Error = frost_ed25519::Error;
+    fn try_from(pk: frost_ed25519::keys::PublicKeyPackage) -> Result<Self, Self::Error> {
+        Ok(PkId::new(
+            Sha256::digest(&pk.serialize()?.to_vec()).to_vec(),
+        ))
     }
 }

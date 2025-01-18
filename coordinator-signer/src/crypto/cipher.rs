@@ -10,7 +10,7 @@ pub use secp256k1::*;
 pub use secp256k1_tr::*;
 
 pub trait Cipher: Ciphersuite + Clone + std::fmt::Debug + Send + Sync + 'static {
-    type Identifier;
+    type Identifier: Ord;
     type Signature;
     type SigningCommitments;
     type SigningNonces;
@@ -18,7 +18,7 @@ pub trait Cipher: Ciphersuite + Clone + std::fmt::Debug + Send + Sync + 'static 
 
     type KeyPackage;
     type SigningPackage;
-    type PublicKeyPackage: TryInto<PkId, Error = Self::CryptoError>;
+    type PublicKeyPackage: TryInto<PkId, Error = Self::CryptoError> + Clone;
 
     type DKGRound1SecretPackage;
     type DKGRound1Package;

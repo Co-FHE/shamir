@@ -66,7 +66,7 @@ impl<VI: ValidatorIdentity, C: Cipher> CoordinatorSession<VI, C> {
     }
     pub(crate) async fn start(
         mut self,
-        completed_sender: oneshot::Sender<CoordinatorSigningSession<VI>>,
+        completed_sender: oneshot::Sender<CoordinatorSigningSession<VI, C>>,
         signing_sender: UnboundedSender<(
             SigningRequest<VI::Identity, C>,
             oneshot::Sender<SigningResponse<VI::Identity, C>>,
@@ -82,7 +82,6 @@ impl<VI: ValidatorIdentity, C: Cipher> CoordinatorSession<VI, C> {
                         public_key_package,
                         self.min_signers,
                         self.participants.clone(),
-                        self.crypto_type,
                         signing_sender,
                         signature_sender,
                     );

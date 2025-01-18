@@ -6,6 +6,8 @@ use uuid::Uuid;
 
 use crate::types::error::SessionIdError;
 
+use super::{Cipher, Participants};
+
 // SessionId format:
 // 1 byte: crypto type
 // 2 byte: min signers
@@ -29,10 +31,10 @@ impl<'de, VII: ValidatorIdentityIdentity> Deserialize<'de> for SessionId<VII> {
     }
 }
 impl<VII: ValidatorIdentityIdentity> SessionId<VII> {
-    pub fn new(
+    pub fn new<C: Cipher>(
         crypto_type: CryptoType,
         min_signers: u16,
-        participants: &BTreeMap<u16, VII>,
+        participants: Participants<VII, C>,
     ) -> Result<Self, SessionIdError> {
         let mut bytes = [0u8; 37];
 

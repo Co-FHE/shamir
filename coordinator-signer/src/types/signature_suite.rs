@@ -1,19 +1,20 @@
-use crate::crypto::{Cipher, PkId, ValidatorIdentity};
+use crate::crypto::{Cipher, PkId, PublicKeyPackage, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use serde_json;
 use std::fmt::{Display, Formatter, Result};
 
-use super::{SessionId, SubsessionId};
+use super::{Participants, SessionId, SubsessionId, ValidatorIdentityIdentity};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct SignatureSuite<VI: ValidatorIdentity, C: Cipher> {
+pub(crate) struct SignatureSuite<VII: ValidatorIdentityIdentity, C: Cipher> {
     pub(crate) signature: C::Signature,
     pub(crate) pk: C::PublicKeyPackage,
-    pub(crate) subsession_id: SubsessionId<VI::Identity>,
+    pub(crate) subsession_id: SubsessionId,
+    pub(crate) participants: Participants<VII, C>,
     pub(crate) pkid: PkId,
     pub(crate) message: Vec<u8>,
 }
-impl<VI: ValidatorIdentity, C: Cipher> SignatureSuite<VI, C> {
+impl<VII: ValidatorIdentityIdentity, C: Cipher> SignatureSuite<VII, C> {
     pub(crate) fn pretty_print(&self) -> String {
         format!(
             "Signature: {}\nPK: {}\nSubsession ID: {}\nPKID: \"{}\"\nMessage: \"{}\"\nVerification: {}",
@@ -27,12 +28,12 @@ impl<VI: ValidatorIdentity, C: Cipher> SignatureSuite<VI, C> {
     }
 }
 
-impl<VI: ValidatorIdentity, C: Cipher> Display for SignatureSuite<VI, C> {
+impl<VII: ValidatorIdentityIdentity, C: Cipher> Display for SignatureSuite<VII, C> {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         write!(f, "{}", self.pretty_print())
     }
 }
-impl<VI: ValidatorIdentity, C: Cipher> SignatureSuite<VI, C> {
+impl<VII: ValidatorIdentityIdentity, C: Cipher> SignatureSuite<VII, C> {
     pub fn verify(&self, message: &[u8]) -> bool {
         self.pk
             .verifying_key()

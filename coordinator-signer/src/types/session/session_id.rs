@@ -1,10 +1,10 @@
+use crate::crypto::Identifier;
 use crate::crypto::{CryptoType, ValidatorIdentityIdentity};
+use crate::types::error::SessionIdError;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, marker::PhantomData};
 use uuid::Uuid;
-
-use crate::types::error::SessionIdError;
 
 use super::{Cipher, Participants};
 
@@ -34,7 +34,7 @@ impl<VII: ValidatorIdentityIdentity> SessionId<VII> {
     pub fn new<C: Cipher>(
         crypto_type: CryptoType,
         min_signers: u16,
-        participants: Participants<VII, C>,
+        participants: &Participants<VII, C>,
     ) -> Result<Self, SessionIdError> {
         let mut bytes = [0u8; 37];
 
@@ -64,7 +64,7 @@ impl<VII: ValidatorIdentityIdentity> SessionId<VII> {
 
         let mut hasher = Sha256::new();
         for (key, _) in &sorted_entries {
-            hasher.update(&key.to_be_bytes());
+            hasher.update(&key.to_bytes());
         }
         let hash = hasher.finalize();
         bytes[13..21].copy_from_slice(&hash[0..8]);

@@ -26,8 +26,12 @@ libp2p = { version = "0.55", features = [
     "rendezvous",
 ] }
 anyhow = "1.0.70"
-frost-core = { git = "https://github.com/verisense-network/frost.git", branch = "main", package = "frost-core" }
-frost-ed25519 = { git = "https://github.com/verisense-network/frost.git", branch = "main", package = "frost-ed25519" }
+frost-core = { git = "https://github.com/verisense-network/frost.git", branch = "main", package = "frost-core", features = [
+    "serde",
+] }
+frost-ed25519 = { git = "https://github.com/verisense-network/frost.git", branch = "main", package = "frost-ed25519", features = [
+    "serde",
+] }
 frost-secp256k1 = { git = "https://github.com/verisense-network/frost.git", branch = "main", package = "frost-secp256k1" }
 frost-secp256k1-tr = { git = "https://github.com/verisense-network/frost.git", branch = "main", package = "frost-secp256k1-tr" }
 

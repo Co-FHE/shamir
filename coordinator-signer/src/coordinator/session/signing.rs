@@ -2,7 +2,7 @@ use subsession::CoordinatorSubsession;
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
 use crate::{
-    crypto::{PkId, ValidatorIdentityIdentity},
+    crypto::{PkId, PublicKeyPackage, ValidatorIdentityIdentity},
     types::{
         error::SessionError,
         message::{SigningRequest, SigningResponse},
@@ -23,7 +23,7 @@ pub(crate) struct CoordinatorSigningSession<VI: ValidatorIdentity, C: Cipher> {
         SigningRequest<VI::Identity, C>,
         oneshot::Sender<SigningResponse<VI::Identity, C>>,
     )>,
-    signature_sender: UnboundedSender<SignatureSuite<VI, C>>,
+    signature_sender: UnboundedSender<SignatureSuite<VI::Identity, C>>,
 }
 impl<VI: ValidatorIdentity, C: Cipher> CoordinatorSigningSession<VI, C> {
     pub(crate) fn new(
@@ -35,10 +35,12 @@ impl<VI: ValidatorIdentity, C: Cipher> CoordinatorSigningSession<VI, C> {
             SigningRequest<VI::Identity, C>,
             oneshot::Sender<SigningResponse<VI::Identity, C>>,
         )>,
-        signature_sender: UnboundedSender<SignatureSuite<VI, C>>,
+        signature_sender: UnboundedSender<SignatureSuite<VI::Identity, C>>,
     ) -> Result<Self, SessionError<C>> {
         Ok(Self {
-            pkid: public_key_package.into(),
+            pkid: public_key_package
+                .pkid()
+                .map_err(|e| SessionError::CryptoError(e))?,
             session_id,
             public_key_package,
             min_signers,
@@ -50,10 +52,9 @@ impl<VI: ValidatorIdentity, C: Cipher> CoordinatorSigningSession<VI, C> {
     pub(crate) async fn start_new_signing<T: AsRef<[u8]>>(
         &mut self,
         msg: T,
-    ) -> Result<SubsessionId<VI::Identity>, SessionError> {
+    ) -> Result<SubsessionId, SessionError<C>> {
         let msg = msg.as_ref().to_vec();
         let subsession = CoordinatorSubsession::<VI, C>::new(
-            self.session_id.clone(),
             self.pkid.clone(),
             self.public_key_package.clone(),
             self.min_signers,

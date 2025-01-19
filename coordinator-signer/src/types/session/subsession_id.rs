@@ -1,10 +1,10 @@
-use crate::crypto::{CryptoType, PkId, ValidatorIdentityIdentity};
+use crate::crypto::{CryptoType, Identifier, PkId, ValidatorIdentityIdentity};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, marker::PhantomData};
 use uuid::Uuid;
 
-use super::SessionId;
+use super::{Cipher, Participants, SessionId};
 use crate::types::error::SessionIdError;
 
 // SubSessionId format:
@@ -18,31 +18,30 @@ use crate::types::error::SessionIdError;
 // 16 bytes: uuid of subsession
 // The SessionId cannot be used in any consensus
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
-pub(crate) struct SubsessionId<VI: ValidatorIdentityIdentity>([u8; 101], PhantomData<VI>);
+pub(crate) struct SubsessionId([u8; 101]);
 
-impl<VII: ValidatorIdentityIdentity> Serialize for SubsessionId<VII> {
+impl Serialize for SubsessionId {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(&self.to_string())
     }
 }
 
-impl<'de, VII: ValidatorIdentityIdentity> Deserialize<'de> for SubsessionId<VII> {
+impl<'de> Deserialize<'de> for SubsessionId {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let s = String::deserialize(deserializer)?;
         SubsessionId::from_string(&s).map_err(serde::de::Error::custom)
     }
 }
 
-impl<VII: ValidatorIdentityIdentity> SubsessionId<VII> {
-    pub fn new(
+impl SubsessionId {
+    pub fn new<VII: ValidatorIdentityIdentity, C: Cipher>(
         crypto_type: CryptoType,
         min_signers: u16,
-        participants: &BTreeMap<u16, VII>,
+        participants: &Participants<VII, C>,
         sign_message: Vec<u8>,
-        session_id: &SessionId<VII>,
         pkid: PkId,
     ) -> Result<Self, SessionIdError> {
-        let mut bytes = [0u8; 85];
+        let mut bytes = [0u8; 101];
 
         // 1 byte crypto type
         bytes[0] = crypto_type as u8;
@@ -71,12 +70,14 @@ impl<VII: ValidatorIdentityIdentity> SubsessionId<VII> {
 
         let mut hasher = Sha256::new();
         for (key, _) in &sorted_entries {
-            hasher.update(&key.to_be_bytes());
+            hasher.update(&key.to_bytes());
         }
         let hash = hasher.finalize();
         bytes[13..21].copy_from_slice(&hash[0..8]);
-
-        bytes[21..53].copy_from_slice(&pkid[..]);
+        if pkid.to_bytes().len() != 32 {
+            return Err(SessionIdError::InvalidPkIdLength(pkid.to_bytes().len()));
+        }
+        bytes[21..53].copy_from_slice(&pkid.to_bytes());
 
         // Calculate sign message hash
         let mut hasher = Sha256::new();
@@ -88,7 +89,7 @@ impl<VII: ValidatorIdentityIdentity> SubsessionId<VII> {
         let subsession_uuid = Uuid::new_v4();
         bytes[86..101].copy_from_slice(subsession_uuid.as_bytes());
 
-        Ok(SubsessionId(bytes, PhantomData))
+        Ok(SubsessionId(bytes))
     }
 
     pub fn to_string(&self) -> String {
@@ -122,7 +123,7 @@ impl<VII: ValidatorIdentityIdentity> SubsessionId<VII> {
             )));
         }
 
-        let mut bytes = [0u8; 85];
+        let mut bytes = [0u8; 101];
 
         // Parse crypto type (1 byte)
         let crypto_type = u8::from_str_radix(parts[0], 16).map_err(|e| {
@@ -234,6 +235,6 @@ impl<VII: ValidatorIdentityIdentity> SubsessionId<VII> {
         }
         bytes[69..85].copy_from_slice(&uuid);
 
-        Ok(SubsessionId(bytes, PhantomData))
+        Ok(SubsessionId(bytes))
     }
 }

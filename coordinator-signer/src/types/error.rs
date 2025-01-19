@@ -1,5 +1,4 @@
 use crate::crypto::Cipher;
-
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum SessionError<C: Cipher> {
     #[error("Invalid participants: {0}")]
@@ -8,14 +7,16 @@ pub(crate) enum SessionError<C: Cipher> {
     MissingDataForSplitIntoRequest(String),
     #[error("Invalid crypto type: {0}")]
     InvalidCryptoType(String),
-    #[error("Internal error: {0}")]
-    InternalError(String),
     #[error("Invalid request: {0}")]
     InvalidRequest(String),
     #[error("Invalid subsession id: {0}")]
     InvalidSessionId(SessionIdError),
     #[error("Frost error: {0}")]
     CryptoError(C::CryptoError),
+    #[error("Session id error: {0}")]
+    SessionIdError(#[from] SessionIdError),
+    #[error("Invalid response: {0}")]
+    InvalidResponse(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -26,4 +27,6 @@ pub(crate) enum SessionIdError {
     InvalidSubSessionIdFormat(String),
     #[error("Invalid min signers: {0}, max signers: {1}")]
     InvalidMinSigners(u16, u16),
+    #[error("Invalid pkid length: {0}")]
+    InvalidPkIdLength(usize),
 }

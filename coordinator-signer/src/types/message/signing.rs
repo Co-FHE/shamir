@@ -1,16 +1,16 @@
-use frost_ed25519::Ed25519Sha512;
-use frost_secp256k1::Secp256K1Sha256;
-use frost_secp256k1_tr::Secp256K1Sha256TR;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    crypto::{Cipher, PkId, ValidatorIdentityIdentity},
+    crypto::{
+        Cipher, Ed25519Sha512, PkId, Secp256K1Sha256, Secp256K1Sha256TR, ValidatorIdentityIdentity,
+    },
     types::{Participants, SubsessionId},
 };
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct SigningBaseMessage<VII: ValidatorIdentityIdentity, C: Cipher> {
     pub(crate) participants: Participants<VII, C>,
     pub(crate) pkid: PkId,
-    pub(crate) subsession_id: SubsessionId<VII>,
+    pub(crate) subsession_id: SubsessionId,
     pub(crate) identifier: C::Identifier,
     pub(crate) identity: VII,
     pub(crate) public_key: C::PublicKeyPackage,
@@ -25,6 +25,7 @@ pub(crate) enum SigningRequestStage<C: Cipher> {
     Round1,
     Round2 { signing_package: C::SigningPackage },
 }
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum SigningRequestWrap<VII: ValidatorIdentityIdentity> {
     Ed25519(SigningRequest<VII, Ed25519Sha512>),
     Secp256k1(SigningRequest<VII, Secp256K1Sha256>),

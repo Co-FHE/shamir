@@ -1,19 +1,22 @@
 use std::collections::BTreeMap;
 
 use common::Settings;
-use futures::stream::FuturesUnordered;
+use futures::stream::{FuturesUnordered, StreamExt};
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
+use super::{signing::CoordinatorSigningSession, SessionId, ValidatorIdentity};
+use crate::crypto::*;
 use crate::{
     crypto::{Cipher, CryptoType, ValidatorIdentityIdentity},
     types::{
         error::SessionError,
-        message::{DKGRequest, DKGResponse, DKGResponseStage, SigningRequest, SigningResponse},
+        message::{
+            DKGBaseMessage, DKGRequest, DKGRequestStage, DKGResponse, DKGResponseStage,
+            SigningRequest, SigningResponse,
+        },
         Participants, SignatureSuite,
     },
 };
-
-use super::{signing::CoordinatorSigningSession, SessionId, ValidatorIdentity};
 
 #[derive(Debug, Clone)]
 pub(crate) enum CoordinatorDKGState<C: Cipher> {
@@ -30,7 +33,7 @@ pub(crate) enum CoordinatorDKGState<C: Cipher> {
     },
 }
 
-pub(crate) struct CoordinatorSession<VI: ValidatorIdentity, C: Cipher> {
+pub(crate) struct CoordinatorDKGSession<VI: ValidatorIdentity, C: Cipher> {
     session_id: SessionId<VI::Identity>,
     min_signers: u16,
     dkg_state: CoordinatorDKGState<C>,
@@ -41,10 +44,10 @@ pub(crate) struct CoordinatorSession<VI: ValidatorIdentity, C: Cipher> {
     )>,
 }
 
-impl<VI: ValidatorIdentity, C: Cipher> CoordinatorSession<VI, C> {
+impl<VI: ValidatorIdentity, C: Cipher> CoordinatorDKGSession<VI, C> {
     pub fn new(
         crypto_type: CryptoType,
-        participants: Vec<(u16, VI::Identity)>,
+        participants: Vec<(C::Identifier, VI::Identity)>,
         min_signers: u16,
         dkg_sender: UnboundedSender<(
             DKGRequest<VI::Identity, C>,
@@ -71,13 +74,13 @@ impl<VI: ValidatorIdentity, C: Cipher> CoordinatorSession<VI, C> {
             SigningRequest<VI::Identity, C>,
             oneshot::Sender<SigningResponse<VI::Identity, C>>,
         )>,
-        signature_sender: UnboundedSender<SignatureSuite<VI, C>>,
+        signature_sender: UnboundedSender<SignatureSuite<VI::Identity, C>>,
     ) {
         tracing::debug!("Starting DKG session with id: {:?}", self.session_id);
         tokio::spawn(async move {
             let signing_session = loop {
                 if let Some(public_key_package) = self.dkg_state.completed() {
-                    let signing_session = CoordinatorSigningSession::<VI>::new(
+                    let signing_session = CoordinatorSigningSession::<VI, C>::new(
                         self.session_id.clone(),
                         public_key_package,
                         self.min_signers,
@@ -93,7 +96,7 @@ impl<VI: ValidatorIdentity, C: Cipher> CoordinatorSession<VI, C> {
                 }
                 tracing::info!("Starting new DKG round");
                 let mut futures = FuturesUnordered::new();
-                for request in self.dkg_state.split_into_single_requests() {
+                for request in self.split_into_single_requests()? {
                     tracing::debug!("Sending DKG request: {:?}", request);
                     let (tx, rx) = oneshot::channel();
                     futures.push(rx);
@@ -113,8 +116,8 @@ impl<VI: ValidatorIdentity, C: Cipher> CoordinatorSession<VI, C> {
                     let response = futures.next().await;
                     match response {
                         Some(Ok(response)) => {
-                            tracing::debug!("Received valid response: {:?}", response);
-                            responses.insert(response.get_identifier(), response);
+                            tracing::debug!("Received valid response: {:?}", response.clone());
+                            responses.insert(response.base_info.identifier.clone(), response);
                         }
                         Some(Err(e)) => {
                             tracing::error!("Error receiving DKG state: {}", e);
@@ -132,7 +135,7 @@ impl<VI: ValidatorIdentity, C: Cipher> CoordinatorSession<VI, C> {
                 }
                 if responses.len() == self.participants.len() {
                     tracing::debug!("Received all {} responses, handling them", responses.len());
-                    let result = self.dkg_state.handle_response(responses);
+                    let result = self.handle_response(responses);
                     match result {
                         Ok(next_state) => {
                             tracing::debug!("Successfully transitioned to next DKG state");
@@ -171,29 +174,39 @@ impl<VI: ValidatorIdentity, C: Cipher> CoordinatorSession<VI, C> {
     fn split_into_single_requests(
         &self,
     ) -> Result<Vec<DKGRequest<VI::Identity, C>>, SessionError<C>> {
-        match self.dkg_state {
+        match self.dkg_state.clone() {
             CoordinatorDKGState::Part1 => self
                 .participants
                 .iter()
-                .map(|(id, identity)| DKGRequest::Part1 {
-                    min_signers: self.min_signers,
-                    participants: self.participants.clone(),
-                    identifier: *id,
-                    identity: identity.clone(),
-                    session_id: self.session_id.clone(),
-                    crypto_type: *self.crypto_type,
+                .map(|(id, identity)| {
+                    Ok(DKGRequest {
+                        base_info: DKGBaseMessage {
+                            min_signers: self.min_signers,
+                            participants: self.participants.clone(),
+                            identifier: id.clone(),
+                            identity: identity.clone(),
+                            session_id: self.session_id.clone(),
+                        },
+                        stage: DKGRequestStage::Part1,
+                    })
                 })
                 .collect(),
             CoordinatorDKGState::Part2 { round1_package_map } => self
                 .participants
                 .iter()
-                .map(|(id, identity)| DKGRequest::Part2 {
-                    min_signers: self.min_signers,
-                    max_signers: self.participants.len() as u16,
-                    identifier: *id,
-                    identity: identity.clone(),
-                    round1_packages: round1_package_map.clone(),
-                    session_id: self.session_id.clone(),
+                .map(|(id, identity)| {
+                    Ok(DKGRequest {
+                        base_info: DKGBaseMessage {
+                            min_signers: self.min_signers,
+                            participants: self.participants.clone(),
+                            identifier: id.clone(),
+                            identity: identity.clone(),
+                            session_id: self.session_id.clone(),
+                        },
+                        stage: DKGRequestStage::Part2 {
+                            round1_package_map: round1_package_map.clone(),
+                        },
+                    })
                 })
                 .collect(),
             CoordinatorDKGState::GenPublicKey {
@@ -203,33 +216,36 @@ impl<VI: ValidatorIdentity, C: Cipher> CoordinatorSession<VI, C> {
                 self.participants
                     .iter()
                     .map(|(id, identity)| {
-                        let mut round2_packages = BTreeMap::new();
+                        let mut round2_packages = <C as Cipher>::DKGRound2PackageMap::new();
                         for (oid, round2_package_map) in round2_package_map_map.iter() {
                             if oid == id {
                                 continue;
                             }
-                            let value = round2_package_map.get(id).unwrap();
+                            let value = round2_package_map.get(&oid);
                             match value {
                                 Some(round2_package) => {
-                                    round2_packages.insert(*oid, round2_package.clone());
+                                    round2_packages.insert(oid.clone(), round2_package.clone());
                                 }
                                 None => {
                                     return Err(SessionError::MissingDataForSplitIntoRequest(
-                                        format!("response not found for id: {}", id),
+                                        format!("response not found for id: {}", id.to_string()),
                                     ));
                                 }
                             }
                         }
-                        DKGRequest::GenPublicKey {
-                            min_signers: self.min_signers,
-                            max_signers: self.participants.len() as u16,
-                            identifier: *id,
-                            identity: identity.clone(),
-                            round1_packages: round1_package_map.clone(),
-                            round2_packages: round2_packages.clone(),
-                            crypto_type: *self.crypto_type,
-                            session_id: self.session_id.clone(),
-                        }
+                        Ok(DKGRequest {
+                            base_info: DKGBaseMessage {
+                                min_signers: self.min_signers,
+                                participants: self.participants.clone(),
+                                identifier: id.clone(),
+                                identity: identity.clone(),
+                                session_id: self.session_id.clone(),
+                            },
+                            stage: DKGRequestStage::GenPublicKey {
+                                round1_package_map: round1_package_map.clone(),
+                                round2_package_map: round2_packages.clone(),
+                            },
+                        })
                     })
                     .collect()
             }
@@ -240,21 +256,20 @@ impl<VI: ValidatorIdentity, C: Cipher> CoordinatorSession<VI, C> {
         &self,
         response: BTreeMap<C::Identifier, DKGResponse<VI::Identity, C>>,
     ) -> Result<CoordinatorDKGState<C>, SessionError<C>> {
-        match self.dkg_state {
+        match self.dkg_state.clone() {
             CoordinatorDKGState::Part1 => {
-                let mut packages = BTreeMap::new();
+                let mut packages = <C as Cipher>::DKGRound1PackageMap::new();
                 for (id, _) in self.participants.iter() {
                     // find in response
                     let response = response.get(id).ok_or(
-                        crate::types::error::SessionError::InvalidResponse(format!(
+                        crate::types::error::SessionError::<C>::InvalidResponse(format!(
                             "response not found for id: {}",
-                            id
-                        ))
-                        .into(),
+                            id.to_string()
+                        )),
                     )?;
-                    match response.stage {
-                        DKGResponseStage::Round1(package) => {
-                            packages.insert(*id, package);
+                    match response.stage.clone() {
+                        DKGResponseStage::Part1 { round1_package } => {
+                            packages.insert(id.clone(), round1_package);
                         }
                         _ => {
                             return Err(SessionError::InvalidResponse(format!(
@@ -268,19 +283,19 @@ impl<VI: ValidatorIdentity, C: Cipher> CoordinatorSession<VI, C> {
                 })
             }
             CoordinatorDKGState::Part2 { round1_package_map } => {
-                let mut packagess = BTreeMap::new();
+                let mut packagess = <C as Cipher>::DKGRound2PackageMapMap::new();
                 for (id, _) in self.participants.iter() {
                     let response =
                         response
                             .get(id)
                             .ok_or(SessionError::InvalidResponse(format!(
                                 "response not found for id: {}",
-                                id
+                                id.to_string()
                             )))?;
                     // TODO: need more checks
-                    match response.stage {
-                        DKGResponseStage::Part2(packages) => {
-                            packagess.insert(*id, packages);
+                    match response.stage.clone() {
+                        DKGResponseStage::Part2 { round2_package_map } => {
+                            packagess.insert(id.clone(), round2_package_map);
                         }
                         _ => {
                             return Err(SessionError::InvalidResponse(format!(
@@ -305,9 +320,9 @@ impl<VI: ValidatorIdentity, C: Cipher> CoordinatorSession<VI, C> {
                             .get(id)
                             .ok_or(SessionError::InvalidResponse(format!(
                                 "response not found for id: {}",
-                                id
+                                id.to_string()
                             )))?;
-                    match response.stage {
+                    match response.stage.clone() {
                         DKGResponseStage::GenPublicKey { public_key_package } => match public_key {
                             None => public_key = Some(public_key_package.clone()),
                             Some(ref pk) => {
@@ -336,7 +351,7 @@ impl<VI: ValidatorIdentity, C: Cipher> CoordinatorSession<VI, C> {
                     ))
                 }
             }
-            CoordinatorDKGState::Completed { .. } => Ok(self.clone()),
+            CoordinatorDKGState::Completed { .. } => Ok(self.dkg_state.clone()),
         }
     }
 }
@@ -346,7 +361,7 @@ impl<C: Cipher> CoordinatorDKGState<C> {
         Self::Part1 {}
     }
     fn completed(&self) -> Option<C::PublicKeyPackage> {
-        match self.dkg_state {
+        match self {
             CoordinatorDKGState::Completed { public_key } => Some(public_key.clone()),
             _ => None,
         }

@@ -1,14 +1,16 @@
 mod session_id;
 mod subsession_id;
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, ops::Deref};
 
+use serde::{Deserialize, Serialize};
 pub(crate) use session_id::SessionId;
 pub(crate) use subsession_id::SubsessionId;
 
-use crate::crypto::PkId;
+use crate::crypto::{Identifier, PkId};
 
 use super::{error::SessionError, Cipher, ValidatorIdentityIdentity};
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct Participants<VII: ValidatorIdentityIdentity, C: Cipher>(
     BTreeMap<C::Identifier, VII>,
 );
@@ -22,25 +24,19 @@ pub(crate) struct DKGBaseState<VII: ValidatorIdentityIdentity, C: Cipher> {
 pub(crate) struct SigningBaseState<VII: ValidatorIdentityIdentity, C: Cipher> {
     pub(crate) participants: Participants<VII, C>,
     pub(crate) pkid: PkId,
-    pub(crate) subsession_id: SubsessionId<VII>,
+    pub(crate) subsession_id: SubsessionId,
     pub(crate) public_key: C::PublicKeyPackage,
 }
 impl<VII: ValidatorIdentityIdentity, C: Cipher> Participants<VII, C> {
-    pub(crate) fn new<T: IntoIterator<Item = (u16, VII)>>(
+    pub(crate) fn new<T: IntoIterator<Item = (C::Identifier, VII)>>(
         participants: T,
     ) -> Result<Self, SessionError<C>> {
         let mut participants_map: BTreeMap<C::Identifier, VII> = BTreeMap::new();
-        if participants.len() < 1 {
-            return Err(SessionError::InvalidParticipants(format!(
-                "min signers is 1, got {}",
-                participants.len()
-            )));
-        }
         for (id, identity) in participants {
-            if participants_map.contains_key(&id) {
+            if participants_map.contains_key(&id.clone().try_into().unwrap()) {
                 return Err(SessionError::InvalidParticipants(format!(
                     "duplicate participant id: {}",
-                    id
+                    id.to_string()
                 )));
             }
             // Identity must be different
@@ -55,6 +51,12 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> Participants<VII, C> {
             }
             participants_map.insert(id, identity);
         }
+        if participants_map.len() < 1 {
+            return Err(SessionError::InvalidParticipants(format!(
+                "min signers is 1, got {}",
+                participants_map.len()
+            )));
+        }
         if participants_map.len() > 255 {
             return Err(SessionError::InvalidParticipants(format!(
                 "max signers is 255, got {}",
@@ -68,11 +70,20 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> Participants<VII, C> {
     }
     pub(crate) fn check_min_signers(&self, min_signers: u16) -> Result<(), SessionError<C>> {
         if self.len() < min_signers as usize {
-            return Err(SessionError::InvalidMinSigners(
+            return Err(SessionError::InvalidParticipants(format!(
+                "min signers is {}, got {}",
                 min_signers,
-                self.len() as u16,
-            ));
+                self.len() as u16
+            )));
         }
         Ok(())
+    }
+}
+
+impl<VII: ValidatorIdentityIdentity, C: Cipher> Deref for Participants<VII, C> {
+    type Target = BTreeMap<C::Identifier, VII>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }

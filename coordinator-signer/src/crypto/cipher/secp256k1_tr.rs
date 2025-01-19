@@ -1,9 +1,16 @@
 use std::collections::BTreeMap;
 
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use super::{Cipher, CryptoType, PkId};
-impl Cipher for frost_secp256k1_tr::Secp256K1Sha256TR {
+use super::{
+    Cipher, CryptoType, Identifier, PackageMap, PkId, PublicKeyPackage, SigningPackage,
+    VerifyingKey,
+};
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct Secp256K1Sha256TR;
+
+impl Cipher for Secp256K1Sha256TR {
     type Identifier = frost_secp256k1_tr::Identifier;
     type Signature = frost_secp256k1_tr::Signature;
     type SigningCommitments = frost_secp256k1_tr::round1::SigningCommitments;
@@ -25,8 +32,17 @@ impl Cipher for frost_secp256k1_tr::Secp256K1Sha256TR {
     fn get_crypto_type() -> CryptoType {
         CryptoType::Secp256k1Tr
     }
+    fn aggregate(
+        signing_package: &Self::SigningPackage,
+        signature_shares: &BTreeMap<Self::Identifier, Self::SignatureShare>,
+        public_key: &Self::PublicKeyPackage,
+    ) -> Result<Self::Signature, Self::CryptoError> {
+        frost_secp256k1_tr::aggregate(signing_package, signature_shares, public_key)
+    }
 
     type DKGRound2PackageMapMap = BTreeMap<Self::Identifier, Self::DKGRound2PackageMap>;
+
+    type VerifyingKey = frost_secp256k1_tr::VerifyingKey;
 }
 impl TryFrom<frost_secp256k1_tr::keys::PublicKeyPackage> for PkId {
     type Error = frost_secp256k1_tr::Error;
@@ -34,5 +50,55 @@ impl TryFrom<frost_secp256k1_tr::keys::PublicKeyPackage> for PkId {
         Ok(PkId::new(
             Sha256::digest(&pk.serialize()?.to_vec()).to_vec(),
         ))
+    }
+}
+
+impl SigningPackage for frost_secp256k1_tr::SigningPackage {
+    type Identifier = frost_secp256k1_tr::Identifier;
+    type SigningCommitments = frost_secp256k1_tr::round1::SigningCommitments;
+    type CryptoError = frost_secp256k1_tr::Error;
+    fn new(
+        commitments: BTreeMap<Self::Identifier, Self::SigningCommitments>,
+        message: &[u8],
+    ) -> Result<Self, Self::CryptoError> {
+        Ok(Self::new(commitments, message))
+    }
+}
+impl Identifier for frost_secp256k1_tr::Identifier {
+    type CryptoError = frost_secp256k1_tr::Error;
+    fn to_bytes(&self) -> Vec<u8> {
+        self.serialize()
+    }
+
+    fn from_bytes<T: AsRef<[u8]>>(bytes: T) -> Result<Self, Self::CryptoError> {
+        Self::deserialize(bytes.as_ref())
+    }
+
+    fn from_u16(n: u16) -> Result<Self, Self::CryptoError> {
+        Ok(n.try_into()?)
+    }
+}
+impl PublicKeyPackage for frost_secp256k1_tr::keys::PublicKeyPackage {
+    type Signature = frost_secp256k1_tr::Signature;
+    type CryptoError = frost_secp256k1_tr::Error;
+    type VerifyingKey = frost_secp256k1_tr::VerifyingKey;
+    fn verifying_key(&self) -> &Self::VerifyingKey {
+        self.verifying_key()
+    }
+
+    fn serialize(&self) -> Result<Vec<u8>, Self::CryptoError> {
+        Ok(self.serialize()?)
+    }
+
+    fn deserialize(bytes: &[u8]) -> Result<Self, Self::CryptoError> {
+        Ok(Self::deserialize(bytes)?)
+    }
+}
+
+impl VerifyingKey for frost_secp256k1_tr::VerifyingKey {
+    type Signature = frost_secp256k1_tr::Signature;
+    type CryptoError = frost_secp256k1_tr::Error;
+    fn verify(&self, msg: &[u8], signature: &Self::Signature) -> Result<(), Self::CryptoError> {
+        self.verify(msg, signature)
     }
 }

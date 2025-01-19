@@ -1,12 +1,9 @@
-use std::collections::BTreeMap;
-
-use frost_ed25519::Ed25519Sha512;
-use frost_secp256k1::Secp256K1Sha256;
-use frost_secp256k1_tr::Secp256K1Sha256TR;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    crypto::{Cipher, ValidatorIdentityIdentity},
+    crypto::{
+        Cipher, Ed25519Sha512, Secp256K1Sha256, Secp256K1Sha256TR, ValidatorIdentityIdentity,
+    },
     types::{Participants, SessionId},
 };
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,11 +23,11 @@ pub(crate) struct DKGRequest<VII: ValidatorIdentityIdentity, C: Cipher> {
 pub(crate) enum DKGRequestStage<C: Cipher> {
     Part1,
     Part2 {
-        round1_package: C::DKGRound2PackageMap,
+        round1_package_map: C::DKGRound1PackageMap,
     },
     GenPublicKey {
-        round1_packages: C::DKGRound1PackageMap,
-        round2_packages: C::DKGRound2PackageMap,
+        round1_package_map: C::DKGRound1PackageMap,
+        round2_package_map: C::DKGRound2PackageMap,
     },
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]

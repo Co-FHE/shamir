@@ -21,35 +21,33 @@ pub(crate) enum CoordinatorSigningState<C: Cipher> {
     Round2 { signing_package: C::SigningPackage },
     Completed { signature: C::Signature },
 }
-pub(crate) struct CoordinatorSubsession<VI: ValidatorIdentity, C: Cipher> {
+pub(crate) struct CoordinatorSubsession<VII: ValidatorIdentityIdentity, C: Cipher> {
     message: Vec<u8>,
     subsession_id: SubsessionId,
     min_signers: u16,
-    participants: Participants<VI::Identity, C>,
+    participants: Participants<VII, C>,
     state: CoordinatorSigningState<C>,
     public_key: C::PublicKeyPackage,
     pkid: PkId,
     signing_sender: UnboundedSender<(
-        SigningRequest<VI::Identity, C>,
-        oneshot::Sender<SigningResponse<VI::Identity, C>>,
+        SigningRequest<VII, C>,
+        oneshot::Sender<SigningResponse<VII, C>>,
     )>,
-    signature_sender: UnboundedSender<SignatureSuite<VI::Identity, C>>,
 }
-impl<VI: ValidatorIdentity, C: Cipher> CoordinatorSubsession<VI, C> {
+impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
     pub(crate) fn new(
         pkid: PkId,
         public_key: C::PublicKeyPackage,
         min_signers: u16,
-        participants: Participants<VI::Identity, C>,
+        participants: Participants<VII, C>,
         sign_message: Vec<u8>,
         sender: UnboundedSender<(
-            SigningRequest<VI::Identity, C>,
-            oneshot::Sender<SigningResponse<VI::Identity, C>>,
+            SigningRequest<VII, C>,
+            oneshot::Sender<SigningResponse<VII, C>>,
         )>,
-        signature_sender: UnboundedSender<SignatureSuite<VI::Identity, C>>,
     ) -> Result<Self, SessionError<C>> {
         let subsession_id = SubsessionId::new(
-            C::get_crypto_type(),
+            C::crypto_type(),
             min_signers,
             &participants,
             sign_message.clone(),
@@ -61,33 +59,31 @@ impl<VI: ValidatorIdentity, C: Cipher> CoordinatorSubsession<VI, C> {
             participants: participants.clone(),
             pkid: pkid.clone(),
             public_key: public_key.clone(),
-            signature_sender,
             state: CoordinatorSigningState::Round1,
             signing_sender: sender,
             message: sign_message,
         })
     }
-    pub(crate) async fn start_signing<T: AsRef<[u8]>>(mut self, msg: T) {
+    pub(crate) async fn start_signing<T: AsRef<[u8]>>(
+        mut self,
+        msg: T,
+        response_sender: oneshot::Sender<Result<SignatureSuite<VII, C>, SessionError<C>>>,
+    ) {
         tracing::debug!("Starting Signing session with id: {:?}", self.subsession_id);
-        let msg_v = msg.as_ref().to_vec();
+        let msg = msg.as_ref().to_vec();
         tokio::spawn(async move {
-            let signature = loop {
+            let result = 'out: loop {
                 if let Some(signature) = self.state.completed() {
-                    break signature;
+                    break Ok(signature);
                 }
                 tracing::info!("Starting new Signing round");
                 let mut futures = FuturesUnordered::new();
                 for request in self.split_into_single_requests() {
-                    tracing::debug!("Sending DKG request: {:?}", request);
+                    tracing::debug!("Sending Signing request: {:?}", request);
                     let (tx, rx) = oneshot::channel();
                     futures.push(rx);
                     if let Err(e) = self.signing_sender.send((request.clone(), tx)) {
-                        tracing::error!("Error sending DKG state: {}", e);
-                        tracing::debug!("Failed request was: {:?}", request);
-                        tokio::time::sleep(tokio::time::Duration::from_secs(
-                            Settings::global().session.state_channel_retry_interval,
-                        ))
-                        .await;
+                        break 'out Err(SessionError::CoordinatorSessionError(e.to_string()));
                     }
                 }
                 let mut responses = BTreeMap::new();
@@ -101,16 +97,17 @@ impl<VI: ValidatorIdentity, C: Cipher> CoordinatorSubsession<VI, C> {
                             responses.insert(response.base_info.identifier.clone(), response);
                         }
                         Some(Err(e)) => {
-                            tracing::error!("Error receiving DKG state: {}", e);
-                            tracing::debug!("Breaking out of response collection loop");
-                            break;
+                            tracing::error!("Error receiving Signing state: {}", e);
+                            break 'out Err(SessionError::CoordinatorSessionError(e.to_string()));
                         }
                         None => {
                             tracing::error!("DKG state is not completed");
                             tracing::debug!(
                                 "Received None response, breaking out of collection loop"
                             );
-                            break;
+                            break 'out Err(SessionError::CoordinatorSessionError(
+                                "DKG state is not completed".to_string(),
+                            ));
                         }
                     }
                 }
@@ -124,12 +121,7 @@ impl<VI: ValidatorIdentity, C: Cipher> CoordinatorSubsession<VI, C> {
                         }
                         Err(e) => {
                             tracing::error!("Error handling DKG state: {}", e);
-                            tracing::debug!("Retrying after interval");
-                            tokio::time::sleep(tokio::time::Duration::from_secs(
-                                Settings::global().session.state_channel_retry_interval,
-                            ))
-                            .await;
-                            continue;
+                            break 'out Err(e);
                         }
                     }
                 } else {
@@ -138,23 +130,23 @@ impl<VI: ValidatorIdentity, C: Cipher> CoordinatorSubsession<VI, C> {
                         responses.len(),
                         self.participants.len()
                     );
-                    tracing::debug!("Retrying after interval");
-                    tokio::time::sleep(tokio::time::Duration::from_secs(
-                        Settings::global().session.state_channel_retry_interval,
-                    ))
-                    .await;
-                    continue;
+                    break 'out Err(SessionError::CoordinatorSessionError(format!(
+                        "DKG state is not completed, got {}/{} responses",
+                        responses.len(),
+                        self.participants.len()
+                    )));
                 }
-            };
-            if let Err(e) = self.signature_sender.send(SignatureSuite {
+            }
+            .map(|signature| SignatureSuite {
                 signature,
                 pk: self.public_key.clone(),
                 subsession_id: self.subsession_id.clone(),
                 pkid: self.pkid.clone(),
-                message: msg_v,
+                message: msg,
                 participants: self.participants.clone(),
-            }) {
-                tracing::error!("Error sending signing session: {:?}", e);
+            });
+            if let Err(e) = response_sender.send(result) {
+                tracing::error!("Failed to send response: {:?}", e);
             }
         });
     }
@@ -162,7 +154,7 @@ impl<VI: ValidatorIdentity, C: Cipher> CoordinatorSubsession<VI, C> {
     pub(crate) fn get_subsession_id(&self) -> SubsessionId {
         self.subsession_id.clone()
     }
-    pub(crate) fn split_into_single_requests(&self) -> Vec<SigningRequest<VI::Identity, C>> {
+    pub(crate) fn split_into_single_requests(&self) -> Vec<SigningRequest<VII, C>> {
         match self.state.clone() {
             CoordinatorSigningState::Round1 => self
                 .participants
@@ -202,7 +194,7 @@ impl<VI: ValidatorIdentity, C: Cipher> CoordinatorSubsession<VI, C> {
 
     pub(crate) fn handle_response(
         &self,
-        response: BTreeMap<C::Identifier, SigningResponse<VI::Identity, C>>,
+        response: BTreeMap<C::Identifier, SigningResponse<VII, C>>,
     ) -> Result<CoordinatorSigningState<C>, SessionError<C>> {
         match self.state.clone() {
             CoordinatorSigningState::Round1 => {
@@ -232,13 +224,12 @@ impl<VI: ValidatorIdentity, C: Cipher> CoordinatorSubsession<VI, C> {
             }
             CoordinatorSigningState::Round2 { signing_package } => {
                 for (id, _) in self.participants.iter() {
-                    let response =
-                        response
-                            .get(id)
-                            .ok_or(SessionError::InvalidResponse(format!(
-                                "response not found for id: {}",
-                                id.to_string()
-                            )))?;
+                    response
+                        .get(id)
+                        .ok_or(SessionError::InvalidResponse(format!(
+                            "response not found for id: {}",
+                            id.to_string()
+                        )))?;
                 }
                 let mut signature_shares = BTreeMap::new();
                 for (id, resp) in response.iter() {

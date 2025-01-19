@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::{
-    Cipher, CryptoType, Identifier, PackageMap, PkId, PublicKeyPackage, SigningPackage,
+    Cipher, CryptoType, Identifier, PackageMap, PkId, PublicKeyPackage, Signature, SigningPackage,
     VerifyingKey,
 };
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
@@ -29,7 +29,7 @@ impl Cipher for Secp256K1Sha256TR {
     type DKGRound2PackageMap = BTreeMap<Self::Identifier, Self::DKGRound2Package>;
 
     type CryptoError = frost_secp256k1_tr::Error;
-    fn get_crypto_type() -> CryptoType {
+    fn crypto_type() -> CryptoType {
         CryptoType::Secp256k1Tr
     }
     fn aggregate(
@@ -44,12 +44,13 @@ impl Cipher for Secp256K1Sha256TR {
 
     type VerifyingKey = frost_secp256k1_tr::VerifyingKey;
 }
-impl TryFrom<frost_secp256k1_tr::keys::PublicKeyPackage> for PkId {
-    type Error = frost_secp256k1_tr::Error;
-    fn try_from(pk: frost_secp256k1_tr::keys::PublicKeyPackage) -> Result<Self, Self::Error> {
-        Ok(PkId::new(
-            Sha256::digest(&pk.serialize()?.to_vec()).to_vec(),
-        ))
+impl Signature for frost_secp256k1_tr::Signature {
+    type CryptoError = frost_secp256k1_tr::Error;
+    fn to_bytes(&self) -> Result<Vec<u8>, Self::CryptoError> {
+        self.serialize()
+    }
+    fn from_bytes<T: AsRef<[u8]>>(bytes: T) -> Result<Self, Self::CryptoError> {
+        Self::deserialize(bytes.as_ref())
     }
 }
 

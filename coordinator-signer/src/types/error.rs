@@ -17,6 +17,10 @@ pub(crate) enum SessionError<C: Cipher> {
     SessionIdError(#[from] SessionIdError),
     #[error("Invalid response: {0}")]
     InvalidResponse(String),
+    #[error("Coordinator session error: {0}")]
+    CoordinatorSessionError(String),
+    #[error("Signer session error: {0}")]
+    SignerSessionError(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

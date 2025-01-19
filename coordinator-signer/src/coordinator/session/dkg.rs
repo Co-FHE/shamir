@@ -7,7 +7,7 @@ use tokio::sync::{mpsc::UnboundedSender, oneshot};
 use super::{signing::CoordinatorSigningSession, SessionId, ValidatorIdentity};
 use crate::crypto::*;
 use crate::{
-    crypto::{Cipher, CryptoType, ValidatorIdentityIdentity},
+    crypto::{Cipher, CryptoType},
     types::{
         error::SessionError,
         message::{
@@ -33,30 +33,22 @@ pub(crate) enum CoordinatorDKGState<C: Cipher> {
     },
 }
 
-pub(crate) struct CoordinatorDKGSession<VI: ValidatorIdentity, C: Cipher> {
-    session_id: SessionId<VI::Identity>,
+pub(crate) struct CoordinatorDKGSession<VII: ValidatorIdentityIdentity, C: Cipher> {
+    session_id: SessionId<VII>,
     min_signers: u16,
     dkg_state: CoordinatorDKGState<C>,
-    participants: Participants<VI::Identity, C>,
-    dkg_sender: UnboundedSender<(
-        DKGRequest<VI::Identity, C>,
-        oneshot::Sender<DKGResponse<VI::Identity, C>>,
-    )>,
+    participants: Participants<VII, C>,
+    dkg_sender: UnboundedSender<(DKGRequest<VII, C>, oneshot::Sender<DKGResponse<VII, C>>)>,
 }
 
-impl<VI: ValidatorIdentity, C: Cipher> CoordinatorDKGSession<VI, C> {
+impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorDKGSession<VII, C> {
     pub fn new(
-        crypto_type: CryptoType,
-        participants: Vec<(C::Identifier, VI::Identity)>,
+        participants: Participants<VII, C>,
         min_signers: u16,
-        dkg_sender: UnboundedSender<(
-            DKGRequest<VI::Identity, C>,
-            oneshot::Sender<DKGResponse<VI::Identity, C>>,
-        )>,
+        dkg_sender: UnboundedSender<(DKGRequest<VII, C>, oneshot::Sender<DKGResponse<VII, C>>)>,
     ) -> Result<Self, SessionError<C>> {
-        let participants = Participants::new(participants)?;
         participants.check_min_signers(min_signers)?;
-        let session_id = SessionId::new(crypto_type, min_signers, &participants)?;
+        let session_id = SessionId::new(C::crypto_type(), min_signers, &participants)?;
         let dkg_state = CoordinatorDKGState::new();
 
         Ok(Self {
@@ -67,46 +59,39 @@ impl<VI: ValidatorIdentity, C: Cipher> CoordinatorDKGSession<VI, C> {
             dkg_sender,
         })
     }
-    pub(crate) async fn start(
+    pub(crate) fn session_id(&self) -> SessionId<VII> {
+        self.session_id.clone()
+    }
+    pub(crate) async fn start_dkg(
         mut self,
-        completed_sender: oneshot::Sender<CoordinatorSigningSession<VI, C>>,
-        signing_sender: UnboundedSender<(
-            SigningRequest<VI::Identity, C>,
-            oneshot::Sender<SigningResponse<VI::Identity, C>>,
-        )>,
-        signature_sender: UnboundedSender<SignatureSuite<VI::Identity, C>>,
+        response_sender: oneshot::Sender<Result<C::PublicKeyPackage, SessionError<C>>>,
     ) {
-        tracing::debug!("Starting DKG session with id: {:?}", self.session_id);
         tokio::spawn(async move {
-            let signing_session = loop {
+            tracing::debug!("Starting DKG session with id: {:?}", self.session_id);
+            let public_key_package = 'out: loop {
                 if let Some(public_key_package) = self.dkg_state.completed() {
-                    let signing_session = CoordinatorSigningSession::<VI, C>::new(
-                        self.session_id.clone(),
-                        public_key_package,
-                        self.min_signers,
-                        self.participants.clone(),
-                        signing_sender,
-                        signature_sender,
-                    );
-                    if let Err(e) = signing_session {
-                        return Err(e);
-                    }
-                    let signing_session = signing_session.unwrap();
-                    break signing_session;
+                    break 'out Ok(public_key_package);
                 }
                 tracing::info!("Starting new DKG round");
                 let mut futures = FuturesUnordered::new();
-                for request in self.split_into_single_requests()? {
-                    tracing::debug!("Sending DKG request: {:?}", request);
-                    let (tx, rx) = oneshot::channel();
-                    futures.push(rx);
-                    if let Err(e) = self.dkg_sender.send((request.clone(), tx)) {
-                        tracing::error!("Error sending DKG state: {}", e);
-                        tracing::debug!("Failed request was: {:?}", request);
-                        tokio::time::sleep(tokio::time::Duration::from_secs(
-                            Settings::global().session.state_channel_retry_interval,
-                        ))
-                        .await;
+                match self.split_into_single_requests() {
+                    Ok(requests) => {
+                        for request in requests {
+                            tracing::debug!("Sending DKG request: {:?}", request);
+                            let (tx, rx) = oneshot::channel();
+                            futures.push(rx);
+                            if let Err(e) = self.dkg_sender.send((request.clone(), tx)) {
+                                tracing::error!("Error sending DKG request: {}", e);
+                                break 'out Err(SessionError::CoordinatorSessionError(format!(
+                                    "Error sending DKG request: {}",
+                                    e
+                                )));
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("Error splitting into single requests: {}", e);
+                        break 'out Err(e);
                     }
                 }
                 let mut responses = BTreeMap::new();
@@ -121,15 +106,19 @@ impl<VI: ValidatorIdentity, C: Cipher> CoordinatorDKGSession<VI, C> {
                         }
                         Some(Err(e)) => {
                             tracing::error!("Error receiving DKG state: {}", e);
-                            tracing::debug!("Breaking out of response collection loop");
-                            break;
+                            break 'out Err(SessionError::CoordinatorSessionError(format!(
+                                "Error receiving DKG state: {}",
+                                e
+                            )));
                         }
                         None => {
                             tracing::error!("DKG state is not completed");
                             tracing::debug!(
                                 "Received None response, breaking out of collection loop"
                             );
-                            break;
+                            break 'out Err(SessionError::CoordinatorSessionError(
+                                "DKG state is not completed".to_string(),
+                            ));
                         }
                     }
                 }
@@ -143,12 +132,7 @@ impl<VI: ValidatorIdentity, C: Cipher> CoordinatorDKGSession<VI, C> {
                         }
                         Err(e) => {
                             tracing::error!("Error handling DKG state: {}", e);
-                            tracing::debug!("Retrying after interval");
-                            tokio::time::sleep(tokio::time::Duration::from_secs(
-                                Settings::global().session.state_channel_retry_interval,
-                            ))
-                            .await;
-                            continue;
+                            break 'out Err(e);
                         }
                     }
                 } else {
@@ -157,23 +141,19 @@ impl<VI: ValidatorIdentity, C: Cipher> CoordinatorDKGSession<VI, C> {
                         responses.len(),
                         self.participants.len()
                     );
-                    tracing::debug!("Retrying after interval");
-                    tokio::time::sleep(tokio::time::Duration::from_secs(
-                        Settings::global().session.state_channel_retry_interval,
-                    ))
-                    .await;
-                    continue;
+                    break 'out Err(SessionError::CoordinatorSessionError(format!(
+                        "DKG state is not completed, got {}/{} responses",
+                        responses.len(),
+                        self.participants.len()
+                    )));
                 }
             };
-            if let Err(e) = completed_sender.send(signing_session) {
-                tracing::error!("Error sending signing session: {:?}", e.pkid);
+            if let Err(e) = response_sender.send(public_key_package) {
+                tracing::error!("Failed to send response: {:?}", e);
             }
-            return Ok(());
         });
     }
-    fn split_into_single_requests(
-        &self,
-    ) -> Result<Vec<DKGRequest<VI::Identity, C>>, SessionError<C>> {
+    fn split_into_single_requests(&self) -> Result<Vec<DKGRequest<VII, C>>, SessionError<C>> {
         match self.dkg_state.clone() {
             CoordinatorDKGState::Part1 => self
                 .participants
@@ -254,7 +234,7 @@ impl<VI: ValidatorIdentity, C: Cipher> CoordinatorDKGSession<VI, C> {
     }
     fn handle_response(
         &self,
-        response: BTreeMap<C::Identifier, DKGResponse<VI::Identity, C>>,
+        response: BTreeMap<C::Identifier, DKGResponse<VII, C>>,
     ) -> Result<CoordinatorDKGState<C>, SessionError<C>> {
         match self.dkg_state.clone() {
             CoordinatorDKGState::Part1 => {

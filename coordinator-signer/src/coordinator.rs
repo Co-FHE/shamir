@@ -1,4 +1,5 @@
 mod command;
+mod manager;
 mod session;
 use crate::behaviour::{
     CoorBehaviour, CoorBehaviourEvent, CoorToSigRequest, CoorToSigResponse, SigToCoorRequest,
@@ -19,6 +20,7 @@ use libp2p::{
     tcp, yamux, Multiaddr,
 };
 use libp2p::{ping, rendezvous, request_response, PeerId, StreamProtocol};
+use session::SessionWrap;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::str::FromStr;

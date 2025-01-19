@@ -7,7 +7,7 @@ use sha2::{Digest, Sha256};
 use crate::types::error::SessionError;
 
 use super::{
-    Cipher, CryptoType, Identifier, PackageMap, PkId, PublicKeyPackage, SigningPackage,
+    Cipher, CryptoType, Identifier, PackageMap, PkId, PublicKeyPackage, Signature, SigningPackage,
     VerifyingKey,
 };
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
@@ -32,7 +32,7 @@ impl Cipher for Ed25519Sha512 {
     type DKGRound2PackageMap = BTreeMap<Self::Identifier, Self::DKGRound2Package>;
 
     type CryptoError = frost_ed25519::Error;
-    fn get_crypto_type() -> CryptoType {
+    fn crypto_type() -> CryptoType {
         CryptoType::Ed25519
     }
 
@@ -44,6 +44,15 @@ impl Cipher for Ed25519Sha512 {
         public_key: &Self::PublicKeyPackage,
     ) -> Result<Self::Signature, Self::CryptoError> {
         frost_ed25519::aggregate(signing_package, signature_shares, public_key)
+    }
+}
+impl Signature for frost_ed25519::Signature {
+    type CryptoError = frost_ed25519::Error;
+    fn to_bytes(&self) -> Result<Vec<u8>, Self::CryptoError> {
+        self.serialize()
+    }
+    fn from_bytes<T: AsRef<[u8]>>(bytes: T) -> Result<Self, Self::CryptoError> {
+        Self::deserialize(bytes.as_ref())
     }
 }
 impl SigningPackage for frost_ed25519::SigningPackage {

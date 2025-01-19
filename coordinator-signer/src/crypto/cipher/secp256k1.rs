@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::{
-    Cipher, CryptoType, Identifier, PackageMap, PkId, PublicKeyPackage, SigningPackage,
+    Cipher, CryptoType, Identifier, PackageMap, PkId, PublicKeyPackage, Signature, SigningPackage,
     VerifyingKey,
 };
 use std::collections::BTreeMap;
@@ -30,7 +30,7 @@ impl Cipher for Secp256K1Sha256 {
     type DKGRound2PackageMap = BTreeMap<Self::Identifier, Self::DKGRound2Package>;
 
     type CryptoError = frost_secp256k1::Error;
-    fn get_crypto_type() -> CryptoType {
+    fn crypto_type() -> CryptoType {
         CryptoType::Secp256k1
     }
 
@@ -44,6 +44,15 @@ impl Cipher for Secp256K1Sha256 {
     type DKGRound2PackageMapMap = BTreeMap<Self::Identifier, Self::DKGRound2PackageMap>;
 }
 
+impl Signature for frost_secp256k1::Signature {
+    type CryptoError = frost_secp256k1::Error;
+    fn to_bytes(&self) -> Result<Vec<u8>, Self::CryptoError> {
+        self.serialize()
+    }
+    fn from_bytes<T: AsRef<[u8]>>(bytes: T) -> Result<Self, Self::CryptoError> {
+        Self::deserialize(bytes.as_ref())
+    }
+}
 impl SigningPackage for frost_secp256k1::SigningPackage {
     type Identifier = frost_secp256k1::Identifier;
     type SigningCommitments = frost_secp256k1::round1::SigningCommitments;

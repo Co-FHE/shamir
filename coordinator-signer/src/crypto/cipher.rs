@@ -16,7 +16,7 @@ pub use secp256k1_tr::*;
 
 pub trait Cipher: Clone + std::fmt::Debug + Send + Sync + 'static {
     type Identifier: Identifier<CryptoError = Self::CryptoError>;
-    type Signature: Serialize + for<'de> Deserialize<'de> + fmt::Debug + Send + Sync + Clone;
+    type Signature: Signature<CryptoError = Self::CryptoError>;
     type SigningCommitments: Serialize
         + for<'de> Deserialize<'de>
         + fmt::Debug
@@ -59,7 +59,7 @@ pub trait Cipher: Clone + std::fmt::Debug + Send + Sync + 'static {
         + 'static
         + Clone
         + Sized;
-    fn get_crypto_type() -> CryptoType;
+    fn crypto_type() -> CryptoType;
     fn aggregate(
         signing_package: &Self::SigningPackage,
         signature_shares: &BTreeMap<Self::Identifier, Self::SignatureShare>,
@@ -67,6 +67,13 @@ pub trait Cipher: Clone + std::fmt::Debug + Send + Sync + 'static {
     ) -> Result<Self::Signature, Self::CryptoError>;
 }
 
+pub trait Signature:
+    Serialize + for<'de> Deserialize<'de> + fmt::Debug + Clone + Send + Sync
+{
+    type CryptoError: std::error::Error + std::marker::Send + std::marker::Sync + 'static;
+    fn to_bytes(&self) -> Result<Vec<u8>, Self::CryptoError>;
+    fn from_bytes<T: AsRef<[u8]>>(bytes: T) -> Result<Self, Self::CryptoError>;
+}
 pub trait Identifier:
     Serialize + for<'de> Deserialize<'de> + fmt::Debug + Clone + TryFrom<u16> + Ord + Send + Sync
 {

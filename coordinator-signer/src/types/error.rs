@@ -21,6 +21,8 @@ pub(crate) enum SessionError<C: Cipher> {
     CoordinatorSessionError(String),
     #[error("Signer session error: {0}")]
     SignerSessionError(String),
+    #[error("Transform Wraping Message Error: {0}")]
+    TransformWrapingMessageError(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

@@ -12,7 +12,7 @@ use crate::{
 
 use super::{
     Cipher, Participants, PkId, SessionError, SessionId, SignatureSuite, SigningRequest,
-    SigningResponse, SubsessionId, ValidatorIdentity,
+    SigningRequestWrap, SigningResponse, SigningResponseWrap, SubsessionId, ValidatorIdentity,
 };
 
 #[derive(Debug, Clone)]
@@ -30,8 +30,8 @@ pub(crate) struct CoordinatorSubsession<VII: ValidatorIdentityIdentity, C: Ciphe
     public_key: C::PublicKeyPackage,
     pkid: PkId,
     signing_sender: UnboundedSender<(
-        SigningRequest<VII, C>,
-        oneshot::Sender<SigningResponse<VII, C>>,
+        SigningRequestWrap<VII>,
+        oneshot::Sender<SigningResponseWrap<VII>>,
     )>,
 }
 impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
@@ -42,8 +42,8 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
         participants: Participants<VII, C>,
         sign_message: Vec<u8>,
         sender: UnboundedSender<(
-            SigningRequest<VII, C>,
-            oneshot::Sender<SigningResponse<VII, C>>,
+            SigningRequestWrap<VII>,
+            oneshot::Sender<SigningResponseWrap<VII>>,
         )>,
     ) -> Result<Self, SessionError<C>> {
         let subsession_id = SubsessionId::new(
@@ -82,8 +82,18 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
                     tracing::debug!("Sending Signing request: {:?}", request);
                     let (tx, rx) = oneshot::channel();
                     futures.push(rx);
-                    if let Err(e) = self.signing_sender.send((request.clone(), tx)) {
-                        break 'out Err(SessionError::CoordinatorSessionError(e.to_string()));
+                    let request_wrap = SigningRequestWrap::from(request);
+                    match request_wrap {
+                        Ok(request_wrap) => {
+                            if let Err(e) = self.signing_sender.send((request_wrap, tx)) {
+                                break 'out Err(SessionError::CoordinatorSessionError(
+                                    e.to_string(),
+                                ));
+                            }
+                        }
+                        Err(e) => {
+                            break 'out Err(e);
+                        }
                     }
                 }
                 let mut responses = BTreeMap::new();
@@ -93,8 +103,20 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
                     let response = futures.next().await;
                     match response {
                         Some(Ok(response)) => {
-                            tracing::debug!("Received valid response: {:?}", response.clone());
-                            responses.insert(response.base_info.identifier.clone(), response);
+                            let response = SigningResponse::<VII, C>::from(response);
+                            match response {
+                                Ok(response) => {
+                                    tracing::debug!(
+                                        "Received valid response: {:?}",
+                                        response.clone()
+                                    );
+                                    responses
+                                        .insert(response.base_info.identifier.clone(), response);
+                                }
+                                Err(e) => {
+                                    break 'out Err(e);
+                                }
+                            }
                         }
                         Some(Err(e)) => {
                             tracing::error!("Error receiving Signing state: {}", e);

@@ -107,7 +107,11 @@ pub(crate) fn new<VII: ValidatorIdentityIdentity>(
                             session_wrap.new_key(participants, min_signers).await;
                         }
                     },
-                    Instruction::Sign { pkid, msg } => {
+                    Instruction::Sign {
+                        pkid,
+                        msg,
+                        signature_response_onshot,
+                    } => {
                         session_wrap.sign(pkid, msg).await;
                     }
                 }
@@ -116,7 +120,7 @@ pub(crate) fn new<VII: ValidatorIdentityIdentity>(
                 continue;
             }
             tokio::select! {
-                request = dkg_session_receiver.recv() => {
+                request = dkg_session_receiver_cipher.recv() => {
                     if let Some(request) = request {
                         session_wrap.handle_dkg_request(request).await;
                     } else {
@@ -124,7 +128,7 @@ pub(crate) fn new<VII: ValidatorIdentityIdentity>(
                         continue;
                     }
                 }
-                request = signing_session_receiver.recv() => {
+                request = signing_session_receiver_cipher.recv() => {
                     if let Some(request) = request {
                         session_wrap.handle_signing_request(request).await;
                     } else {

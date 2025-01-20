@@ -64,23 +64,6 @@ struct SessionWrap<VII: ValidatorIdentityIdentity, C: Cipher> {
         FuturesUnordered<oneshot::Receiver<Result<SignatureSuite<VII, C>, SessionError<C>>>>,
 
     instruction_receiver: UnboundedReceiver<InstructionCipher<VII>>,
-
-    cipher_dkg_session_receiver:
-        UnboundedReceiver<(DKGRequest<VII, C>, oneshot::Sender<DKGResponse<VII, C>>)>,
-    cipher_dkg_session_sender:
-        UnboundedSender<(DKGRequest<VII, C>, oneshot::Sender<DKGResponse<VII, C>>)>,
-    cipher_signing_session_sender: UnboundedSender<(
-        SigningRequest<VII, C>,
-        oneshot::Sender<SigningResponse<VII, C>>,
-    )>,
-    cipher_signing_session_receiver: UnboundedReceiver<(
-        SigningRequest<VII, C>,
-        oneshot::Sender<SigningResponse<VII, C>>,
-    )>,
-
-    cipher_dkg_oneshot_mapping: HashMap<SessionId<VII>, oneshot::Sender<DKGResponse<VII, C>>>,
-    cipher_signing_oneshot_mapping:
-        HashMap<SessionId<VII>, oneshot::Sender<SigningResponse<VII, C>>>,
 }
 
 impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
@@ -95,16 +78,10 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
         )>,
         instruction_receiver: UnboundedReceiver<InstructionCipher<VII>>,
     ) -> Self {
-        let (cipher_dkg_session_sender, cipher_dkg_session_receiver) = unbounded_channel();
-        let (cipher_signing_session_sender, cipher_signing_session_receiver) = unbounded_channel();
         Self {
             signing_sessions: HashMap::new(),
             dkg_session_sender,
             signing_session_sender,
-            cipher_dkg_session_sender,
-            cipher_dkg_session_receiver,
-            cipher_signing_session_sender,
-            cipher_signing_session_receiver,
             session_id_key_map: HashMap::new(),
             dkg_futures: FuturesUnordered::new(),
             instruction_receiver,
@@ -132,7 +109,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
         let session = DkgSession::<VII, C>::new(
             participants.clone(),
             min_signers,
-            self.cipher_dkg_session_sender.clone(),
+            self.dkg_session_sender.clone(),
         )?;
         let session_id = session.session_id().clone();
         let (tx, rx) = oneshot::channel();
@@ -173,24 +150,10 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
                     Some(Result::Ok(signing_session))= self.signing_futures.next() => {
                         self.handle_signing_future(signing_session).await;
                     }
-                    Some(cipher_dkg_request) = self.cipher_dkg_session_receiver.recv() => {
-                        self.handle_cipher_dkg_request(cipher_dkg_request).await;
-                    }
-                    Some(cipher_signing_request) = self.cipher_signing_session_receiver.recv() => {
-                        self.handle_cipher_signing_request(cipher_signing_request).await;
-                    }
 
                 }
             }
         });
-    }
-    async fn handle_cipher_dkg_request(
-        &mut self,
-        dkg_request: DKGRequest<VII, C>,
-    ) -> Result<(), SessionError<C>> {
-        let session_id = dkg_request.session_id();
-        let dkg_request = DKGResponseWrap::from(dkg_request.0);
-        return Ok(());
     }
     async fn handle_instruction(&mut self, instruction: InstructionCipher<VII>) {
         match instruction {
@@ -276,7 +239,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
                         dkg_info.public_key_package.clone(),
                         dkg_info.min_signers,
                         dkg_info.participants.clone(),
-                        self.cipher_signing_session_sender.clone(),
+                        self.signing_session_sender.clone(),
                     )?,
                 );
                 let oneshot = self.session_id_key_map.remove(&dkg_info.session_id);

@@ -5,6 +5,7 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
 use super::{signing::CoordinatorSigningSession, SessionId, ValidatorIdentity};
+use super::{DKGRequestWrap, DKGResponseWrap};
 use crate::crypto::*;
 use crate::{
     crypto::{Cipher, CryptoType},
@@ -38,7 +39,7 @@ pub(crate) struct CoordinatorDKGSession<VII: ValidatorIdentityIdentity, C: Ciphe
     min_signers: u16,
     dkg_state: CoordinatorDKGState<C>,
     participants: Participants<VII, C>,
-    dkg_sender: UnboundedSender<(DKGRequest<VII, C>, oneshot::Sender<DKGResponse<VII, C>>)>,
+    dkg_sender: UnboundedSender<(DKGRequestWrap<VII>, oneshot::Sender<DKGResponseWrap<VII>>)>,
 }
 #[derive(Debug, Clone)]
 pub(crate) struct DKGInfo<VII: ValidatorIdentityIdentity, C: Cipher> {
@@ -51,7 +52,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorDKGSession<VII, C> {
     pub fn new(
         participants: Participants<VII, C>,
         min_signers: u16,
-        dkg_sender: UnboundedSender<(DKGRequest<VII, C>, oneshot::Sender<DKGResponse<VII, C>>)>,
+        dkg_sender: UnboundedSender<(DKGRequestWrap<VII>, oneshot::Sender<DKGResponseWrap<VII>>)>,
     ) -> Result<Self, SessionError<C>> {
         participants.check_min_signers(min_signers)?;
         let session_id = SessionId::new(C::crypto_type(), min_signers, &participants)?;
@@ -93,12 +94,21 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorDKGSession<VII, C> {
                             tracing::debug!("Sending DKG request: {:?}", request);
                             let (tx, rx) = oneshot::channel();
                             futures.push(rx);
-                            if let Err(e) = self.dkg_sender.send((request.clone(), tx)) {
-                                tracing::error!("Error sending DKG request: {}", e);
-                                break 'out Err(SessionError::CoordinatorSessionError(format!(
-                                    "Error sending DKG request: {}",
-                                    e
-                                )));
+                            let request_wrap = DKGRequestWrap::from(request);
+                            match request_wrap {
+                                Ok(request_wrap) => {
+                                    if let Err(e) = self.dkg_sender.send((request_wrap.clone(), tx))
+                                    {
+                                        tracing::error!("Error sending DKG request: {}", e);
+                                        break 'out Err(SessionError::CoordinatorSessionError(
+                                            format!("Error sending DKG request: {}", e),
+                                        ));
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::error!("{}", e);
+                                    break 'out Err(e);
+                                }
                             }
                         }
                     }
@@ -115,7 +125,16 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorDKGSession<VII, C> {
                     match response {
                         Some(Ok(response)) => {
                             tracing::debug!("Received valid response: {:?}", response.clone());
-                            responses.insert(response.base_info.identifier.clone(), response);
+                            match DKGResponse::<VII, C>::from(response) {
+                                Ok(response) => {
+                                    responses
+                                        .insert(response.base_info.identifier.clone(), response);
+                                }
+                                Err(e) => {
+                                    tracing::error!("Error transforming DKG response: {}", e);
+                                    break 'out Err(e);
+                                }
+                            }
                         }
                         Some(Err(e)) => {
                             tracing::error!("Error receiving DKG state: {}", e);

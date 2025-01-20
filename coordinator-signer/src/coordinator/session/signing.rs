@@ -10,7 +10,7 @@ use crate::{
     },
 };
 
-use super::{Cipher, SessionId, ValidatorIdentity};
+use super::{Cipher, SessionId, SigningRequestWrap, SigningResponseWrap, ValidatorIdentity};
 
 mod subsession;
 pub(crate) struct CoordinatorSigningSession<VII: ValidatorIdentityIdentity, C: Cipher> {
@@ -19,8 +19,8 @@ pub(crate) struct CoordinatorSigningSession<VII: ValidatorIdentityIdentity, C: C
     pub(crate) min_signers: u16,
     pub(crate) participants: Participants<VII, C>,
     signing_sender: UnboundedSender<(
-        SigningRequest<VII, C>,
-        oneshot::Sender<SigningResponse<VII, C>>,
+        SigningRequestWrap<VII>,
+        oneshot::Sender<SigningResponseWrap<VII>>,
     )>,
 }
 impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSigningSession<VII, C> {
@@ -29,8 +29,8 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSigningSession<VII, C
         min_signers: u16,
         participants: Participants<VII, C>,
         signing_sender: UnboundedSender<(
-            SigningRequest<VII, C>,
-            oneshot::Sender<SigningResponse<VII, C>>,
+            SigningRequestWrap<VII>,
+            oneshot::Sender<SigningResponseWrap<VII>>,
         )>,
     ) -> Result<Self, SessionError<C>> {
         Ok(Self {

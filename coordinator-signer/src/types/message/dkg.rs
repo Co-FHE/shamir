@@ -7,7 +7,7 @@ use crate::{
         Cipher, CryptoType, Ed25519Sha512, Secp256K1Sha256, Secp256K1Sha256TR,
         ValidatorIdentityIdentity,
     },
-    types::{Participants, SessionId},
+    types::{error::SessionError, Participants, SessionId},
 };
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct DKGBaseMessage<VII: ValidatorIdentityIdentity, C: Cipher> {
@@ -75,45 +75,102 @@ fn try_cast_request<VII: ValidatorIdentityIdentity, C: Cipher, T: Cipher>(
 ) -> Option<&DKGRequest<VII, T>> {
     r.downcast_ref::<DKGRequest<VII, T>>()
 }
+
 impl<VII: ValidatorIdentityIdentity> DKGResponseWrap<VII> {
-    pub(crate) fn from<C: Cipher>(r: DKGResponse<VII, C>) -> Option<Self> {
+    pub(crate) fn from<C: Cipher>(r: DKGResponse<VII, C>) -> Result<Self, SessionError<C>> {
         match C::crypto_type() {
-            CryptoType::Ed25519 => Some(DKGResponseWrap::Ed25519(
+            CryptoType::Ed25519 => Ok(DKGResponseWrap::Ed25519(
                 try_cast_response::<VII, C, Ed25519Sha512>(&r)
-                    .unwrap()
+                    .ok_or(SessionError::<C>::TransformWrapingMessageError(
+                        "Error transforming DKG response to DKGResponseWrap".to_string(),
+                    ))?
                     .clone(),
             )),
-            CryptoType::Secp256k1 => Some(DKGResponseWrap::Secp256k1(
+            CryptoType::Secp256k1 => Ok(DKGResponseWrap::Secp256k1(
                 try_cast_response::<VII, C, Secp256K1Sha256>(&r)
-                    .unwrap()
+                    .ok_or(SessionError::<C>::TransformWrapingMessageError(
+                        "Error transforming DKG response to DKGResponseWrap".to_string(),
+                    ))?
                     .clone(),
             )),
-            CryptoType::Secp256k1Tr => Some(DKGResponseWrap::Secp256k1Tr(
+            CryptoType::Secp256k1Tr => Ok(DKGResponseWrap::Secp256k1Tr(
                 try_cast_response::<VII, C, Secp256K1Sha256TR>(&r)
-                    .unwrap()
+                    .ok_or(SessionError::<C>::TransformWrapingMessageError(
+                        "Error transforming DKG response to DKGResponseWrap".to_string(),
+                    ))?
                     .clone(),
             )),
         }
     }
 }
 impl<VII: ValidatorIdentityIdentity> DKGRequestWrap<VII> {
-    pub(crate) fn from<C: Cipher>(r: DKGRequest<VII, C>) -> Option<Self> {
+    pub(crate) fn from<C: Cipher>(r: DKGRequest<VII, C>) -> Result<Self, SessionError<C>> {
         match C::crypto_type() {
-            CryptoType::Ed25519 => Some(DKGRequestWrap::Ed25519(
+            CryptoType::Ed25519 => Ok(DKGRequestWrap::Ed25519(
                 try_cast_request::<VII, C, Ed25519Sha512>(&r)
-                    .unwrap()
+                    .ok_or(SessionError::<C>::TransformWrapingMessageError(
+                        "Error transforming DKG request to DKGRequestWrap".to_string(),
+                    ))?
                     .clone(),
             )),
-            CryptoType::Secp256k1 => Some(DKGRequestWrap::Secp256k1(
+            CryptoType::Secp256k1 => Ok(DKGRequestWrap::Secp256k1(
                 try_cast_request::<VII, C, Secp256K1Sha256>(&r)
-                    .unwrap()
+                    .ok_or(SessionError::<C>::TransformWrapingMessageError(
+                        "Error transforming DKG request to DKGRequestWrap".to_string(),
+                    ))?
                     .clone(),
             )),
-            CryptoType::Secp256k1Tr => Some(DKGRequestWrap::Secp256k1Tr(
+            CryptoType::Secp256k1Tr => Ok(DKGRequestWrap::Secp256k1Tr(
                 try_cast_request::<VII, C, Secp256K1Sha256TR>(&r)
-                    .unwrap()
+                    .ok_or(SessionError::<C>::TransformWrapingMessageError(
+                        "Error transforming DKG request to DKGRequestWrap".to_string(),
+                    ))?
                     .clone(),
             )),
+        }
+    }
+}
+impl<VII: ValidatorIdentityIdentity, C: Cipher> DKGRequest<VII, C> {
+    pub(crate) fn from(r: DKGRequestWrap<VII>) -> Result<DKGRequest<VII, C>, SessionError<C>> {
+        match r {
+            DKGRequestWrap::Ed25519(r) => Ok(try_cast_request::<VII, Ed25519Sha512, C>(&r)
+                .ok_or(SessionError::<C>::TransformWrapingMessageError(
+                    "Error transforming DKG requestWrap to DKGRequest".to_string(),
+                ))?
+                .clone()),
+            DKGRequestWrap::Secp256k1(r) => Ok(try_cast_request::<VII, Secp256K1Sha256, C>(&r)
+                .ok_or(SessionError::<C>::TransformWrapingMessageError(
+                    "Error transforming DKG requestWrap to DKGRequest".to_string(),
+                ))?
+                .clone()),
+            DKGRequestWrap::Secp256k1Tr(r) => Ok(try_cast_request::<VII, Secp256K1Sha256TR, C>(&r)
+                .ok_or(SessionError::<C>::TransformWrapingMessageError(
+                    "Error transforming DKG requestWrap to DKGRequest".to_string(),
+                ))?
+                .clone()),
+        }
+    }
+}
+impl<VII: ValidatorIdentityIdentity, C: Cipher> DKGResponse<VII, C> {
+    pub(crate) fn from(r: DKGResponseWrap<VII>) -> Result<DKGResponse<VII, C>, SessionError<C>> {
+        match r {
+            DKGResponseWrap::Ed25519(r) => Ok(try_cast_response::<VII, Ed25519Sha512, C>(&r)
+                .ok_or(SessionError::<C>::TransformWrapingMessageError(
+                    "Error transforming DKG responseWrap to DKGResponse".to_string(),
+                ))?
+                .clone()),
+            DKGResponseWrap::Secp256k1(r) => Ok(try_cast_response::<VII, Secp256K1Sha256, C>(&r)
+                .ok_or(SessionError::<C>::TransformWrapingMessageError(
+                    "Error transforming DKG responseWrap to DKGResponse".to_string(),
+                ))?
+                .clone()),
+            DKGResponseWrap::Secp256k1Tr(r) => {
+                Ok(try_cast_response::<VII, Secp256K1Sha256TR, C>(&r)
+                    .ok_or(SessionError::<C>::TransformWrapingMessageError(
+                        "Error transforming DKG responseWrap to DKGResponse".to_string(),
+                    ))?
+                    .clone())
+            }
         }
     }
 }

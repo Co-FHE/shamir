@@ -83,6 +83,9 @@ impl PublicKeyPackage for frost_secp256k1::keys::PublicKeyPackage {
     type Signature = frost_secp256k1::Signature;
     type CryptoError = frost_secp256k1::Error;
     type VerifyingKey = frost_secp256k1::VerifyingKey;
+    type VerifyingShare = frost_secp256k1::keys::VerifyingShare;
+    type Identifier = frost_secp256k1::Identifier;
+
     fn verifying_key(&self) -> &Self::VerifyingKey {
         self.verifying_key()
     }
@@ -94,6 +97,10 @@ impl PublicKeyPackage for frost_secp256k1::keys::PublicKeyPackage {
     fn deserialize(bytes: &[u8]) -> Result<Self, Self::CryptoError> {
         Ok(Self::deserialize(bytes)?)
     }
+
+    fn verifying_shares(&self) -> &BTreeMap<Self::Identifier, Self::VerifyingShare> {
+        self.verifying_shares()
+    }
 }
 
 impl VerifyingKey for frost_secp256k1::VerifyingKey {
@@ -101,5 +108,12 @@ impl VerifyingKey for frost_secp256k1::VerifyingKey {
     type CryptoError = frost_secp256k1::Error;
     fn verify(&self, msg: &[u8], signature: &Self::Signature) -> Result<(), Self::CryptoError> {
         self.verify(msg, signature)
+    }
+    fn serialize(&self) -> Result<Vec<u8>, Self::CryptoError> {
+        self.serialize()
+    }
+
+    fn deserialize(bytes: &[u8]) -> Result<Self, Self::CryptoError> {
+        Self::deserialize(bytes)
     }
 }

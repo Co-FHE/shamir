@@ -67,7 +67,9 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
     pub(crate) async fn start_signing<T: AsRef<[u8]>>(
         mut self,
         msg: T,
-        response_sender: oneshot::Sender<Result<SignatureSuite<VII, C>, SessionError<C>>>,
+        response_sender: oneshot::Sender<
+            Result<SignatureSuite<VII, C>, (Option<SubsessionId>, SessionError<C>)>,
+        >,
     ) {
         tracing::debug!("Starting Signing session with id: {:?}", self.subsession_id);
         let msg = msg.as_ref().to_vec();
@@ -167,13 +169,14 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
                 message: msg,
                 participants: self.participants.clone(),
             });
-            if let Err(e) = response_sender.send(result) {
+            if let Err(e) = response_sender.send(result.map_err(|e| (Some(self.subsession_id), e)))
+            {
                 tracing::error!("Failed to send response: {:?}", e);
             }
         });
     }
 
-    pub(crate) fn get_subsession_id(&self) -> SubsessionId {
+    pub(crate) fn subsession_id(&self) -> SubsessionId {
         self.subsession_id.clone()
     }
     pub(crate) fn split_into_single_requests(&self) -> Vec<SigningRequest<VII, C>> {

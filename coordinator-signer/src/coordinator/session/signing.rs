@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use subsession::CoordinatorSubsession;
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
@@ -46,7 +48,10 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSigningSession<VII, C
     pub(crate) async fn start_new_signing<T: AsRef<[u8]>>(
         &mut self,
         msg: T,
-        response: oneshot::Sender<Result<SignatureSuite<VII, C>, SessionError<C>>>,
+        response: oneshot::Sender<
+            Result<SignatureSuite<VII, C>, (Option<SubsessionId>, SessionError<C>)>,
+        >,
+        callback: impl FnOnce(SubsessionId),
     ) {
         let msg = msg.as_ref().to_vec();
         let subsession_result = CoordinatorSubsession::<VII, C>::new(
@@ -58,9 +63,13 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSigningSession<VII, C
             self.signing_sender.clone(),
         );
         match subsession_result {
-            Ok(subsession) => subsession.start_signing(msg, response).await,
+            Ok(subsession) => {
+                let subsession_id = subsession.subsession_id();
+                callback(subsession_id);
+                subsession.start_signing(msg, response).await
+            }
             Err(e) => {
-                if let Err(e) = response.send(Err(e)) {
+                if let Err(e) = response.send(Err((None, e))) {
                     tracing::error!("Failed to send error response: {:?}", e);
                 }
             }

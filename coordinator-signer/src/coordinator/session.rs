@@ -1,5 +1,6 @@
 mod dkg;
 mod signing;
+use super::manager::SessionManagerError;
 use super::{
     Cipher, CryptoType, Ed25519Sha512, PkId, PublicKeyPackage, Secp256K1Sha256, Secp256K1Sha256TR,
     Signature, ValidatorIdentity, ValidatorIdentityIdentity,
@@ -14,6 +15,7 @@ use crate::types::{
     },
     Participants, SessionId, SignatureSuite,
 };
+use crate::types::{SignatureSuiteInfo, SubsessionId};
 use dkg::{CoordinatorDKGSession as DkgSession, DKGInfo};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
@@ -23,7 +25,6 @@ use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
     oneshot,
 };
-
 pub(crate) enum InstructionCipher<VII: ValidatorIdentityIdentity> {
     IsCryptoType {
         crypto_type: CryptoType,
@@ -36,15 +37,19 @@ pub(crate) enum InstructionCipher<VII: ValidatorIdentityIdentity> {
     NewKey {
         participants: Vec<(u16, VII)>,
         min_signers: u16,
-        pkid_response_onshot: oneshot::Sender<Result<Vec<u8>, String>>,
+        pkid_response_onshot: oneshot::Sender<Result<PkId, SessionManagerError>>,
     },
     Sign {
-        pkid: Vec<u8>,
+        pkid: PkId,
         msg: Vec<u8>,
-        signature_response_onshot: oneshot::Sender<Result<Vec<u8>, String>>,
+        signature_response_onshot:
+            oneshot::Sender<Result<SignatureSuiteInfo<VII>, SessionManagerError>>,
+    },
+    ListPkIds {
+        list_pkids_response_onshot: oneshot::Sender<Vec<PkId>>,
     },
 }
-struct SessionWrap<VII: ValidatorIdentityIdentity, C: Cipher> {
+pub(crate) struct SessionWrap<VII: ValidatorIdentityIdentity, C: Cipher> {
     signing_sessions: HashMap<PkId, SigningSession<VII, C>>,
 
     dkg_session_sender:
@@ -54,18 +59,21 @@ struct SessionWrap<VII: ValidatorIdentityIdentity, C: Cipher> {
         oneshot::Sender<SigningResponseWrap<VII>>,
     )>,
 
-    session_id_key_map: HashMap<SessionId<VII>, oneshot::Sender<Result<Vec<u8>, String>>>,
-    pkid_signaturesuite_map: HashMap<PkId, oneshot::Sender<Result<Vec<u8>, String>>>,
+    session_id_key_map: HashMap<SessionId<VII>, oneshot::Sender<Result<PkId, SessionManagerError>>>,
+    subsession_id_signaturesuite_map: HashMap<
+        SubsessionId,
+        oneshot::Sender<Result<SignatureSuiteInfo<VII>, SessionManagerError>>,
+    >,
 
     dkg_futures: FuturesUnordered<
         oneshot::Receiver<Result<DKGInfo<VII, C>, (SessionId<VII>, SessionError<C>)>>,
     >,
-    signing_futures:
-        FuturesUnordered<oneshot::Receiver<Result<SignatureSuite<VII, C>, SessionError<C>>>>,
+    signing_futures: FuturesUnordered<
+        oneshot::Receiver<Result<SignatureSuite<VII, C>, (Option<SubsessionId>, SessionError<C>)>>,
+    >,
 
     instruction_receiver: UnboundedReceiver<InstructionCipher<VII>>,
 }
-
 impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
     pub(crate) fn new(
         dkg_session_sender: UnboundedSender<(
@@ -86,10 +94,10 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
             dkg_futures: FuturesUnordered::new(),
             instruction_receiver,
             signing_futures: FuturesUnordered::new(),
-            pkid_signaturesuite_map: HashMap::new(),
+            subsession_id_signaturesuite_map: HashMap::new(),
         }
     }
-    pub(crate) async fn new_key<IT>(
+    async fn new_key<IT>(
         &mut self,
         participants: Vec<(IT, VII)>,
         min_signers: u16,
@@ -117,10 +125,13 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
         session.start_dkg(tx).await;
         return Ok(session_id);
     }
-    pub(crate) async fn sign<T: AsRef<[u8]>>(
+    async fn sign<T: AsRef<[u8]>>(
         &mut self,
         pkid_raw: T,
         msg: Vec<u8>,
+        signature_response_onshot: oneshot::Sender<
+            Result<SignatureSuiteInfo<VII>, SessionManagerError>,
+        >,
     ) -> Result<(), SessionError<C>> {
         let pkid = PkId::new(pkid_raw.as_ref().to_vec());
         let signing_session =
@@ -131,7 +142,12 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
                 ))?;
         let (tx, rx) = oneshot::channel();
         self.signing_futures.push(rx);
-        signing_session.start_new_signing(msg, tx).await;
+        signing_session
+            .start_new_signing(msg, tx, |subsession_id| {
+                self.subsession_id_signaturesuite_map
+                    .insert(subsession_id, signature_response_onshot);
+            })
+            .await;
         return Ok(());
     }
     pub(crate) fn find_pkid(&self, pkid: PkId) -> bool {
@@ -181,14 +197,15 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
             } => {
                 let session_id = self
                     .new_key(participants, min_signers, |id| C::Identifier::from_u16(id))
-                    .await;
+                    .await
+                    .map_err(|e| SessionManagerError::SessionError(e.to_string()));
                 match session_id {
                     Ok(session_id) => {
                         self.session_id_key_map
                             .insert(session_id, pkid_response_onshot);
                     }
                     Err(e) => {
-                        if let Err(e) = pkid_response_onshot.send(Err(e.to_string())) {
+                        if let Err(e) = pkid_response_onshot.send(Err(e)) {
                             tracing::error!("Error sending pkid response: {:?}", e);
                         }
                     }
@@ -199,25 +216,15 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
                 msg,
                 signature_response_onshot,
             } => {
-                let pkid = PkId::new(pkid);
-                let session = self
-                    .signing_sessions
-                    .get_mut(&pkid)
-                    .ok_or("Signing session not found".to_string());
-
-                match session {
-                    Ok(session) => {
-                        let (tx, rx) = oneshot::channel();
-                        self.signing_futures.push(rx);
-                        self.pkid_signaturesuite_map
-                            .insert(pkid, signature_response_onshot);
-                        session.start_new_signing(msg, tx).await;
-                    }
-                    Err(e) => {
-                        if let Err(e) = signature_response_onshot.send(Err(e.to_string())) {
-                            tracing::error!("Error sending signature response: {:?}", e);
-                        }
-                    }
+                self.sign(pkid.to_bytes(), msg, signature_response_onshot)
+                    .await;
+            }
+            InstructionCipher::ListPkIds {
+                list_pkids_response_onshot,
+            } => {
+                let pkids = self.signing_sessions.keys().cloned().collect::<Vec<_>>();
+                if let Err(e) = list_pkids_response_onshot.send(pkids) {
+                    tracing::error!("Error sending pkids response: {:?}", e);
                 }
             }
         }
@@ -244,22 +251,33 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
                 );
                 let oneshot = self.session_id_key_map.remove(&dkg_info.session_id);
                 if let Some(oneshot) = oneshot {
-                    oneshot
-                        .send(
-                            dkg_info
-                                .public_key_package
-                                .pkid()
-                                .map(|pkid| pkid.to_bytes().to_vec())
-                                .map_err(|e| e.to_string()),
-                        )
-                        .unwrap();
+                    if let Err(e) = oneshot.send(
+                        dkg_info
+                            .public_key_package
+                            .pkid()
+                            .map_err(|e| SessionManagerError::SessionError(e.to_string())),
+                    ) {
+                        tracing::error!("Error sending pkid response: {:?}", e);
+                        return Err(SessionError::SendOneshotError(format!(
+                            "Error sending pkid response: {:?}",
+                            e
+                        )));
+                    }
                 }
             }
             Err(e) => {
                 tracing::error!("Error in DKG future: {:?}", e);
                 let oneshot = self.session_id_key_map.remove(&e.0);
                 if let Some(oneshot) = oneshot {
-                    oneshot.send(Err(e.1.to_string())).unwrap();
+                    if let Err(e) =
+                        oneshot.send(Err(SessionManagerError::SessionError(e.1.to_string())))
+                    {
+                        tracing::error!("Error sending pkid response: {:?}", e);
+                        return Err(SessionError::SendOneshotError(format!(
+                            "Error sending pkid response: {:?}",
+                            e
+                        )));
+                    }
                 }
             }
         }
@@ -268,8 +286,58 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
     }
     async fn handle_signing_future(
         &mut self,
-        signing_session: Result<SignatureSuite<VII, C>, SessionError<C>>,
+        signing_session: Result<SignatureSuite<VII, C>, (Option<SubsessionId>, SessionError<C>)>,
     ) -> Result<(), SessionError<C>> {
-        return Ok(());
+        match signing_session {
+            Ok(signature_suite) => {
+                let subsession_id = signature_suite.subsession_id;
+                let oneshot = self.subsession_id_signaturesuite_map.remove(&subsession_id);
+                if let Some(oneshot) = oneshot {
+                    if let Err(e) = oneshot.send(
+                        signature_suite
+                            .to_signature_info()
+                            .map_err(|e| SessionManagerError::SessionError(e.to_string())),
+                    ) {
+                        tracing::error!("Error sending signature response: {:?}", e);
+                        return Err(SessionError::SendOneshotError(format!(
+                            "Error sending signature response: {:?}",
+                            e
+                        )));
+                    }
+                } else {
+                    tracing::error!("Subsession id not found: {:?}", subsession_id);
+                    return Err(SessionError::SignerSessionError(format!(
+                        "Subsession id not found: {:?}",
+                        subsession_id
+                    )));
+                }
+            }
+            Err((Some(subsession_id), e)) => {
+                tracing::error!("Error in signing future: {:?}", e);
+                let oneshot = self.subsession_id_signaturesuite_map.remove(&subsession_id);
+                if let Some(oneshot) = oneshot {
+                    if let Err(e) =
+                        oneshot.send(Err(SessionManagerError::SessionError(e.to_string())))
+                    {
+                        tracing::error!("Error sending signature response: {:?}", e);
+                        return Err(SessionError::SendOneshotError(format!(
+                            "Error sending signature response: {:?}",
+                            e
+                        )));
+                    }
+                }
+            }
+            Err((None, e)) => {
+                tracing::error!(
+                    "Error in signing future before generating subsession id: {:?}",
+                    e
+                );
+                return Err(SessionError::SignerSessionError(format!(
+                    "Error in signing future before generating subsession id: {:?}",
+                    e
+                )));
+            }
+        }
+        Ok(())
     }
 }

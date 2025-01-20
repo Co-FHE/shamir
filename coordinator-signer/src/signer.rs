@@ -1,3 +1,6 @@
+mod command;
+mod manager;
+mod session;
 use libp2p::request_response::ProtocolSupport;
 use libp2p::{ping, rendezvous, request_response, PeerId, StreamProtocol};
 use std::collections::HashMap;

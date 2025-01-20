@@ -152,6 +152,8 @@ pub trait PublicKeyPackage:
     type Signature;
     type CryptoError;
     type VerifyingKey: VerifyingKey<Signature = Self::Signature, CryptoError = Self::CryptoError>;
+    type VerifyingShare;
+    type Identifier;
     fn verifying_key(&self) -> &Self::VerifyingKey;
     fn serialize(&self) -> Result<Vec<u8>, Self::CryptoError>;
     fn deserialize(bytes: &[u8]) -> Result<Self, Self::CryptoError>;
@@ -160,10 +162,12 @@ pub trait PublicKeyPackage:
             Sha256::digest(<Self as PublicKeyPackage>::serialize(&self)?).to_vec(),
         ))
     }
+    fn verifying_shares(&self) -> &BTreeMap<Self::Identifier, Self::VerifyingShare>;
 }
-
 pub trait VerifyingKey: Serialize + for<'de> Deserialize<'de> + fmt::Debug + Clone {
     type Signature;
     type CryptoError;
     fn verify(&self, message: &[u8], signature: &Self::Signature) -> Result<(), Self::CryptoError>;
+    fn serialize(&self) -> Result<Vec<u8>, Self::CryptoError>;
+    fn deserialize(bytes: &[u8]) -> Result<Self, Self::CryptoError>;
 }

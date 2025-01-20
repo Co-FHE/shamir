@@ -29,6 +29,7 @@ pub(crate) enum SigningRequestStage<C: Cipher> {
     Round2 { signing_package: C::SigningPackage },
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "cipher_type")]
 pub(crate) enum SigningRequestWrap<VII: ValidatorIdentityIdentity> {
     Ed25519(SigningRequest<VII, Ed25519Sha512>),
     Secp256k1(SigningRequest<VII, Secp256K1Sha256>),
@@ -42,6 +43,7 @@ pub(crate) struct SigningResponse<VII: ValidatorIdentityIdentity, C: Cipher> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "cipher_type")]
 pub(crate) enum SigningResponseStage<C: Cipher> {
     Round1 { commitments: C::SigningCommitments },
     Round2 { signature_share: C::SignatureShare },
@@ -93,6 +95,53 @@ impl<VII: ValidatorIdentityIdentity> SigningResponseWrap<VII> {
     }
 }
 impl<VII: ValidatorIdentityIdentity> SigningRequestWrap<VII> {
+    pub(crate) fn identity(&self) -> &VII {
+        match self {
+            SigningRequestWrap::Ed25519(r) => &r.base_info.identity,
+            SigningRequestWrap::Secp256k1(r) => &r.base_info.identity,
+            SigningRequestWrap::Secp256k1Tr(r) => &r.base_info.identity,
+        }
+    }
+
+    pub(crate) fn failure(&self, msg: String) -> SigningResponseWrap<VII> {
+        match self {
+            SigningRequestWrap::Ed25519(r) => SigningResponseWrap::Ed25519(SigningResponse {
+                base_info: SigningBaseMessage {
+                    pkid: r.base_info.pkid.clone(),
+                    subsession_id: r.base_info.subsession_id,
+                    public_key: r.base_info.public_key.clone(),
+                    participants: r.base_info.participants.clone(),
+                    identifier: r.base_info.identifier,
+                    identity: r.base_info.identity.clone(),
+                },
+                stage: SigningResponseStage::Failure(msg),
+            }),
+            SigningRequestWrap::Secp256k1(r) => SigningResponseWrap::Secp256k1(SigningResponse {
+                base_info: SigningBaseMessage {
+                    pkid: r.base_info.pkid.clone(),
+                    subsession_id: r.base_info.subsession_id,
+                    public_key: r.base_info.public_key.clone(),
+                    participants: r.base_info.participants.clone(),
+                    identifier: r.base_info.identifier,
+                    identity: r.base_info.identity.clone(),
+                },
+                stage: SigningResponseStage::Failure(msg),
+            }),
+            SigningRequestWrap::Secp256k1Tr(r) => {
+                SigningResponseWrap::Secp256k1Tr(SigningResponse {
+                    base_info: SigningBaseMessage {
+                        pkid: r.base_info.pkid.clone(),
+                        subsession_id: r.base_info.subsession_id,
+                        public_key: r.base_info.public_key.clone(),
+                        participants: r.base_info.participants.clone(),
+                        identifier: r.base_info.identifier,
+                        identity: r.base_info.identity.clone(),
+                    },
+                    stage: SigningResponseStage::Failure(msg),
+                })
+            }
+        }
+    }
     pub(crate) fn from<C: Cipher>(r: SigningRequest<VII, C>) -> Result<Self, SessionError<C>> {
         match C::crypto_type() {
             CryptoType::Ed25519 => Ok(SigningRequestWrap::Ed25519(

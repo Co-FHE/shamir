@@ -1,11 +1,13 @@
 mod command;
 mod manager;
 mod session;
-use crate::behaviour::{
-    CoorBehaviour, CoorBehaviourEvent, CoorToSigRequest, CoorToSigResponse, SigToCoorRequest,
-    SigToCoorResponse, ValidatorIdentityRequest,
-};
 use crate::crypto::*;
+use crate::types::message::{
+    CoorBehaviour, CoorBehaviourEvent, CoorToSigRequest, CoorToSigResponse, DKGRequestWrap,
+    DKGResponseWrap, SigToCoorRequest, SigToCoorResponse, SigningRequestWrap, SigningResponseWrap,
+    ValidatorIdentityRequest,
+};
+use crate::types::Validator;
 use crate::utils::*;
 use command::Command;
 use common::Settings;
@@ -20,13 +22,13 @@ use libp2p::{
     tcp, yamux, Multiaddr,
 };
 use libp2p::{ping, rendezvous, request_response, PeerId, StreamProtocol};
+use manager::Instruction;
 use session::SessionWrap;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
-use subsession::{SignatureSuite, SubSessionId, PKID};
 use tokio::io::AsyncWriteExt;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::unix::SocketAddr;
@@ -37,36 +39,22 @@ pub struct Coordinator<VI: ValidatorIdentity> {
     p2p_keypair: libp2p::identity::Keypair,
     swarm: libp2p::Swarm<CoorBehaviour<VI::Identity>>,
     ipc_path: PathBuf,
-    sessions: HashMap<SessionId<VI::Identity>, Session<VI>>,
-    valid_validators: HashMap<VI::Identity, ValidValidator<VI>>,
+    valid_validators: HashMap<VI::Identity, Validator<VI>>,
     p2ppeerid_2_endpoint: HashMap<PeerId, Multiaddr>,
     dkg_request_mapping:
-        HashMap<OutboundRequestId, (oneshot::Sender<DKGSingleResponse<VI::Identity>>, PeerId)>,
+        HashMap<OutboundRequestId, (oneshot::Sender<DKGResponseWrap<VI::Identity>>, PeerId)>,
     signing_request_mapping:
-        HashMap<OutboundRequestId, (oneshot::Sender<SigningSingleResponse<VI::Identity>>, PeerId)>,
-    signing_session_futures:
-        futures::stream::FuturesUnordered<oneshot::Receiver<SigningSession<VI>>>,
-    session_receiver: UnboundedReceiver<(
-        DKGSingleRequest<VI::Identity>,
-        oneshot::Sender<DKGSingleResponse<VI::Identity>>,
-    )>,
-    session_sender: UnboundedSender<(
-        DKGSingleRequest<VI::Identity>,
-        oneshot::Sender<DKGSingleResponse<VI::Identity>>,
-    )>,
-    signing_session_sender: UnboundedSender<(
-        SigningSingleRequest<VI::Identity>,
-        oneshot::Sender<SigningSingleResponse<VI::Identity>>,
+        HashMap<OutboundRequestId, (oneshot::Sender<SigningResponseWrap<VI::Identity>>, PeerId)>,
+
+    dkg_session_receiver: UnboundedReceiver<(
+        DKGRequestWrap<VI::Identity>,
+        oneshot::Sender<DKGResponseWrap<VI::Identity>>,
     )>,
     signing_session_receiver: UnboundedReceiver<(
-        SigningSingleRequest<VI::Identity>,
-        oneshot::Sender<SigningSingleResponse<VI::Identity>>,
+        SigningRequestWrap<VI::Identity>,
+        oneshot::Sender<SigningResponseWrap<VI::Identity>>,
     )>,
-    signing_sessions: HashMap<PKID, SigningSession<VI>>,
-    signature_sender: UnboundedSender<SignatureSuite<VI>>,
-    signature_receiver: UnboundedReceiver<SignatureSuite<VI>>,
-
-    reply_sender: HashMap<SubSessionId<VI::Identity>, oneshot::Sender<SignatureSuite<VI>>>,
+    instruction_sender: UnboundedSender<Instruction<VI::Identity>>,
 }
 impl<VI: ValidatorIdentity> Coordinator<VI> {
     pub fn new(p2p_keypair: libp2p::identity::Keypair) -> anyhow::Result<Self> {
@@ -101,28 +89,26 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
             })?
             .with_swarm_config(|cfg| cfg.with_idle_connection_timeout(Duration::from_secs(1000)))
             .build();
-        let (session_sender, session_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let (dkg_session_sender, dkg_session_receiver) = tokio::sync::mpsc::unbounded_channel();
         let (signing_session_sender, signing_session_receiver) =
             tokio::sync::mpsc::unbounded_channel();
-        let (signature_sender, signature_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let (instruction_sender, instruction_receiver) = tokio::sync::mpsc::unbounded_channel();
+        manager::CoordiantorSessionManager::new(
+            instruction_receiver,
+            dkg_session_sender,
+            signing_session_sender,
+        );
         Ok(Self {
             p2p_keypair,
             swarm,
             ipc_path: Settings::global().coordinator.ipc_socket_path.into(),
-            sessions: HashMap::new(),
             valid_validators: HashMap::new(),
             p2ppeerid_2_endpoint: HashMap::new(),
             dkg_request_mapping: HashMap::new(),
             signing_request_mapping: HashMap::new(),
-            session_sender,
-            session_receiver,
-            signing_session_sender,
+            dkg_session_receiver,
             signing_session_receiver,
-            signing_session_futures: FuturesUnordered::new(),
-            signing_sessions: HashMap::new(),
-            signature_sender,
-            signature_receiver,
-            reply_sender: HashMap::new(),
+            instruction_sender,
         })
     }
 
@@ -138,7 +124,7 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                         tracing::error!("Error handling swarm event: {}", e);
                     }
                 },
-                recv_data = self.session_receiver.recv()=> {
+                recv_data = self.dkg_session_receiver.recv()=> {
                     tracing::info!("Received DKG request from session");
                     if let Some((request, sender)) = recv_data {
                         if let Err(e) = self.handle_dkg_request(request, sender).await {
@@ -162,36 +148,16 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                         tracing::error!("Error handling command: {}", e);
                     }
                 }
-                signature_result = self.signature_receiver.recv() => {
-                    if let Some(signature_suite) = signature_result {
-                        tracing::info!("Received signature suite {}", signature_suite);
-                        self.reply_sender.remove(&signature_suite.subsession_id).unwrap().send(signature_suite).unwrap();
-
-                    }
-                }
-                signing_session_future = self.signing_session_futures.next() => {
-                    if let Some(signing_session) = signing_session_future {
-                        match signing_session {
-                            Ok(signing_session) => {
-                                tracing::info!("Received signing session {}", signing_session.pkid.clone());
-                                self.signing_sessions.insert(signing_session.pkid.clone(), signing_session);
-                            }
-                            Err(e) => {
-                                tracing::error!("Error receiving signing session: {}", e);
-                            }
-                        }
-                    }
-                }
             }
         }
     }
     pub async fn handle_dkg_request(
         &mut self,
-        request: DKGSingleRequest<VI::Identity>,
-        sender: oneshot::Sender<DKGSingleResponse<VI::Identity>>,
+        request: DKGRequestWrap<VI::Identity>,
+        sender: oneshot::Sender<DKGResponseWrap<VI::Identity>>,
     ) -> Result<(), anyhow::Error> {
         tracing::info!("Received DKG request From Session: {:?}", request);
-        let peer = request.get_identity();
+        let peer = request.identity();
         let validator = self.valid_validators.get(peer).cloned();
         match validator {
             Some(validator) => {
@@ -200,10 +166,7 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                     validator.p2p_peer_id
                 );
                 if let Some(addr) = validator.address {
-                    self.swarm
-                        .behaviour_mut()
-                        .sig2coor
-                        .add_address(&validator.p2p_peer_id, addr);
+                    self.swarm.add_peer_address(validator.p2p_peer_id, addr);
                 }
                 let outbound_request_id = self.swarm.behaviour_mut().coor2sig.send_request(
                     &validator.p2p_peer_id,
@@ -215,10 +178,9 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
             }
             None => {
                 tracing::error!("Validator not found");
-                if let Err(e) = sender.send(DKGSingleResponse::Failure(format!(
-                    "Validator not found: {}",
-                    peer.to_fmt_string()
-                ))) {
+                if let Err(e) = sender
+                    .send(request.failure(format!("Validator not found: {}", peer.to_fmt_string())))
+                {
                     tracing::error!("Error sending failure response: {:?}", e);
                     return Err(anyhow::anyhow!("Error sending failure response: {:?}", e));
                 }
@@ -230,11 +192,11 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
 
     pub async fn handle_signing_request(
         &mut self,
-        request: SigningSingleRequest<VI::Identity>,
-        sender: oneshot::Sender<SigningSingleResponse<VI::Identity>>,
+        request: SigningRequestWrap<VI::Identity>,
+        sender: oneshot::Sender<SigningResponseWrap<VI::Identity>>,
     ) -> Result<(), anyhow::Error> {
         tracing::info!("Received Signing request From Session: {:?}", request);
-        let peer = request.get_identity();
+        let peer = request.identity();
         let validator = self.valid_validators.get(peer).cloned();
         match validator {
             Some(validator) => {
@@ -243,10 +205,7 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                     validator.p2p_peer_id
                 );
                 if let Some(addr) = validator.address {
-                    self.swarm
-                        .behaviour_mut()
-                        .sig2coor
-                        .add_address(&validator.p2p_peer_id, addr);
+                    self.swarm.add_peer_address(validator.p2p_peer_id, addr);
                 }
                 let outbound_request_id = self.swarm.behaviour_mut().coor2sig.send_request(
                     &validator.p2p_peer_id,
@@ -258,10 +217,9 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
             }
             None => {
                 tracing::error!("Validator not found");
-                if let Err(e) = sender.send(SigningSingleResponse::Failure(format!(
-                    "Validator not found: {}",
-                    peer.to_fmt_string()
-                ))) {
+                if let Err(e) = sender
+                    .send(request.failure(format!("Validator not found: {}", peer.to_fmt_string())))
+                {
                     tracing::error!("Error sending failure response: {:?}", e);
                     return Err(anyhow::anyhow!("Error sending failure response: {:?}", e));
                 }
@@ -434,7 +392,7 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                         // Verify the signature
                         if public_key.verify(&hash, &signature) {
                             let address = self.p2ppeerid_2_endpoint.get(&peer).cloned();
-                            let new_validator = ValidValidator {
+                            let new_validator = Validator {
                                 p2p_peer_id: peer,
                                 validator_peer_id: validator_peer.clone(),
                                 validator_public_key: public_key,
@@ -568,101 +526,46 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                     }
                     Command::Sign(pkid, msg) => {
                         tracing::info!("Received sign request: {}", msg);
-                        let pkid = PKID::from(pkid);
+                        let pkid = PkId::from(pkid);
                         let (sender, receiver) = oneshot::channel();
-                        if let Some(session) = self.signing_sessions.get_mut(&pkid) {
-                            match session.start_new_signing(msg.clone()).await {
-                                Ok(subsession_id) => {
+                        self.instruction_sender.send(Instruction::Sign {
+                            pkid,
+                            msg: msg.as_bytes().to_vec(),
+                            signature_response_onshot: sender,
+                        });
+                        tokio::spawn(async move {
+                            let result = receiver.await.unwrap();
+                            match result {
+                                Ok(signature) => {
                                     reader
                                         .get_mut()
-                                        .write_all(
-                                            format!("Subsession id: {}", subsession_id.to_string())
-                                                .as_bytes(),
-                                        )
-                                        .await?;
-                                    reader.get_mut().write_all(b"\n").await?;
-                                    self.reply_sender.insert(subsession_id, sender);
-                                    tokio::spawn(async move {
-                                        let recv = receiver.await.unwrap();
-                                        reader
-                                            .get_mut()
-                                            .write_all(recv.to_string().as_bytes())
-                                            .await
-                                            .unwrap();
-                                        reader.get_mut().write_all(b"\n").await.unwrap();
-                                        let verified = recv.verify(&msg.as_bytes());
-                                        reader
-                                            .get_mut()
-                                            .write_all(format!("Verified: {}", verified).as_bytes())
-                                            .await
-                                            .unwrap();
-                                        reader.get_mut().write_all(b"\n").await.unwrap();
-                                    });
+                                        .write_all(signature.pretty_print_original().as_bytes())
+                                        .await
+                                        .unwrap();
+                                    reader.get_mut().write_all(b"\n").await.unwrap();
                                 }
                                 Err(e) => {
-                                    reader
-                                        .get_mut()
-                                        .write_all(
-                                            format!("Error starting new signing: {}", e).as_bytes(),
-                                        )
-                                        .await?;
+                                    tracing::error!("Error signing: {}", e);
                                 }
                             }
-                        } else {
-                            reader.get_mut().write_all(b"Session not found\n").await?;
-                        }
+                        });
                     }
                     Command::ListPkId => {
                         tracing::info!("Received list pkid request");
-                        for pkid in self.signing_sessions.keys() {
-                            tracing::info!("PKID: {}", pkid);
+                        let (sender, receiver) = oneshot::channel();
+                        self.instruction_sender.send(Instruction::ListPkIds {
+                            list_pkids_response_onshot: sender,
+                        });
+                        let pkids = receiver.await.unwrap();
+                        for (crypto_type, pkids) in pkids {
+                            reader
+                                .get_mut()
+                                .write_all(format!("{:?}: {:?}\n", crypto_type, pkids).as_bytes())
+                                .await?;
                         }
                     }
                     Command::StartDkg(min_signers, crypto_type) => {
-                        tracing::debug!(
-                            "Starting DKG with min_signers: {}, crypto_type: {:?}",
-                            min_signers,
-                            crypto_type
-                        );
                         let mut participants = Vec::new();
-                        if min_signers > self.valid_validators.len() as u16 {
-                            let msg = format!(
-                                "Not enough validators to start DKG, min_signers: {}, validators: {}",
-                                min_signers,
-                                self.valid_validators.len()
-                            );
-                            tracing::debug!("{}", msg);
-                            reader.get_mut().write_all(msg.as_bytes()).await?;
-                            reader.get_mut().write_all(b"\n").await?;
-                            return Err(anyhow::anyhow!(msg));
-                        }
-                        if self.valid_validators.len() > 255 {
-                            let msg = format!(
-                                "Too many validators to start DKG, max is 255, got {}",
-                                self.valid_validators.len()
-                            );
-                            tracing::debug!("{}", msg);
-                            reader.get_mut().write_all(msg.as_bytes()).await?;
-                            reader.get_mut().write_all(b"\n").await?;
-                            return Err(anyhow::anyhow!(msg));
-                        }
-                        if min_signers < (self.valid_validators.len() as u16 + 1) / 2
-                            || min_signers == 0
-                        {
-                            let msg = format!(
-                                "Min signers is too low, min_signers: {}, validators: {}",
-                                min_signers,
-                                self.valid_validators.len()
-                            );
-                            tracing::debug!("{}", msg);
-                            reader.get_mut().write_all(msg.as_bytes()).await?;
-                            reader.get_mut().write_all(b"\n").await?;
-                            return Err(anyhow::anyhow!(msg));
-                        }
-                        tracing::debug!(
-                            "Adding {} validators as participants",
-                            self.valid_validators.len()
-                        );
                         for (i, validator) in self.valid_validators.values().enumerate() {
                             tracing::debug!(
                                 "Adding validator {} with peer id {}",
@@ -672,33 +575,33 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                             participants
                                 .push(((i + 1) as u16, validator.validator_peer_id.clone()));
                         }
-                        tracing::debug!("Creating new session");
-                        let session = Session::<VI>::new(
-                            crypto_type,
-                            participants.clone(),
+                        let (sender, receiver) = oneshot::channel();
+                        self.instruction_sender.send(Instruction::NewKey {
                             min_signers,
-                            self.session_sender.clone(),
-                        );
-
-                        if let Err(e) = session {
-                            let msg = format!("Error creating session: {}", e);
-                            tracing::debug!("{}", msg);
-                            reader.get_mut().write_all(msg.as_bytes()).await?;
-                            reader.get_mut().write_all(b"\n").await?;
-                            return Err(anyhow::anyhow!(msg));
-                        }
-                        let session = session.unwrap();
-                        tracing::debug!("Starting session");
-                        let (tx, rx) = oneshot::channel();
-                        self.signing_session_futures.push(rx);
-                        session
-                            .start(
-                                tx,
-                                self.signing_session_sender.clone(),
-                                self.signature_sender.clone(),
-                            )
-                            .await;
-                        // accept ctrl+c to stop
+                            crypto_type,
+                            participants,
+                            pkid_response_onshot: sender,
+                        });
+                        tokio::spawn(async move {
+                            let result = receiver.await.unwrap();
+                            match result {
+                                Ok(pkid) => {
+                                    reader.get_mut().write_all(b"Success\n").await.unwrap();
+                                    reader
+                                        .get_mut()
+                                        .write_all(pkid.to_string().as_bytes())
+                                        .await
+                                        .unwrap();
+                                    reader.get_mut().write_all(b"\n").await.unwrap();
+                                }
+                                Err(e) => {
+                                    let msg = format!("Error starting DKG: {}", e);
+                                    tracing::debug!("{}", msg);
+                                    reader.get_mut().write_all(msg.as_bytes()).await.unwrap();
+                                    reader.get_mut().write_all(b"\n").await.unwrap();
+                                }
+                            }
+                        });
                     }
                 }
             }

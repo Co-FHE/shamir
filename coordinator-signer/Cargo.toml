@@ -52,3 +52,7 @@ proptest = "1.0.100"
 thiserror = "2.0"
 rand = "0.8.5"
 serde_with = "3"
+
+strum_macros = "0.26"
+
+strum = { version = "0.26", features = ["derive"] }

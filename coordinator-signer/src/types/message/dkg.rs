@@ -34,6 +34,7 @@ pub(crate) enum DKGRequestStage<C: Cipher> {
     },
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "cipher_type")]
 pub(crate) enum DKGRequestWrap<VII: ValidatorIdentityIdentity> {
     Ed25519(DKGRequest<VII, Ed25519Sha512>),
     Secp256k1(DKGRequest<VII, Secp256K1Sha256>),
@@ -60,6 +61,7 @@ pub(crate) enum DKGResponseStage<C: Cipher> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "cipher_type")]
 pub(crate) enum DKGResponseWrap<VII: ValidatorIdentityIdentity> {
     Ed25519(DKGResponse<VII, Ed25519Sha512>),
     Secp256k1(DKGResponse<VII, Secp256K1Sha256>),
@@ -104,6 +106,47 @@ impl<VII: ValidatorIdentityIdentity> DKGResponseWrap<VII> {
     }
 }
 impl<VII: ValidatorIdentityIdentity> DKGRequestWrap<VII> {
+    pub(crate) fn identity(&self) -> &VII {
+        match self {
+            DKGRequestWrap::Ed25519(r) => &r.base_info.identity,
+            DKGRequestWrap::Secp256k1(r) => &r.base_info.identity,
+            DKGRequestWrap::Secp256k1Tr(r) => &r.base_info.identity,
+        }
+    }
+    pub(crate) fn failure(&self, msg: String) -> DKGResponseWrap<VII> {
+        match self {
+            DKGRequestWrap::Ed25519(r) => DKGResponseWrap::Ed25519(DKGResponse {
+                base_info: DKGBaseMessage {
+                    session_id: r.base_info.session_id.clone(),
+                    min_signers: r.base_info.min_signers,
+                    participants: r.base_info.participants.clone(),
+                    identifier: r.base_info.identifier,
+                    identity: r.base_info.identity.clone(),
+                },
+                stage: DKGResponseStage::Failure(msg),
+            }),
+            DKGRequestWrap::Secp256k1(r) => DKGResponseWrap::Secp256k1(DKGResponse {
+                base_info: DKGBaseMessage {
+                    session_id: r.base_info.session_id.clone(),
+                    min_signers: r.base_info.min_signers,
+                    participants: r.base_info.participants.clone(),
+                    identifier: r.base_info.identifier,
+                    identity: r.base_info.identity.clone(),
+                },
+                stage: DKGResponseStage::Failure(msg),
+            }),
+            DKGRequestWrap::Secp256k1Tr(r) => DKGResponseWrap::Secp256k1Tr(DKGResponse {
+                base_info: DKGBaseMessage {
+                    session_id: r.base_info.session_id.clone(),
+                    min_signers: r.base_info.min_signers,
+                    participants: r.base_info.participants.clone(),
+                    identifier: r.base_info.identifier,
+                    identity: r.base_info.identity.clone(),
+                },
+                stage: DKGResponseStage::Failure(msg),
+            }),
+        }
+    }
     pub(crate) fn from<C: Cipher>(r: DKGRequest<VII, C>) -> Result<Self, SessionError<C>> {
         match C::crypto_type() {
             CryptoType::Ed25519 => Ok(DKGRequestWrap::Ed25519(

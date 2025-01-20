@@ -63,6 +63,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> Participants<VII, C> {
                 participants_map.len()
             )));
         }
+
         Ok(Self(participants_map))
     }
     pub(crate) fn len(&self) -> usize {
@@ -75,6 +76,15 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> Participants<VII, C> {
                 min_signers,
                 self.len() as u16
             )));
+        }
+
+        if min_signers < (self.len() as u16 + 1) / 2 || min_signers == 0 {
+            let msg = format!(
+                "Min signers is too low, min_signers: {}, validators: {}",
+                min_signers,
+                self.len()
+            );
+            return Err(SessionError::InvalidParticipants(msg));
         }
         Ok(())
     }

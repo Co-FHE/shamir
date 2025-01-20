@@ -40,7 +40,13 @@ pub(crate) struct CoordinatorDKGSession<VII: ValidatorIdentityIdentity, C: Ciphe
     participants: Participants<VII, C>,
     dkg_sender: UnboundedSender<(DKGRequest<VII, C>, oneshot::Sender<DKGResponse<VII, C>>)>,
 }
-
+#[derive(Debug, Clone)]
+pub(crate) struct DKGInfo<VII: ValidatorIdentityIdentity, C: Cipher> {
+    pub(crate) min_signers: u16,
+    pub(crate) participants: Participants<VII, C>,
+    pub(crate) session_id: SessionId<VII>,
+    pub(crate) public_key_package: C::PublicKeyPackage,
+}
 impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorDKGSession<VII, C> {
     pub fn new(
         participants: Participants<VII, C>,
@@ -64,13 +70,20 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorDKGSession<VII, C> {
     }
     pub(crate) async fn start_dkg(
         mut self,
-        response_sender: oneshot::Sender<Result<C::PublicKeyPackage, SessionError<C>>>,
+        response_sender: oneshot::Sender<
+            Result<DKGInfo<VII, C>, (SessionId<VII>, SessionError<C>)>,
+        >,
     ) {
         tokio::spawn(async move {
             tracing::debug!("Starting DKG session with id: {:?}", self.session_id);
-            let public_key_package = 'out: loop {
+            let result = 'out: loop {
                 if let Some(public_key_package) = self.dkg_state.completed() {
-                    break 'out Ok(public_key_package);
+                    break 'out Ok(DKGInfo {
+                        session_id: self.session_id.clone(),
+                        min_signers: self.min_signers,
+                        participants: self.participants.clone(),
+                        public_key_package,
+                    });
                 }
                 tracing::info!("Starting new DKG round");
                 let mut futures = FuturesUnordered::new();
@@ -148,7 +161,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorDKGSession<VII, C> {
                     )));
                 }
             };
-            if let Err(e) = response_sender.send(public_key_package) {
+            if let Err(e) = response_sender.send(result.map_err(|e| (self.session_id.clone(), e))) {
                 tracing::error!("Failed to send response: {:?}", e);
             }
         });

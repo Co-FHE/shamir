@@ -4,7 +4,6 @@ use std::collections::HashMap;
 
 use dkg::DKGSession;
 use futures::StreamExt;
-use libp2p::request_response::ResponseChannel;
 use rand::{CryptoRng, RngCore};
 use signing::SigningSession;
 use tokio::sync::{broadcast, mpsc::UnboundedReceiver, oneshot};
@@ -21,10 +20,7 @@ use crate::{
     },
 };
 
-use super::{
-    manager::{Request, SessionManagerError},
-    CoorToSigResponse, PkId, ValidatorIdentityIdentity,
-};
+use super::{manager::SessionManagerError, PkId, ValidatorIdentityIdentity};
 
 pub(crate) trait SessionWrapTrait {
     type R: CryptoRng + RngCore + Clone;
@@ -39,7 +35,16 @@ pub(crate) trait SessionWrapTrait {
     ) -> Result<SigningResponseWrap<Self::VII>, SessionManagerError>;
     fn pkid_exists(&self, pkid: PkId) -> bool;
 }
-
+pub(crate) enum RequestCipher<VII: ValidatorIdentityIdentity> {
+    DKG(
+        DKGRequestWrap<VII>,
+        oneshot::Sender<Result<DKGResponseWrap<VII>, SessionManagerError>>,
+    ),
+    Signing(
+        SigningRequestWrap<VII>,
+        oneshot::Sender<Result<SigningResponseWrap<VII>, SessionManagerError>>,
+    ),
+}
 pub(crate) struct SessionWrap<
     VII: ValidatorIdentityIdentity,
     C: Cipher,
@@ -47,7 +52,7 @@ pub(crate) struct SessionWrap<
 > {
     dkg_sessions: HashMap<SessionId, DKGSession<VII, C, R>>,
     signing_sessions: HashMap<PkId, SigningSession<VII, C, R>>,
-    request_receiver: UnboundedReceiver<Request<VII>>,
+    request_receiver: UnboundedReceiver<RequestCipher<VII>>,
     rng: R,
 }
 impl<
@@ -113,7 +118,7 @@ impl<
 impl<VII: ValidatorIdentityIdentity, C: Cipher, R: CryptoRng + RngCore + Clone + Send>
     SessionWrap<VII, C, R>
 {
-    pub(crate) fn new(request_receiver: UnboundedReceiver<Request<VII>>, rng: R) -> Self {
+    pub(crate) fn new(request_receiver: UnboundedReceiver<RequestCipher<VII>>, rng: R) -> Self {
         Self {
             dkg_sessions: HashMap::new(),
             signing_sessions: HashMap::new(),
@@ -121,29 +126,20 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher, R: CryptoRng + RngCore + Clone +
             rng,
         }
     }
-    pub(crate) fn listening<
-        F: FnMut(ResponseChannel<CoorToSigResponse<VII>>, CoorToSigResponse<VII>),
-    >(
-        mut self,
-        callback: F,
-    ) {
+    pub(crate) fn listening(mut self) {
         tokio::spawn(async move {
             loop {
                 let request = self.request_receiver.recv().await;
                 if let Some(request) = request {
                     match request {
-                        Request::DKG(request, response_channel) => {
+                        RequestCipher::DKG(request, response_oneshot) => {
                             let result = self.dkg_apply_request(request);
-                            response_oneshot
-                                .send(result.map(|r| (request_id, r)))
-                                .unwrap();
+                            response_oneshot.send(result).unwrap();
                         }
-                        Request::Signing((request_id, request), response_oneshot) => {
+                        RequestCipher::Signing(request, response_oneshot) => {
                             let result = self.signing_apply_request(request);
 
-                            response_oneshot
-                                .send(result.map(|r| (request_id, r)))
-                                .unwrap();
+                            response_oneshot.send(result).unwrap();
                         }
                     }
                 }

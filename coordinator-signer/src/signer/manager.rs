@@ -19,6 +19,7 @@ use tokio::sync::{
 
 use crate::crypto::*;
 
+use super::session::RequestCipher;
 use super::CoorToSigResponse;
 use super::{session::SessionWrapTrait, SessionWrap};
 
@@ -41,44 +42,28 @@ pub(crate) enum Request<VII: ValidatorIdentityIdentity> {
     ),
 }
 macro_rules! new_session_wrap {
-    ($session_inst_channels:expr, $generic_type:ty, $crypto_variant:ident, $rng:expr,$callback:expr) => {{
+    ($session_inst_channels:expr, $generic_type:ty, $crypto_variant:ident, $rng:expr) => {{
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         $session_inst_channels.insert(CryptoType::$crypto_variant, tx);
-        SessionWrap::<VII, $generic_type, R>::new(rx, $rng.clone()).listening($callback);
+        SessionWrap::<VII, $generic_type, R>::new(rx, $rng.clone()).listening();
     }};
 }
 pub(crate) struct SignerSessionManager<
     VII: ValidatorIdentityIdentity + Sized,
     R: CryptoRng + RngCore + Clone + Sized,
 > {
-    session_inst_channels: HashMap<CryptoType, UnboundedSender<Request<VII>>>,
+    session_inst_channels: HashMap<CryptoType, UnboundedSender<RequestCipher<VII>>>,
     request_receiver: UnboundedReceiver<Request<VII>>,
     _phantom: PhantomData<R>,
 }
 impl<VII: ValidatorIdentityIdentity, R: CryptoRng + RngCore + Clone + Send + Sync + 'static>
     SignerSessionManager<VII, R>
 {
-    pub(crate) fn new<F: FnMut(ResponseChannel<CoorToSigResponse<VII>>, CoorToSigResponse<VII>)>(
-        request_receiver: UnboundedReceiver<Request<VII>>,
-        rng: R,
-        callback: F,
-    ) -> Self {
+    pub(crate) fn new(request_receiver: UnboundedReceiver<Request<VII>>, rng: R) -> Self {
         let mut session_inst_channels = HashMap::new();
-        new_session_wrap!(session_inst_channels, Ed25519Sha512, Ed25519, rng, callback);
-        new_session_wrap!(
-            session_inst_channels,
-            Secp256K1Sha256,
-            Secp256k1,
-            rng,
-            callback
-        );
-        new_session_wrap!(
-            session_inst_channels,
-            Secp256K1Sha256TR,
-            Secp256k1Tr,
-            rng,
-            callback
-        );
+        new_session_wrap!(session_inst_channels, Ed25519Sha512, Ed25519, rng);
+        new_session_wrap!(session_inst_channels, Secp256K1Sha256, Secp256k1, rng);
+        new_session_wrap!(session_inst_channels, Secp256K1Sha256TR, Secp256k1Tr, rng);
         assert!(session_inst_channels.len() == CryptoType::iter().len());
 
         Self {
@@ -87,7 +72,14 @@ impl<VII: ValidatorIdentityIdentity, R: CryptoRng + RngCore + Clone + Send + Syn
             _phantom: PhantomData,
         }
     }
-    pub(crate) fn listening(mut self) {
+    pub(crate) fn listening<
+        SingingCallback: FnOnce(ResponseChannel<CoorToSigResponse<VII>>, SigningResponseWrap<VII>),
+        DkgCallback: FnOnce(ResponseChannel<CoorToSigResponse<VII>>, DKGResponseWrap<VII>),
+    >(
+        mut self,
+        singing_callback: SingingCallback,
+        dkg_callback: DkgCallback,
+    ) {
         tokio::spawn(async move {
             loop {
                 let request = self.request_receiver.recv().await;
@@ -99,7 +91,7 @@ impl<VII: ValidatorIdentityIdentity, R: CryptoRng + RngCore + Clone + Send + Syn
                                 .get(&dkg_request_wrap.crypto_type());
                             if let Some(session_inst_channel) = session_inst_channel {
                                 session_inst_channel
-                                    .send(Request::DKG((request_id, dkg_request_wrap), sender))
+                                    .send(RequestCipher::DKG(dkg_request_wrap, sender))
                                     .unwrap();
                             } else {
                                 sender

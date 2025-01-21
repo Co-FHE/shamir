@@ -193,7 +193,9 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
                         identity: identity.clone(),
                         public_key: self.public_key.clone(),
                     },
-                    stage: SigningRequestStage::Round1,
+                    stage: SigningRequestStage::Round1 {
+                        message: self.message.clone(),
+                    },
                 })
                 .collect(),
             CoordinatorSigningState::Round2 { signing_package } => self
@@ -217,20 +219,47 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
         }
     }
 
+    fn match_base_info(
+        &self,
+        base_info: &SigningBaseMessage<VII, C>,
+    ) -> Result<(), SessionError<C>> {
+        if self.subsession_id != base_info.subsession_id {
+            return Err(SessionError::BaseInfoNotMatch(format!(
+                "subsession id does not match: {:?} vs {:?}",
+                self.subsession_id, base_info.subsession_id
+            )));
+        }
+        if self.pkid != base_info.pkid {
+            return Err(SessionError::BaseInfoNotMatch(format!(
+                "pkid does not match: {:?} vs {:?}",
+                self.pkid, base_info.pkid
+            )));
+        }
+        if self.participants != base_info.participants {
+            return Err(SessionError::BaseInfoNotMatch(format!(
+                "participants does not match: {:?} vs {:?}",
+                self.participants, base_info.participants
+            )));
+        }
+        if self.public_key != base_info.public_key {
+            return Err(SessionError::BaseInfoNotMatch(format!(
+                "public key does not match: {:?} vs {:?}",
+                self.public_key, base_info.public_key
+            )));
+        }
+
+        Ok(())
+    }
     pub(crate) fn handle_response(
         &self,
         response: BTreeMap<C::Identifier, SigningResponse<VII, C>>,
     ) -> Result<CoordinatorSigningState<C>, SessionError<C>> {
+        for (_, response) in response.iter() {
+            self.match_base_info(&response.base_info)?;
+        }
+        self.participants.check_keys_equal(&response)?;
         match self.state.clone() {
             CoordinatorSigningState::Round1 => {
-                for (id, _) in self.participants.iter() {
-                    let _ = response
-                        .get(id)
-                        .ok_or(SessionError::InvalidResponse(format!(
-                            "response not found for id: {}",
-                            id.to_string()
-                        )))?;
-                }
                 let commitments_map = response
                     .iter()
                     .map(|(id, resp)| {
@@ -248,14 +277,6 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
                 Ok(CoordinatorSigningState::Round2 { signing_package })
             }
             CoordinatorSigningState::Round2 { signing_package } => {
-                for (id, _) in self.participants.iter() {
-                    response
-                        .get(id)
-                        .ok_or(SessionError::InvalidResponse(format!(
-                            "response not found for id: {}",
-                            id.to_string()
-                        )))?;
-                }
                 let mut signature_shares = BTreeMap::new();
                 for (id, resp) in response.iter() {
                     if let SigningResponseStage::Round2 {

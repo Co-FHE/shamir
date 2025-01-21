@@ -1,5 +1,6 @@
 use std::{collections::BTreeMap, fmt};
 
+use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -14,7 +15,7 @@ pub use ed25519::*;
 pub use secp256k1::*;
 pub use secp256k1_tr::*;
 
-pub trait Cipher: Clone + std::fmt::Debug + Send + Sync + 'static {
+pub trait Cipher: Clone + std::fmt::Debug + Send + Sync + 'static + PartialEq + Eq {
     type Identifier: Identifier<CryptoError = Self::CryptoError>;
     type Signature: Signature<CryptoError = Self::CryptoError>;
     type SigningCommitments: Serialize
@@ -41,18 +42,8 @@ pub trait Cipher: Clone + std::fmt::Debug + Send + Sync + 'static {
 
     type DKGRound1SecretPackage: fmt::Debug + Clone;
     type DKGRound1Package: Serialize + for<'de> Deserialize<'de> + fmt::Debug + Clone + Send + Sync;
-    type DKGRound1PackageMap: PackageMap<Key = Self::Identifier, Value = Self::DKGRound1Package>
-        + Serialize
-        + for<'de> Deserialize<'de>;
     type DKGRound2SecretPackage: fmt::Debug + Clone;
     type DKGRound2Package: Serialize + for<'de> Deserialize<'de> + fmt::Debug + Clone + Send + Sync;
-    type DKGRound2PackageMap: PackageMap<Key = Self::Identifier, Value = Self::DKGRound2Package>
-        + Serialize
-        + for<'de> Deserialize<'de>;
-    type DKGRound2PackageMapMap: PackageMap<Key = Self::Identifier, Value = Self::DKGRound2PackageMap>
-        + Serialize
-        + for<'de> Deserialize<'de>;
-
     type CryptoError: std::error::Error
         + std::marker::Send
         + std::marker::Sync
@@ -65,6 +56,36 @@ pub trait Cipher: Clone + std::fmt::Debug + Send + Sync + 'static {
         signature_shares: &BTreeMap<Self::Identifier, Self::SignatureShare>,
         public_key: &Self::PublicKeyPackage,
     ) -> Result<Self::Signature, Self::CryptoError>;
+    fn dkg_part1<R: RngCore + CryptoRng>(
+        identifier: Self::Identifier,
+        max_signers: u16,
+        min_signers: u16,
+        rng: &mut R,
+    ) -> Result<(Self::DKGRound1SecretPackage, Self::DKGRound1Package), Self::CryptoError>;
+    fn dkg_part2(
+        secret_package: Self::DKGRound1SecretPackage,
+        round1_package_map: &BTreeMap<Self::Identifier, Self::DKGRound1Package>,
+    ) -> Result<
+        (
+            Self::DKGRound2SecretPackage,
+            BTreeMap<Self::Identifier, Self::DKGRound2Package>,
+        ),
+        Self::CryptoError,
+    >;
+    fn dkg_part3(
+        secret_package: &Self::DKGRound2SecretPackage,
+        round1_packages: &BTreeMap<Self::Identifier, Self::DKGRound1Package>,
+        round2_packages: &BTreeMap<Self::Identifier, Self::DKGRound2Package>,
+    ) -> Result<(Self::KeyPackage, Self::PublicKeyPackage), Self::CryptoError>;
+    fn sign(
+        signing_package: &Self::SigningPackage,
+        nonces: &Self::SigningNonces,
+        key_package: &Self::KeyPackage,
+    ) -> Result<Self::SignatureShare, Self::CryptoError>;
+    fn commit<R: RngCore + CryptoRng>(
+        key_package: &Self::KeyPackage,
+        rng: &mut R,
+    ) -> (Self::SigningNonces, Self::SigningCommitments);
 }
 
 pub trait Signature:
@@ -95,56 +116,6 @@ pub trait SigningPackage:
         commitments: BTreeMap<Self::Identifier, Self::SigningCommitments>,
         message: &[u8],
     ) -> Result<Self, Self::CryptoError>;
-}
-pub trait PackageMap:
-    IntoIterator<Item = (Self::Key, Self::Value)> + fmt::Debug + Clone + Send + Sync
-{
-    type Key: Clone + fmt::Debug;
-    type Value: Clone + fmt::Debug;
-    type Iter<'a>: Iterator<Item = (&'a Self::Key, &'a Self::Value)>
-    where
-        Self: 'a;
-    fn get(&self, key: &Self::Key) -> Option<&Self::Value>;
-    fn insert(&mut self, key: Self::Key, value: Self::Value);
-    fn new() -> Self;
-    fn len(&self) -> usize;
-    fn iter(&self) -> Self::Iter<'_>;
-    fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-}
-impl<K, V> PackageMap for BTreeMap<K, V>
-where
-    K: Clone + fmt::Debug + Sync + Send + Ord,
-    V: Clone + fmt::Debug + Sync + Send,
-{
-    type Key = K;
-    type Value = V;
-    type Iter<'a>
-        = std::collections::btree_map::Iter<'a, K, V>
-    where
-        Self: 'a;
-    fn get(&self, key: &Self::Key) -> Option<&Self::Value> {
-        BTreeMap::get(self, key)
-    }
-
-    fn insert(&mut self, key: Self::Key, value: Self::Value) {
-        BTreeMap::insert(self, key, value);
-    }
-    fn iter(&self) -> Self::Iter<'_> {
-        self.iter()
-    }
-    fn new() -> Self {
-        BTreeMap::new()
-    }
-
-    fn len(&self) -> usize {
-        BTreeMap::len(self)
-    }
-
-    fn is_empty(&self) -> bool {
-        BTreeMap::is_empty(self)
-    }
 }
 pub trait PublicKeyPackage:
     Serialize + for<'de> Deserialize<'de> + fmt::Debug + Clone + Send + Sync + PartialEq + Eq

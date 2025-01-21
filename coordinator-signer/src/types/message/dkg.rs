@@ -1,4 +1,4 @@
-use std::any::Any;
+use std::{any::Any, collections::BTreeMap};
 
 use serde::{Deserialize, Serialize};
 
@@ -11,7 +11,7 @@ use crate::{
 };
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct DKGBaseMessage<VII: ValidatorIdentityIdentity, C: Cipher> {
-    pub(crate) session_id: SessionId<VII>,
+    pub(crate) session_id: SessionId,
     pub(crate) min_signers: u16,
     pub(crate) participants: Participants<VII, C>,
     pub(crate) identifier: C::Identifier,
@@ -26,11 +26,11 @@ pub(crate) struct DKGRequest<VII: ValidatorIdentityIdentity, C: Cipher> {
 pub(crate) enum DKGRequestStage<C: Cipher> {
     Part1,
     Part2 {
-        round1_package_map: C::DKGRound1PackageMap,
+        round1_package_map: BTreeMap<C::Identifier, C::DKGRound1Package>,
     },
     GenPublicKey {
-        round1_package_map: C::DKGRound1PackageMap,
-        round2_package_map: C::DKGRound2PackageMap,
+        round1_package_map: BTreeMap<C::Identifier, C::DKGRound1Package>,
+        round2_package_map: BTreeMap<C::Identifier, C::DKGRound2Package>,
     },
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,7 +52,7 @@ pub(crate) enum DKGResponseStage<C: Cipher> {
         round1_package: C::DKGRound1Package,
     },
     Part2 {
-        round2_package_map: C::DKGRound2PackageMap,
+        round2_package_map: BTreeMap<C::Identifier, C::DKGRound2Package>,
     },
     GenPublicKey {
         public_key_package: C::PublicKeyPackage,

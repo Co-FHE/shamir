@@ -1,11 +1,11 @@
 use std::collections::BTreeMap;
 
+use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::{
-    Cipher, CryptoType, Identifier, PackageMap, PkId, PublicKeyPackage, Signature, SigningPackage,
-    VerifyingKey,
+    Cipher, CryptoType, Identifier, PkId, PublicKeyPackage, Signature, SigningPackage, VerifyingKey,
 };
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct Secp256K1Sha256TR;
@@ -20,13 +20,11 @@ impl Cipher for Secp256K1Sha256TR {
     type KeyPackage = frost_secp256k1_tr::keys::KeyPackage;
     type SigningPackage = frost_secp256k1_tr::SigningPackage;
     type PublicKeyPackage = frost_secp256k1_tr::keys::PublicKeyPackage;
-
+    type VerifyingKey = frost_secp256k1_tr::VerifyingKey;
     type DKGRound1SecretPackage = frost_secp256k1_tr::keys::dkg::round1::SecretPackage;
     type DKGRound1Package = frost_secp256k1_tr::keys::dkg::round1::Package;
-    type DKGRound1PackageMap = BTreeMap<Self::Identifier, Self::DKGRound1Package>;
     type DKGRound2SecretPackage = frost_secp256k1_tr::keys::dkg::round2::SecretPackage;
     type DKGRound2Package = frost_secp256k1_tr::keys::dkg::round2::Package;
-    type DKGRound2PackageMap = BTreeMap<Self::Identifier, Self::DKGRound2Package>;
 
     type CryptoError = frost_secp256k1_tr::Error;
     fn crypto_type() -> CryptoType {
@@ -40,9 +38,50 @@ impl Cipher for Secp256K1Sha256TR {
         frost_secp256k1_tr::aggregate(signing_package, signature_shares, public_key)
     }
 
-    type DKGRound2PackageMapMap = BTreeMap<Self::Identifier, Self::DKGRound2PackageMap>;
+    fn dkg_part1<R: rand::RngCore + rand::CryptoRng>(
+        identifier: Self::Identifier,
+        max_signers: u16,
+        min_signers: u16,
+        rng: &mut R,
+    ) -> Result<(Self::DKGRound1SecretPackage, Self::DKGRound1Package), Self::CryptoError> {
+        frost_secp256k1_tr::keys::dkg::part1(identifier, max_signers, min_signers, rng)
+    }
 
-    type VerifyingKey = frost_secp256k1_tr::VerifyingKey;
+    fn dkg_part2(
+        secret_package: Self::DKGRound1SecretPackage,
+        round1_package_map: &BTreeMap<Self::Identifier, Self::DKGRound1Package>,
+    ) -> Result<
+        (
+            Self::DKGRound2SecretPackage,
+            BTreeMap<Self::Identifier, Self::DKGRound2Package>,
+        ),
+        Self::CryptoError,
+    > {
+        frost_secp256k1_tr::keys::dkg::part2(secret_package, round1_package_map)
+    }
+
+    fn dkg_part3(
+        secret_package: &Self::DKGRound2SecretPackage,
+        round1_package_map: &BTreeMap<Self::Identifier, Self::DKGRound1Package>,
+        round2_package_map: &BTreeMap<Self::Identifier, Self::DKGRound2Package>,
+    ) -> Result<(Self::KeyPackage, Self::PublicKeyPackage), Self::CryptoError> {
+        frost_secp256k1_tr::keys::dkg::part3(secret_package, round1_package_map, round2_package_map)
+    }
+
+    fn sign(
+        signing_package: &Self::SigningPackage,
+        nonces: &Self::SigningNonces,
+        key_package: &Self::KeyPackage,
+    ) -> Result<Self::SignatureShare, Self::CryptoError> {
+        frost_secp256k1_tr::round2::sign(signing_package, nonces, key_package)
+    }
+
+    fn commit<R: RngCore + CryptoRng>(
+        key_package: &Self::KeyPackage,
+        rng: &mut R,
+    ) -> (Self::SigningNonces, Self::SigningCommitments) {
+        frost_secp256k1_tr::round1::commit(key_package.signing_share(), rng)
+    }
 }
 impl Signature for frost_secp256k1_tr::Signature {
     type CryptoError = frost_secp256k1_tr::Error;

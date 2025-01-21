@@ -59,15 +59,14 @@ pub(crate) struct SessionWrap<VII: ValidatorIdentityIdentity, C: Cipher> {
         oneshot::Sender<SigningResponseWrap<VII>>,
     )>,
 
-    session_id_key_map: HashMap<SessionId<VII>, oneshot::Sender<Result<PkId, SessionManagerError>>>,
+    session_id_key_map: HashMap<SessionId, oneshot::Sender<Result<PkId, SessionManagerError>>>,
     subsession_id_signaturesuite_map: HashMap<
         SubsessionId,
         oneshot::Sender<Result<SignatureSuiteInfo<VII>, SessionManagerError>>,
     >,
 
-    dkg_futures: FuturesUnordered<
-        oneshot::Receiver<Result<DKGInfo<VII, C>, (SessionId<VII>, SessionError<C>)>>,
-    >,
+    dkg_futures:
+        FuturesUnordered<oneshot::Receiver<Result<DKGInfo<VII, C>, (SessionId, SessionError<C>)>>>,
     signing_futures: FuturesUnordered<
         oneshot::Receiver<Result<SignatureSuite<VII, C>, (Option<SubsessionId>, SessionError<C>)>>,
     >,
@@ -102,7 +101,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
         participants: Vec<(IT, VII)>,
         min_signers: u16,
         identifier_transform: impl Fn(IT) -> Result<C::Identifier, C::CryptoError> + 'static,
-    ) -> Result<SessionId<VII>, SessionError<C>> {
+    ) -> Result<SessionId, SessionError<C>> {
         //TODO: remove the following participants judgement
         let participants = participants
             .into_iter()
@@ -231,7 +230,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
     }
     async fn handle_dkg_future(
         &mut self,
-        dkg_info: Result<DKGInfo<VII, C>, (SessionId<VII>, SessionError<C>)>,
+        dkg_info: Result<DKGInfo<VII, C>, (SessionId, SessionError<C>)>,
     ) -> Result<(), SessionError<C>> {
         match dkg_info {
             Ok(dkg_info) => {

@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use sha2::{Digest, Sha256};
 
 /// Concatenates data and calculates their SHA256 hash

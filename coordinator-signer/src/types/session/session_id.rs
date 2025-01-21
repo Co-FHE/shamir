@@ -17,21 +17,21 @@ use super::{Cipher, Participants};
 // 16 bytes: uuid of session
 // The SessionId cannot be used in any consensus
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct SessionId<VI: ValidatorIdentityIdentity>([u8; 37], PhantomData<VI>); // 1 + 2 + 2 + 8 + 8 + 16 = 37 bytes
+pub(crate) struct SessionId([u8; 37]); // 1 + 2 + 2 + 8 + 8 + 16 = 37 bytes
 
-impl<VII: ValidatorIdentityIdentity> Serialize for SessionId<VII> {
+impl Serialize for SessionId {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(&self.to_string())
     }
 }
-impl<'de, VII: ValidatorIdentityIdentity> Deserialize<'de> for SessionId<VII> {
+impl<'de> Deserialize<'de> for SessionId {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let s = String::deserialize(deserializer)?;
         SessionId::from_string(&s).map_err(serde::de::Error::custom)
     }
 }
-impl<VII: ValidatorIdentityIdentity> SessionId<VII> {
-    pub fn new<C: Cipher>(
+impl SessionId {
+    pub fn new<VII: ValidatorIdentityIdentity, C: Cipher>(
         crypto_type: CryptoType,
         min_signers: u16,
         participants: &Participants<VII, C>,
@@ -73,7 +73,7 @@ impl<VII: ValidatorIdentityIdentity> SessionId<VII> {
         let session_uuid = Uuid::new_v4();
         bytes[21..37].copy_from_slice(session_uuid.as_bytes());
 
-        Ok(SessionId(bytes, PhantomData))
+        Ok(SessionId(bytes))
     }
 
     pub fn to_string(&self) -> String {
@@ -179,6 +179,6 @@ impl<VII: ValidatorIdentityIdentity> SessionId<VII> {
         }
         bytes[21..37].copy_from_slice(&uuid);
 
-        Ok(SessionId(bytes, PhantomData))
+        Ok(SessionId(bytes))
     }
 }

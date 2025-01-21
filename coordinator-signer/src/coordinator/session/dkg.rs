@@ -23,11 +23,12 @@ use crate::{
 pub(crate) enum CoordinatorDKGState<C: Cipher> {
     Part1,
     Part2 {
-        round1_package_map: C::DKGRound1PackageMap,
+        round1_package_map: BTreeMap<C::Identifier, C::DKGRound1Package>,
     },
     GenPublicKey {
-        round1_package_map: C::DKGRound1PackageMap,
-        round2_package_map_map: C::DKGRound2PackageMapMap,
+        round1_package_map: BTreeMap<C::Identifier, C::DKGRound1Package>,
+        round2_package_map_map:
+            BTreeMap<C::Identifier, BTreeMap<C::Identifier, C::DKGRound2Package>>,
     },
     Completed {
         public_key: C::PublicKeyPackage,
@@ -35,7 +36,7 @@ pub(crate) enum CoordinatorDKGState<C: Cipher> {
 }
 
 pub(crate) struct CoordinatorDKGSession<VII: ValidatorIdentityIdentity, C: Cipher> {
-    session_id: SessionId<VII>,
+    session_id: SessionId,
     min_signers: u16,
     dkg_state: CoordinatorDKGState<C>,
     participants: Participants<VII, C>,
@@ -45,10 +46,10 @@ pub(crate) struct CoordinatorDKGSession<VII: ValidatorIdentityIdentity, C: Ciphe
 pub(crate) struct DKGInfo<VII: ValidatorIdentityIdentity, C: Cipher> {
     pub(crate) min_signers: u16,
     pub(crate) participants: Participants<VII, C>,
-    pub(crate) session_id: SessionId<VII>,
+    pub(crate) session_id: SessionId,
     pub(crate) public_key_package: C::PublicKeyPackage,
 }
-impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorDKGSession<VII, C> {
+impl<VII: ValidatorIdentityIdentity, C: Cipher + PartialEq + Eq> CoordinatorDKGSession<VII, C> {
     pub fn new(
         participants: Participants<VII, C>,
         min_signers: u16,
@@ -66,14 +67,34 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorDKGSession<VII, C> {
             dkg_sender,
         })
     }
-    pub(crate) fn session_id(&self) -> SessionId<VII> {
+    fn match_base_info(&self, base_info: &DKGBaseMessage<VII, C>) -> Result<(), SessionError<C>> {
+        if self.session_id != base_info.session_id {
+            return Err(SessionError::BaseInfoNotMatch(format!(
+                "session id does not match: {:?} vs {:?}",
+                self.session_id, base_info.session_id
+            )));
+        }
+        if self.min_signers != base_info.min_signers {
+            return Err(SessionError::BaseInfoNotMatch(format!(
+                "min signers does not match: {:?} vs {:?}",
+                self.min_signers, base_info.min_signers
+            )));
+        }
+        if self.participants != base_info.participants {
+            return Err(SessionError::BaseInfoNotMatch(format!(
+                "participants does not match: {:?} vs {:?}",
+                self.participants, base_info.participants
+            )));
+        }
+
+        Ok(())
+    }
+    pub(crate) fn session_id(&self) -> SessionId {
         self.session_id.clone()
     }
     pub(crate) async fn start_dkg(
         mut self,
-        response_sender: oneshot::Sender<
-            Result<DKGInfo<VII, C>, (SessionId<VII>, SessionError<C>)>,
-        >,
+        response_sender: oneshot::Sender<Result<DKGInfo<VII, C>, (SessionId, SessionError<C>)>>,
     ) {
         tokio::spawn(async move {
             tracing::debug!("Starting DKG session with id: {:?}", self.session_id);
@@ -228,7 +249,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorDKGSession<VII, C> {
                 self.participants
                     .iter()
                     .map(|(id, identity)| {
-                        let mut round2_packages = <C as Cipher>::DKGRound2PackageMap::new();
+                        let mut round2_packages = BTreeMap::new();
                         for (oid, round2_package_map) in round2_package_map_map.iter() {
                             if oid == id {
                                 continue;
@@ -268,9 +289,13 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorDKGSession<VII, C> {
         &self,
         response: BTreeMap<C::Identifier, DKGResponse<VII, C>>,
     ) -> Result<CoordinatorDKGState<C>, SessionError<C>> {
+        for (_, response) in response.iter() {
+            self.match_base_info(&response.base_info)?;
+        }
+        self.participants.check_keys_equal(&response)?;
         match self.dkg_state.clone() {
             CoordinatorDKGState::Part1 => {
-                let mut packages = <C as Cipher>::DKGRound1PackageMap::new();
+                let mut packages = BTreeMap::new();
                 for (id, _) in self.participants.iter() {
                     // find in response
                     let response = response.get(id).ok_or(
@@ -295,7 +320,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorDKGSession<VII, C> {
                 })
             }
             CoordinatorDKGState::Part2 { round1_package_map } => {
-                let mut packagess = <C as Cipher>::DKGRound2PackageMapMap::new();
+                let mut packagess = BTreeMap::new();
                 for (id, _) in self.participants.iter() {
                     let response =
                         response

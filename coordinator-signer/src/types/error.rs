@@ -25,6 +25,8 @@ pub(crate) enum SessionError<C: Cipher> {
     TransformWrapingMessageError(String),
     #[error("Send oneshot error: {0}")]
     SendOneshotError(String),
+    #[error("Base info does not match: {0}")]
+    BaseInfoNotMatch(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

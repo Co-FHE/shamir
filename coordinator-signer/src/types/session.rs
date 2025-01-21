@@ -10,13 +10,13 @@ use crate::crypto::{Identifier, PkId};
 
 use super::{error::SessionError, Cipher, ValidatorIdentityIdentity};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct Participants<VII: ValidatorIdentityIdentity, C: Cipher>(
     BTreeMap<C::Identifier, VII>,
 );
 
 pub(crate) struct DKGBaseState<VII: ValidatorIdentityIdentity, C: Cipher> {
-    pub(crate) session_id: SessionId<VII>,
+    pub(crate) session_id: SessionId,
     pub(crate) participants: Participants<VII, C>,
     pub(crate) min_signers: u16,
 }
@@ -68,6 +68,51 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> Participants<VII, C> {
     }
     pub(crate) fn len(&self) -> usize {
         self.0.len()
+    }
+    pub(crate) fn check_identifier_identity_exists(
+        &self,
+        identifier: &C::Identifier,
+        identity: &VII,
+    ) -> Result<(), SessionError<C>> {
+        match self.get(identifier) {
+            Some(_identity) => {
+                if _identity != identity {
+                    return Err(SessionError::InvalidParticipants(format!(
+                        "identity does not match: {:?} vs {:?}",
+                        _identity, identity
+                    )));
+                }
+            }
+            None => {
+                return Err(SessionError::InvalidParticipants(format!(
+                    "identity not found for identifier: {:?}",
+                    identifier
+                )));
+            }
+        }
+        Ok(())
+    }
+    pub(crate) fn check_keys_equal<V>(
+        &self,
+        other: &BTreeMap<C::Identifier, V>,
+    ) -> Result<(), SessionError<C>> {
+        if self.len() != other.len() {
+            return Err(SessionError::InvalidParticipants(format!(
+                "participants length does not match: {:?} vs {:?}",
+                self.len(),
+                other.len()
+            )));
+        }
+        for (key, _) in self.iter() {
+            if !other.contains_key(key) {
+                return Err(SessionError::InvalidParticipants(format!(
+                    "participants keys do not match: {:?} vs {:?}",
+                    self.keys(),
+                    other.keys()
+                )));
+            }
+        }
+        Ok(())
     }
     pub(crate) fn check_min_signers(&self, min_signers: u16) -> Result<(), SessionError<C>> {
         if self.len() < min_signers as usize {

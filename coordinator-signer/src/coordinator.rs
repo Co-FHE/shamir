@@ -97,7 +97,8 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
             instruction_receiver,
             dkg_session_sender,
             signing_session_sender,
-        );
+        )
+        .listening();
         Ok(Self {
             p2p_keypair,
             swarm,
@@ -125,7 +126,7 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                     }
                 },
                 recv_data = self.dkg_session_receiver.recv()=> {
-                    tracing::info!("Received DKG request from session");
+                    tracing::info!("Received DKG request from session {:?}", recv_data);
                     if let Some((request, sender)) = recv_data {
                         if let Err(e) = self.handle_dkg_request(request, sender).await {
                             tracing::error!("Error handling DKG request: {}", e);
@@ -528,11 +529,13 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                         tracing::info!("Received sign request: {}", msg);
                         let pkid = PkId::from(pkid);
                         let (sender, receiver) = oneshot::channel();
-                        self.instruction_sender.send(Instruction::Sign {
-                            pkid,
-                            msg: msg.as_bytes().to_vec(),
-                            signature_response_oneshot: sender,
-                        });
+                        self.instruction_sender
+                            .send(Instruction::Sign {
+                                pkid,
+                                msg: msg.as_bytes().to_vec(),
+                                signature_response_oneshot: sender,
+                            })
+                            .unwrap();
                         tokio::spawn(async move {
                             let result = receiver.await.unwrap();
                             match result {
@@ -553,9 +556,11 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                     Command::ListPkId => {
                         tracing::info!("Received list pkid request");
                         let (sender, receiver) = oneshot::channel();
-                        self.instruction_sender.send(Instruction::ListPkIds {
-                            list_pkids_response_oneshot: sender,
-                        });
+                        self.instruction_sender
+                            .send(Instruction::ListPkIds {
+                                list_pkids_response_oneshot: sender,
+                            })
+                            .unwrap();
                         let pkids = receiver.await.unwrap();
                         for (crypto_type, pkids) in pkids {
                             reader
@@ -576,12 +581,14 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                                 .push(((i + 1) as u16, validator.validator_peer_id.clone()));
                         }
                         let (sender, receiver) = oneshot::channel();
-                        self.instruction_sender.send(Instruction::NewKey {
-                            min_signers,
-                            crypto_type,
-                            participants,
-                            pkid_response_oneshot: sender,
-                        });
+                        self.instruction_sender
+                            .send(Instruction::NewKey {
+                                min_signers,
+                                crypto_type,
+                                participants,
+                                pkid_response_oneshot: sender,
+                            })
+                            .unwrap();
                         tokio::spawn(async move {
                             let result = receiver.await.unwrap();
                             match result {

@@ -148,6 +148,16 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                         tracing::error!("Error handling command: {}", e);
                     }
                 }
+                event = self.dkg_response_futures.select_next_some() => {
+                    if let Err(e) = self.dkg_handle_response(event.unwrap()).await {
+                        tracing::error!("Error handling dkg response: {}", e);
+                    }
+                }
+                event = self.signing_response_futures.select_next_some() => {
+                    if let Err(e) = self.signing_handle_response(event.unwrap()).await {
+                        tracing::error!("Error handling signing response: {}", e);
+                    }
+                }
             }
         }
     }
@@ -310,6 +320,9 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                             .send(Request::Signing((request_id, request), tx))
                             .unwrap();
                     }
+                    CoorToSigRequest::Empty => {
+                        tracing::info!("Received empty request");
+                    }
                 }
             }
             SwarmEvent::Behaviour(SigBehaviourEvent::Sig2coor(
@@ -351,11 +364,15 @@ impl<VI: ValidatorIdentity> Signer<VI> {
     }
     pub(crate) async fn dkg_handle_response(
         &mut self,
-        response: Result<(InboundRequestId, DKGResponseWrap<VI::Identity>), SessionManagerError>,
+        response: (
+            InboundRequestId,
+            Result<DKGResponseWrap<VI::Identity>, SessionManagerError>,
+        ),
     ) -> Result<(), anyhow::Error> {
-        match response {
-            Ok((request_id, response)) => {
-                let channel = self.channel_mapping.remove(&request_id).unwrap();
+        let id = response.0;
+        match response.1 {
+            Ok(response) => {
+                let channel = self.channel_mapping.remove(&id).unwrap();
                 self.swarm
                     .behaviour_mut()
                     .coor2sig
@@ -369,13 +386,14 @@ impl<VI: ValidatorIdentity> Signer<VI> {
     }
     pub(crate) async fn signing_handle_response(
         &mut self,
-        response: Result<
-            (InboundRequestId, SigningResponseWrap<VI::Identity>),
-            SessionManagerError,
-        >,
+        response: (
+            InboundRequestId,
+            Result<SigningResponseWrap<VI::Identity>, SessionManagerError>,
+        ),
     ) -> Result<(), anyhow::Error> {
-        match response {
-            Ok((request_id, response)) => {
+        let request_id = response.0;
+        match response.1 {
+            Ok(response) => {
                 let channel = self.channel_mapping.remove(&request_id).unwrap();
                 self.swarm.behaviour_mut().coor2sig.send_response(
                     channel,

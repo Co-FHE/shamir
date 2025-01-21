@@ -34,7 +34,6 @@ pub(crate) enum DKGRequestStage<C: Cipher> {
     },
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "cipher_type")]
 pub(crate) enum DKGRequestWrap<VII: ValidatorIdentityIdentity> {
     Ed25519(DKGRequest<VII, Ed25519Sha512>),
     Secp256k1(DKGRequest<VII, Secp256K1Sha256>),
@@ -61,7 +60,6 @@ pub(crate) enum DKGResponseStage<C: Cipher> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "cipher_type")]
 pub(crate) enum DKGResponseWrap<VII: ValidatorIdentityIdentity> {
     Ed25519(DKGResponse<VII, Ed25519Sha512>),
     Secp256k1(DKGResponse<VII, Secp256K1Sha256>),

@@ -48,6 +48,7 @@ pub(crate) enum SigToCoorResponse {
 pub(crate) enum CoorToSigRequest<VII: ValidatorIdentityIdentity> {
     DKGRequest(DKGRequestWrap<VII>),
     SigningRequest(SigningRequestWrap<VII>),
+    Empty,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

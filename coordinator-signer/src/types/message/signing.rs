@@ -29,7 +29,6 @@ pub(crate) enum SigningRequestStage<C: Cipher> {
     Round2 { signing_package: C::SigningPackage },
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "cipher_type")]
 pub(crate) enum SigningRequestWrap<VII: ValidatorIdentityIdentity> {
     Ed25519(SigningRequest<VII, Ed25519Sha512>),
     Secp256k1(SigningRequest<VII, Secp256K1Sha256>),
@@ -43,7 +42,6 @@ pub(crate) struct SigningResponse<VII: ValidatorIdentityIdentity, C: Cipher> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "cipher_type")]
 pub(crate) enum SigningResponseStage<C: Cipher> {
     Round1 { commitments: C::SigningCommitments },
     Round2 { signature_share: C::SignatureShare },

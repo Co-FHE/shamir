@@ -1,6 +1,6 @@
 mod base;
 use base::SigningSignerBase;
-use rand::{rngs::ThreadRng, CryptoRng, RngCore};
+use rand::{rngs::ThreadRng, thread_rng, CryptoRng, RngCore};
 use std::collections::BTreeMap;
 
 use subsession::SignerSubsession;
@@ -41,9 +41,10 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SigningSession<VII, C> {
             subsessions: BTreeMap::new(),
         })
     }
-    pub(crate) fn apply_request(
+    pub(crate) fn apply_request<R: RngCore + CryptoRng>(
         &mut self,
         request: SigningRequest<VII, C>,
+        rng: &mut R,
     ) -> Result<SigningResponse<VII, C>, SessionError<C>> {
         let subsession_id = request.base_info.subsession_id.clone();
         let subsession = self.subsessions.get_mut(&subsession_id);
@@ -55,7 +56,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SigningSession<VII, C> {
             Ok(response)
         } else {
             let (subsession, response) =
-                SignerSubsession::<VII, C>::new_from_request(request, self.base.clone())?;
+                SignerSubsession::<VII, C>::new_from_request(request, self.base.clone(), rng)?;
             self.subsessions.insert(subsession_id, subsession);
             Ok(response)
         }

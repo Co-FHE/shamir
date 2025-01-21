@@ -70,10 +70,10 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher + PartialEq + Eq> DKGSession<VII,
 
         Ok(())
     }
-    pub(crate) fn new_from_request(
+    pub(crate) fn new_from_request<R: RngCore + CryptoRng>(
         request: DKGRequest<VII, C>,
+        mut rng: R,
     ) -> Result<(Self, DKGResponse<VII, C>), SessionError<C>> {
-        let mut rng = thread_rng();
         let DKGBaseMessage {
             session_id,
             min_signers,
@@ -117,9 +117,10 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher + PartialEq + Eq> DKGSession<VII,
             )))
         }
     }
-    pub(crate) fn update_from_request(
+    pub(crate) fn update_from_request<R: RngCore + CryptoRng>(
         &mut self,
         request: DKGRequest<VII, C>,
+        rng: R,
     ) -> Result<DKGResponse<VII, C>, SessionError<C>> {
         let DKGBaseMessage {
             identifier,

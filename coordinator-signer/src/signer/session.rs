@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use dkg::DKGSession;
 use futures::StreamExt;
 use libp2p::request_response::InboundRequestId;
+use rand::{rngs::ThreadRng, thread_rng, CryptoRng, RngCore};
 use signing::SigningSession;
 use tokio::sync::{broadcast, mpsc::UnboundedReceiver, oneshot};
 
@@ -35,13 +36,14 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
         &mut self,
         request: DKGRequestWrap<VII>,
     ) -> Result<DKGResponseWrap<VII>, SessionManagerError> {
+        let rng = thread_rng();
         let request = DKGRequest::<VII, C>::from(request)
             .map_err(|e| SessionManagerError::SessionError(e.to_string()))?;
         let session_id = request.session_id();
         match self.dkg_sessions.get_mut(&session_id) {
             Some(session) => {
                 let response = session
-                    .update_from_request(request)
+                    .update_from_request(request, rng)
                     .map_err(|e| SessionManagerError::SessionError(e.to_string()))?;
                 if let Some(session) = session
                     .is_completed()
@@ -54,7 +56,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
                     .map_err(|e| SessionManagerError::SessionError(e.to_string()))?)
             }
             None => {
-                let (session, response) = DKGSession::new_from_request(request.clone())
+                let (session, response) = DKGSession::new_from_request(request.clone(), rng)
                     .map_err(|e| SessionManagerError::SessionError(e.to_string()))?;
                 self.dkg_sessions.insert(session_id, session);
                 Ok(DKGResponseWrap::from(response)
@@ -66,12 +68,13 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
         &mut self,
         request: SigningRequestWrap<VII>,
     ) -> Result<SigningResponseWrap<VII>, SessionManagerError> {
+        let mut rng = thread_rng();
         let request = SigningRequest::<VII, C>::from(request)
             .map_err(|e| SessionManagerError::SessionError(e.to_string()))?;
         let pkid = request.base_info.pkid.clone();
         let response = match self.signing_sessions.get_mut(&pkid) {
             Some(session) => Ok(session
-                .apply_request(request)
+                .apply_request(request, &mut rng)
                 .map_err(|e| SessionManagerError::SessionError(e.to_string()))?),
             None => Err(SessionManagerError::SessionError(
                 SessionError::<C>::SessionNotFound(pkid.to_string()).to_string(),

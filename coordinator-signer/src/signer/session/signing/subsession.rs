@@ -28,13 +28,14 @@ pub(crate) struct SignerSubsession<VII: ValidatorIdentityIdentity, C: Cipher> {
     pub(crate) message: Vec<u8>,
 }
 impl<VII: ValidatorIdentityIdentity, C: Cipher> SignerSubsession<VII, C> {
-    pub(crate) fn new_from_request(
+    pub(crate) fn new_from_request<R: RngCore + CryptoRng>(
         request: SigningRequest<VII, C>,
         base: SigningSignerBase<VII, C>,
+        mut rng: R,
     ) -> Result<(Self, SigningResponse<VII, C>), SessionError<C>> {
         if let SigningRequestStage::Round1 { message } = request.stage.clone() {
             base.check_request(&request)?;
-            let (nonces, commitments) = C::commit(&base.key_package, &mut thread_rng());
+            let (nonces, commitments) = C::commit(&base.key_package, &mut rng);
             let response = SigningResponse {
                 base_info: request.base_info.clone(),
                 stage: SigningResponseStage::Round1 {

@@ -35,14 +35,13 @@ use crate::crypto::{
     ValidatorIdentityPublicKey,
 };
 use crate::types::message::{
-    CoorToSigRequest, CoorToSigResponse, DKGRequestWrap, DKGResponseWrap, SigBehaviour,
-    SigBehaviourEvent, SigToCoorRequest, SigToCoorResponse, SigningResponseWrap,
-    ValidatorIdentityRequest,
+    CoorToSigRequest, CoorToSigResponse, DKGResponseWrap, SigBehaviour, SigBehaviourEvent,
+    SigToCoorRequest, SigToCoorResponse, SigningResponseWrap, ValidatorIdentityRequest,
 };
 use crate::utils::{self, concat_string_hash};
 use command::Command;
 
-pub struct Signer<VI: ValidatorIdentity, R: CryptoRng + RngCore> {
+pub struct Signer<VI: ValidatorIdentity> {
     validator_keypair: VI::Keypair,
     p2p_keypair: libp2p::identity::Keypair,
     swarm: libp2p::Swarm<SigBehaviour<VI::Identity>>,
@@ -51,11 +50,23 @@ pub struct Signer<VI: ValidatorIdentity, R: CryptoRng + RngCore> {
     coordinator_peer_id: PeerId,
     register_request_id: Option<request_response::OutboundRequestId>,
     request_sender: UnboundedSender<Request<VI::Identity>>,
-    _phantom: PhantomData<R>,
+    dkg_response_futures: FuturesUnordered<
+        oneshot::Receiver<(
+            InboundRequestId,
+            Result<DKGResponseWrap<VI::Identity>, SessionManagerError>,
+        )>,
+    >,
+    signing_response_futures: FuturesUnordered<
+        oneshot::Receiver<(
+            InboundRequestId,
+            Result<SigningResponseWrap<VI::Identity>, SessionManagerError>,
+        )>,
+    >,
+    channel_mapping: HashMap<InboundRequestId, ResponseChannel<CoorToSigResponse<VI::Identity>>>,
 }
 
-impl<VI: ValidatorIdentity, R: CryptoRng + RngCore + Clone + Send + Sync + 'static> Signer<VI, R> {
-    pub fn new(validator_keypair: VI::Keypair, rng: R) -> Result<Self, anyhow::Error> {
+impl<VI: ValidatorIdentity> Signer<VI> {
+    pub fn new(validator_keypair: VI::Keypair) -> Result<Self, anyhow::Error> {
         let keypair = libp2p::identity::Keypair::generate_ed25519();
         let mut swarm = libp2p::SwarmBuilder::with_existing_identity(keypair.clone())
             .with_tokio()
@@ -95,12 +106,7 @@ impl<VI: ValidatorIdentity, R: CryptoRng + RngCore + Clone + Send + Sync + 'stat
             <PeerId as FromStr>::from_str(&Settings::global().coordinator.peer_id).unwrap();
         swarm.add_peer_address(coordinator_peer_id, coordinator_addr.clone());
         let (request_sender, request_receiver) = tokio::sync::mpsc::unbounded_channel();
-        manager::SignerSessionManager::new(request_receiver, rng).listening(|ch,response| {
-            swarm
-                .behaviour_mut()
-                .coor2sig
-                .send_response(ch, response);
-        });
+        manager::SignerSessionManager::new(request_receiver).listening();
         Ok(Self {
             validator_keypair: validator_keypair.clone(),
             p2p_keypair: keypair,
@@ -119,7 +125,9 @@ impl<VI: ValidatorIdentity, R: CryptoRng + RngCore + Clone + Send + Sync + 'stat
             .unwrap(),
             register_request_id: None,
             request_sender,
-            _phantom: PhantomData,
+            dkg_response_futures: FuturesUnordered::new(),
+            signing_response_futures: FuturesUnordered::new(),
+            channel_mapping: HashMap::new(),
         })
     }
     pub(crate) async fn start_listening(mut self) -> Result<(), anyhow::Error> {
@@ -285,142 +293,22 @@ impl<VI: ValidatorIdentity, R: CryptoRng + RngCore + Clone + Send + Sync + 'stat
                 );
                 match request {
                     CoorToSigRequest::DKGRequest(request) => {
+                        tracing::info!("Received dkg request: {:?}", request);
                         let (tx, rx) = tokio::sync::oneshot::channel();
+                        self.dkg_response_futures.push(rx);
+                        self.channel_mapping.insert(request_id, channel);
                         self.request_sender
                             .send(Request::DKG((request_id, request), tx))
                             .unwrap();
-
-                        let session_id = request.get_session_id();
-                        if let Some(existing_session) = self.sessions.get_mut(&session_id) {
-                            match existing_session.update_from_request(request) {
-                                Ok(response) => {
-                                    if let Some(signing_session) = existing_session.is_completed() {
-                                        tracing::info!("DKG is completed");
-                                        match signing_session {
-                                            Ok(signing_session) => {
-                                                tracing::info!("Signing session is completed");
-                                                self.signing_sessions.insert(
-                                                    signing_session.pkid.clone(),
-                                                    signing_session,
-                                                );
-                                                self.sessions.remove(&session_id);
-                                            }
-                                            Err(e) => {
-                                                tracing::error!(
-                                                    "Failed to create signing session: {}",
-                                                    e
-                                                );
-                                            }
-                                        }
-                                    }
-                                    tracing::info!("Sent {:?} to coordinator", response);
-                                    if let Err(e) =
-                                        self.swarm.behaviour_mut().coor2sig.send_response(
-                                            channel,
-                                            CoorToSigResponse::DKGResponse(response.clone()),
-                                        )
-                                    {
-                                        tracing::error!("Failed to send response: {:?}", e);
-                                        return Err(anyhow::anyhow!(
-                                            "Failed to send response: {:?}",
-                                            e
-                                        ));
-                                    }
-                                    return Ok(());
-                                }
-                                Err(e) => {
-                                    tracing::error!("Failed to update session: {}", e);
-                                    channel.
-                                    if let Err(e) =
-                                        self.swarm.behaviour_mut().coor2sig.send_response(
-                                            channel,
-                                            CoorToSigResponse::DKGResponse(
-                                                DKGSingleResponse::Failure(format!(
-                                                    "Failed to update session: {}",
-                                                    e
-                                                )),
-                                            ),
-                                        )
-                                    {
-                                        tracing::error!("Failed to send response: {:?}", e);
-                                        return Err(anyhow::anyhow!(
-                                            "Failed to send response: {:?}",
-                                            e
-                                        ));
-                                    }
-                                    return Ok(());
-                                }
-                            }
-                        } else {
-                            match SignerSession::new_from_request(request) {
-                                Ok((session, response)) => {
-                                    self.sessions.insert(session_id.clone(), session);
-                                    if let Err(e) =
-                                        self.swarm.behaviour_mut().coor2sig.send_response(
-                                            channel,
-                                            CoorToSigResponse::DKGResponse(response.clone()),
-                                        )
-                                    {
-                                        tracing::error!("Failed to send response: {:?}", e);
-                                        return Err(anyhow::anyhow!(
-                                            "Failed to send response: {:?}",
-                                            e
-                                        ));
-                                    }
-                                    tracing::info!("Sent {:?} to coordinator", response);
-                                }
-                                Err(e) => {
-                                    tracing::error!("Failed to create session: {}", e);
-                                    if let Err(e) =
-                                        self.swarm.behaviour_mut().coor2sig.send_response(
-                                            channel,
-                                            CoorToSigResponse::DKGResponse(
-                                                DKGSingleResponse::Failure(format!(
-                                                    "Failed to create session: {}",
-                                                    e
-                                                )),
-                                            ),
-                                        )
-                                    {
-                                        tracing::error!("Failed to send response: {:?}", e);
-                                        return Err(anyhow::anyhow!(
-                                            "Failed to send response: {:?}",
-                                            e
-                                        ));
-                                    }
-                                    return Ok(());
-                                }
-                            }
-                        }
                     }
                     CoorToSigRequest::SigningRequest(request) => {
                         tracing::info!("Received signing request: {:?}", request);
+                        let (tx, rx) = tokio::sync::oneshot::channel();
+                        self.signing_response_futures.push(rx);
+                        self.channel_mapping.insert(request_id, channel);
                         self.request_sender
-                            .send(Request::Signing(request, sender))
+                            .send(Request::Signing((request_id, request), tx))
                             .unwrap();
-                        let pkid = request.get_pkid();
-                        if let Some(existing_session) = self.signing_sessions.get_mut(&pkid) {
-                            match existing_session.apply_request(request) {
-                                Ok(response) => {
-                                    if let Err(e) =
-                                        self.swarm.behaviour_mut().coor2sig.send_response(
-                                            channel,
-                                            CoorToSigResponse::SigningResponse(response.clone()),
-                                        )
-                                    {
-                                        tracing::error!("Failed to send response: {:?}", e);
-                                        return Err(anyhow::anyhow!(
-                                            "Failed to send response: {:?}",
-                                            e
-                                        ));
-                                    }
-                                    tracing::info!("Sent {:?} to coordinator", response);
-                                }
-                                Err(e) => {
-                                    tracing::error!("Failed to apply request: {}", e);
-                                }
-                            }
-                        }
                     }
                 }
             }
@@ -466,11 +354,34 @@ impl<VI: ValidatorIdentity, R: CryptoRng + RngCore + Clone + Send + Sync + 'stat
         response: Result<(InboundRequestId, DKGResponseWrap<VI::Identity>), SessionManagerError>,
     ) -> Result<(), anyhow::Error> {
         match response {
-            Ok((request_id, response)) => self
-                .swarm
-                .behaviour_mut()
-                .coor2sig
-                .send_response(channel, CoorToSigResponse::DKGResponse(response.clone())),
+            Ok((request_id, response)) => {
+                let channel = self.channel_mapping.remove(&request_id).unwrap();
+                self.swarm
+                    .behaviour_mut()
+                    .coor2sig
+                    .send_response(channel, CoorToSigResponse::DKGResponse(response.clone()));
+            }
+            Err(e) => {
+                tracing::error!("Failed to handle response: {:?}", e);
+            }
+        }
+        Ok(())
+    }
+    pub(crate) async fn signing_handle_response(
+        &mut self,
+        response: Result<
+            (InboundRequestId, SigningResponseWrap<VI::Identity>),
+            SessionManagerError,
+        >,
+    ) -> Result<(), anyhow::Error> {
+        match response {
+            Ok((request_id, response)) => {
+                let channel = self.channel_mapping.remove(&request_id).unwrap();
+                self.swarm.behaviour_mut().coor2sig.send_response(
+                    channel,
+                    CoorToSigResponse::SigningResponse(response.clone()),
+                );
+            }
             Err(e) => {
                 tracing::error!("Failed to handle response: {:?}", e);
             }

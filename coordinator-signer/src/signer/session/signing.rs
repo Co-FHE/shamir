@@ -1,6 +1,6 @@
 mod base;
 use base::SigningSignerBase;
-use rand::{CryptoRng, RngCore};
+use rand::{rngs::ThreadRng, CryptoRng, RngCore};
 use std::collections::BTreeMap;
 
 use subsession::SignerSubsession;
@@ -16,18 +16,11 @@ use crate::{
 };
 
 mod subsession;
-pub(crate) struct SigningSession<
-    VII: ValidatorIdentityIdentity,
-    C: Cipher,
-    R: CryptoRng + RngCore + Clone,
-> {
+pub(crate) struct SigningSession<VII: ValidatorIdentityIdentity, C: Cipher> {
     base: SigningSignerBase<VII, C>,
-    subsessions: BTreeMap<SubsessionId, SignerSubsession<VII, C, R>>,
-    rng: R,
+    subsessions: BTreeMap<SubsessionId, SignerSubsession<VII, C>>,
 }
-impl<VII: ValidatorIdentityIdentity, C: Cipher, R: CryptoRng + RngCore + Clone>
-    SigningSession<VII, C, R>
-{
+impl<VII: ValidatorIdentityIdentity, C: Cipher> SigningSession<VII, C> {
     pub(crate) fn new(
         public_key_package: C::PublicKeyPackage,
         min_signers: u16,
@@ -35,7 +28,6 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher, R: CryptoRng + RngCore + Clone>
         key_package: C::KeyPackage,
         identifier: C::Identifier,
         identity: VII,
-        rng: R,
     ) -> Result<Self, SessionError<C>> {
         Ok(Self {
             base: SigningSignerBase::new(
@@ -47,7 +39,6 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher, R: CryptoRng + RngCore + Clone>
                 identity,
             )?,
             subsessions: BTreeMap::new(),
-            rng,
         })
     }
     pub(crate) fn apply_request(
@@ -63,11 +54,8 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher, R: CryptoRng + RngCore + Clone>
             }
             Ok(response)
         } else {
-            let (subsession, response) = SignerSubsession::<VII, C, R>::new_from_request(
-                request,
-                self.base.clone(),
-                self.rng.clone(),
-            )?;
+            let (subsession, response) =
+                SignerSubsession::<VII, C>::new_from_request(request, self.base.clone())?;
             self.subsessions.insert(subsession_id, subsession);
             Ok(response)
         }

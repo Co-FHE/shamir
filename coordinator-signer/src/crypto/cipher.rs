@@ -88,6 +88,14 @@ pub trait Cipher: Clone + std::fmt::Debug + Send + Sync + 'static + PartialEq + 
     ) -> (Self::SigningNonces, Self::SigningCommitments);
 }
 
+pub trait RngType: CryptoRng + RngCore + Clone {
+    fn new() -> Self;
+}
+impl RngType for rand::rngs::ThreadRng {
+    fn new() -> Self {
+        Self::default()
+    }
+}
 pub trait Signature:
     Serialize + for<'de> Deserialize<'de> + fmt::Debug + Clone + Send + Sync
 {

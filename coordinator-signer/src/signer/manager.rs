@@ -19,9 +19,8 @@ use tokio::sync::{
 
 use crate::crypto::*;
 
-use super::session::RequestCipher;
 use super::CoorToSigResponse;
-use super::{session::SessionWrapTrait, SessionWrap};
+use super::SessionWrap;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum SessionManagerError {
@@ -35,70 +34,68 @@ pub(crate) enum SessionManagerError {
     CryptoTypeError(#[from] CryptoTypeError),
 }
 pub(crate) enum Request<VII: ValidatorIdentityIdentity> {
-    DKG(DKGRequestWrap<VII>, ResponseChannel<CoorToSigResponse<VII>>),
+    DKG(
+        (InboundRequestId, DKGRequestWrap<VII>),
+        oneshot::Sender<(
+            InboundRequestId,
+            Result<DKGResponseWrap<VII>, SessionManagerError>,
+        )>,
+    ),
     Signing(
-        SigningRequestWrap<VII>,
-        ResponseChannel<CoorToSigResponse<VII>>,
+        (InboundRequestId, SigningRequestWrap<VII>),
+        oneshot::Sender<(
+            InboundRequestId,
+            Result<SigningResponseWrap<VII>, SessionManagerError>,
+        )>,
     ),
 }
 macro_rules! new_session_wrap {
-    ($session_inst_channels:expr, $generic_type:ty, $crypto_variant:ident, $rng:expr) => {{
+    ($session_inst_channels:expr, $generic_type:ty, $crypto_variant:ident) => {{
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         $session_inst_channels.insert(CryptoType::$crypto_variant, tx);
-        SessionWrap::<VII, $generic_type, R>::new(rx, $rng.clone()).listening();
+        SessionWrap::<VII, $generic_type>::new(rx).listening();
     }};
 }
-pub(crate) struct SignerSessionManager<
-    VII: ValidatorIdentityIdentity + Sized,
-    R: CryptoRng + RngCore + Clone + Sized,
-> {
-    session_inst_channels: HashMap<CryptoType, UnboundedSender<RequestCipher<VII>>>,
+pub(crate) struct SignerSessionManager<VII: ValidatorIdentityIdentity + Sized> {
+    session_inst_channels: HashMap<CryptoType, UnboundedSender<Request<VII>>>,
     request_receiver: UnboundedReceiver<Request<VII>>,
-    _phantom: PhantomData<R>,
 }
-impl<VII: ValidatorIdentityIdentity, R: CryptoRng + RngCore + Clone + Send + Sync + 'static>
-    SignerSessionManager<VII, R>
-{
-    pub(crate) fn new(request_receiver: UnboundedReceiver<Request<VII>>, rng: R) -> Self {
+impl<VII: ValidatorIdentityIdentity> SignerSessionManager<VII> {
+    pub(crate) fn new(request_receiver: UnboundedReceiver<Request<VII>>) -> Self {
         let mut session_inst_channels = HashMap::new();
-        new_session_wrap!(session_inst_channels, Ed25519Sha512, Ed25519, rng);
-        new_session_wrap!(session_inst_channels, Secp256K1Sha256, Secp256k1, rng);
-        new_session_wrap!(session_inst_channels, Secp256K1Sha256TR, Secp256k1Tr, rng);
+        new_session_wrap!(session_inst_channels, Ed25519Sha512, Ed25519);
+        new_session_wrap!(session_inst_channels, Secp256K1Sha256, Secp256k1);
+        new_session_wrap!(session_inst_channels, Secp256K1Sha256TR, Secp256k1Tr);
         assert!(session_inst_channels.len() == CryptoType::iter().len());
 
         Self {
             request_receiver,
             session_inst_channels,
-            _phantom: PhantomData,
         }
     }
-    pub(crate) fn listening<
-        SingingCallback: FnOnce(ResponseChannel<CoorToSigResponse<VII>>, SigningResponseWrap<VII>),
-        DkgCallback: FnOnce(ResponseChannel<CoorToSigResponse<VII>>, DKGResponseWrap<VII>),
-    >(
-        mut self,
-        singing_callback: SingingCallback,
-        dkg_callback: DkgCallback,
-    ) {
+    pub(crate) fn listening(mut self) {
         tokio::spawn(async move {
             loop {
                 let request = self.request_receiver.recv().await;
                 if let Some(request) = request {
                     match request {
-                        Request::DKG(dkg_request_wrap, sender) => {
+                        Request::DKG((request_id, dkg_request_wrap), sender) => {
                             let session_inst_channel = self
                                 .session_inst_channels
                                 .get(&dkg_request_wrap.crypto_type());
                             if let Some(session_inst_channel) = session_inst_channel {
                                 session_inst_channel
-                                    .send(RequestCipher::DKG(dkg_request_wrap, sender))
+                                    .send(Request::DKG((request_id, dkg_request_wrap), sender))
                                     .unwrap();
                             } else {
                                 sender
-                                    .send(Err(SessionManagerError::SessionError(format!(
-                                        "no channel for crypto type {} found",
-                                        dkg_request_wrap.crypto_type()
-                                    ))))
+                                    .send((
+                                        request_id,
+                                        Err(SessionManagerError::SessionError(format!(
+                                            "no channel for crypto type {} found",
+                                            dkg_request_wrap.crypto_type()
+                                        ))),
+                                    ))
                                     .unwrap();
                             }
                         }

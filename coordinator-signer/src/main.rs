@@ -12,6 +12,7 @@ mod utils;
 use common::Settings;
 use coordinator::Coordinator;
 use crypto::P2pIdentity;
+use rand::rngs::ThreadRng;
 #[allow(unused)]
 fn generate_keypair(path: &str) {
     let keypair = libp2p::identity::Keypair::generate_ed25519();

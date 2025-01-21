@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use dkg::DKGSession;
 use futures::StreamExt;
-use rand::{CryptoRng, RngCore};
+use libp2p::request_response::InboundRequestId;
 use signing::SigningSession;
 use tokio::sync::{broadcast, mpsc::UnboundedReceiver, oneshot};
 
@@ -20,47 +20,14 @@ use crate::{
     },
 };
 
-use super::{manager::SessionManagerError, PkId, ValidatorIdentityIdentity};
+use super::{manager::SessionManagerError, PkId, Request, ValidatorIdentityIdentity};
 
-pub(crate) trait SessionWrapTrait {
-    type R: CryptoRng + RngCore + Clone;
-    type VII: ValidatorIdentityIdentity;
-    fn dkg_apply_request(
-        &mut self,
-        request: DKGRequestWrap<Self::VII>,
-    ) -> Result<DKGResponseWrap<Self::VII>, SessionManagerError>;
-    fn signing_apply_request(
-        &mut self,
-        request: SigningRequestWrap<Self::VII>,
-    ) -> Result<SigningResponseWrap<Self::VII>, SessionManagerError>;
-    fn pkid_exists(&self, pkid: PkId) -> bool;
+pub(crate) struct SessionWrap<VII: ValidatorIdentityIdentity, C: Cipher> {
+    dkg_sessions: HashMap<SessionId, DKGSession<VII, C>>,
+    signing_sessions: HashMap<PkId, SigningSession<VII, C>>,
+    request_receiver: UnboundedReceiver<Request<VII>>,
 }
-pub(crate) enum RequestCipher<VII: ValidatorIdentityIdentity> {
-    DKG(
-        DKGRequestWrap<VII>,
-        oneshot::Sender<Result<DKGResponseWrap<VII>, SessionManagerError>>,
-    ),
-    Signing(
-        SigningRequestWrap<VII>,
-        oneshot::Sender<Result<SigningResponseWrap<VII>, SessionManagerError>>,
-    ),
-}
-pub(crate) struct SessionWrap<
-    VII: ValidatorIdentityIdentity,
-    C: Cipher,
-    R: CryptoRng + RngCore + Clone + Send + 'static,
-> {
-    dkg_sessions: HashMap<SessionId, DKGSession<VII, C, R>>,
-    signing_sessions: HashMap<PkId, SigningSession<VII, C, R>>,
-    request_receiver: UnboundedReceiver<RequestCipher<VII>>,
-    rng: R,
-}
-impl<
-        VII: ValidatorIdentityIdentity,
-        C: Cipher,
-        R: CryptoRng + RngCore + Clone + Send + 'static,
-    > SessionWrap<VII, C, R>
-{
+impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
     pub(crate) fn pkid_exists(&self, pkid: PkId) -> bool {
         self.signing_sessions.contains_key(&pkid)
     }
@@ -87,9 +54,8 @@ impl<
                     .map_err(|e| SessionManagerError::SessionError(e.to_string()))?)
             }
             None => {
-                let (session, response) =
-                    DKGSession::new_from_request(request.clone(), self.rng.clone())
-                        .map_err(|e| SessionManagerError::SessionError(e.to_string()))?;
+                let (session, response) = DKGSession::new_from_request(request.clone())
+                    .map_err(|e| SessionManagerError::SessionError(e.to_string()))?;
                 self.dkg_sessions.insert(session_id, session);
                 Ok(DKGResponseWrap::from(response)
                     .map_err(|e| SessionManagerError::SessionError(e.to_string()))?)
@@ -115,15 +81,12 @@ impl<
             .map_err(|e| SessionManagerError::SessionError(e.to_string()))?)
     }
 }
-impl<VII: ValidatorIdentityIdentity, C: Cipher, R: CryptoRng + RngCore + Clone + Send>
-    SessionWrap<VII, C, R>
-{
-    pub(crate) fn new(request_receiver: UnboundedReceiver<RequestCipher<VII>>, rng: R) -> Self {
+impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
+    pub(crate) fn new(request_receiver: UnboundedReceiver<Request<VII>>) -> Self {
         Self {
             dkg_sessions: HashMap::new(),
             signing_sessions: HashMap::new(),
             request_receiver,
-            rng,
         }
     }
     pub(crate) fn listening(mut self) {
@@ -132,14 +95,14 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher, R: CryptoRng + RngCore + Clone +
                 let request = self.request_receiver.recv().await;
                 if let Some(request) = request {
                     match request {
-                        RequestCipher::DKG(request, response_oneshot) => {
+                        Request::DKG((request_id, request), response_oneshot) => {
                             let result = self.dkg_apply_request(request);
-                            response_oneshot.send(result).unwrap();
+                            response_oneshot.send((request_id, result)).unwrap();
                         }
-                        RequestCipher::Signing(request, response_oneshot) => {
+                        Request::Signing((request_id, request), response_oneshot) => {
                             let result = self.signing_apply_request(request);
 
-                            response_oneshot.send(result).unwrap();
+                            response_oneshot.send((request_id, result)).unwrap();
                         }
                     }
                 }

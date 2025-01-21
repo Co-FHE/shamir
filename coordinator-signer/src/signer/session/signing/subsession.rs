@@ -1,4 +1,4 @@
-use rand::{CryptoRng, RngCore};
+use rand::{thread_rng, CryptoRng, RngCore};
 
 use crate::types::message::{
     SigningRequest, SigningRequestStage, SigningResponse, SigningResponseStage,
@@ -21,28 +21,20 @@ pub(crate) enum SignerSigningState<C: Cipher> {
         signature: C::Signature,
     },
 }
-pub(crate) struct SignerSubsession<
-    VII: ValidatorIdentityIdentity,
-    C: Cipher,
-    R: CryptoRng + RngCore,
-> {
+pub(crate) struct SignerSubsession<VII: ValidatorIdentityIdentity, C: Cipher> {
     pub(crate) subsession_id: SubsessionId,
     pub(crate) base: SigningSignerBase<VII, C>,
     pub(crate) signing_state: SignerSigningState<C>,
     pub(crate) message: Vec<u8>,
-    pub(crate) rng: R,
 }
-impl<VII: ValidatorIdentityIdentity, C: Cipher, R: CryptoRng + RngCore>
-    SignerSubsession<VII, C, R>
-{
+impl<VII: ValidatorIdentityIdentity, C: Cipher> SignerSubsession<VII, C> {
     pub(crate) fn new_from_request(
         request: SigningRequest<VII, C>,
         base: SigningSignerBase<VII, C>,
-        mut rng: R,
     ) -> Result<(Self, SigningResponse<VII, C>), SessionError<C>> {
         if let SigningRequestStage::Round1 { message } = request.stage.clone() {
             base.check_request(&request)?;
-            let (nonces, commitments) = C::commit(&base.key_package, &mut rng);
+            let (nonces, commitments) = C::commit(&base.key_package, &mut thread_rng());
             let response = SigningResponse {
                 base_info: request.base_info.clone(),
                 stage: SigningResponseStage::Round1 {
@@ -58,7 +50,6 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher, R: CryptoRng + RngCore>
                         nonces,
                     },
                     message: message,
-                    rng,
                 },
                 response,
             ))

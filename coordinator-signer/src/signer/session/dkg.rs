@@ -1,4 +1,4 @@
-use rand::CryptoRng;
+use rand::{rngs::ThreadRng, thread_rng, CryptoRng};
 
 use crate::{
     crypto::*,
@@ -27,25 +27,15 @@ enum DKGSignerState<C: Cipher> {
         public_key_package: C::PublicKeyPackage,
     },
 }
-pub(crate) struct DKGSession<
-    VII: ValidatorIdentityIdentity,
-    C: Cipher,
-    R: CryptoRng + RngCore + Clone,
-> {
+pub(crate) struct DKGSession<VII: ValidatorIdentityIdentity, C: Cipher> {
     session_id: SessionId,
     min_signers: u16,
     participants: Participants<VII, C>,
     dkg_state: DKGSignerState<C>,
     identity: VII,
     identifier: C::Identifier,
-    rng: R,
 }
-impl<
-        VII: ValidatorIdentityIdentity,
-        C: Cipher + PartialEq + Eq,
-        R: CryptoRng + RngCore + Clone,
-    > DKGSession<VII, C, R>
-{
+impl<VII: ValidatorIdentityIdentity, C: Cipher + PartialEq + Eq> DKGSession<VII, C> {
     fn match_base_info(&self, base_info: &DKGBaseMessage<VII, C>) -> Result<(), SessionError<C>> {
         if self.session_id != base_info.session_id {
             return Err(SessionError::BaseInfoNotMatch(format!(
@@ -82,8 +72,8 @@ impl<
     }
     pub(crate) fn new_from_request(
         request: DKGRequest<VII, C>,
-        mut rng: R,
     ) -> Result<(Self, DKGResponse<VII, C>), SessionError<C>> {
+        let mut rng = thread_rng();
         let DKGBaseMessage {
             session_id,
             min_signers,
@@ -117,7 +107,6 @@ impl<
                     participants: participants.clone(),
                     identity: identity.clone(),
                     identifier: identifier,
-                    rng,
                 },
                 response,
             ))
@@ -219,9 +208,7 @@ impl<
         };
         Ok(resp)
     }
-    pub(crate) fn is_completed(
-        &self,
-    ) -> Result<Option<SigningSession<VII, C, R>>, SessionError<C>> {
+    pub(crate) fn is_completed(&self) -> Result<Option<SigningSession<VII, C>>, SessionError<C>> {
         match self.dkg_state.clone() {
             DKGSignerState::Completed {
                 key_package,
@@ -233,7 +220,6 @@ impl<
                 key_package,
                 self.identifier.clone(),
                 self.identity.clone(),
-                self.rng.clone(),
             )?)),
             _ => Ok(None),
         }

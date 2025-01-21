@@ -107,4 +107,10 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher, R: CryptoRng + RngCore>
             }
         }
     }
+    pub(crate) fn is_completed(&self) -> bool {
+        match &self.signing_state {
+            SignerSigningState::Completed { .. } => true,
+            _ => false,
+        }
+    }
 }

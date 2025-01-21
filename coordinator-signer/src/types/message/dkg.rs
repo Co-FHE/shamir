@@ -113,6 +113,13 @@ impl<VII: ValidatorIdentityIdentity> DKGRequestWrap<VII> {
             DKGRequestWrap::Secp256k1Tr(r) => &r.base_info.identity,
         }
     }
+    pub(crate) fn crypto_type(&self) -> CryptoType {
+        match self {
+            DKGRequestWrap::Ed25519(_) => CryptoType::Ed25519,
+            DKGRequestWrap::Secp256k1(_) => CryptoType::Secp256k1,
+            DKGRequestWrap::Secp256k1Tr(_) => CryptoType::Secp256k1Tr,
+        }
+    }
     pub(crate) fn failure(&self, msg: String) -> DKGResponseWrap<VII> {
         match self {
             DKGRequestWrap::Ed25519(r) => DKGResponseWrap::Ed25519(DKGResponse {
@@ -192,6 +199,9 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> DKGRequest<VII, C> {
                 ))?
                 .clone()),
         }
+    }
+    pub(crate) fn session_id(&self) -> SessionId {
+        self.base_info.session_id
     }
 }
 impl<VII: ValidatorIdentityIdentity, C: Cipher> DKGResponse<VII, C> {

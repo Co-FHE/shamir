@@ -27,6 +27,8 @@ pub(crate) enum SessionError<C: Cipher> {
     SendOneshotError(String),
     #[error("Base info does not match: {0}")]
     BaseInfoNotMatch(String),
+    #[error("Session not found: {0}")]
+    SessionNotFound(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

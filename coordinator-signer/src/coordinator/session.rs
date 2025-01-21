@@ -26,27 +26,19 @@ use tokio::sync::{
     oneshot,
 };
 pub(crate) enum InstructionCipher<VII: ValidatorIdentityIdentity> {
-    IsCryptoType {
-        crypto_type: CryptoType,
-        response_onshot: oneshot::Sender<bool>,
-    },
-    PkIdExists {
-        pkid: PkId,
-        response_onshot: oneshot::Sender<bool>,
-    },
     NewKey {
         participants: Vec<(u16, VII)>,
         min_signers: u16,
-        pkid_response_onshot: oneshot::Sender<Result<PkId, SessionManagerError>>,
+        pkid_response_oneshot: oneshot::Sender<Result<PkId, SessionManagerError>>,
     },
     Sign {
         pkid: PkId,
         msg: Vec<u8>,
-        signature_response_onshot:
+        signature_response_oneshot:
             oneshot::Sender<Result<SignatureSuiteInfo<VII>, SessionManagerError>>,
     },
     ListPkIds {
-        list_pkids_response_onshot: oneshot::Sender<Vec<PkId>>,
+        list_pkids_response_oneshot: oneshot::Sender<Vec<PkId>>,
     },
 }
 pub(crate) struct SessionWrap<VII: ValidatorIdentityIdentity, C: Cipher> {
@@ -128,7 +120,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
         &mut self,
         pkid_raw: T,
         msg: Vec<u8>,
-        signature_response_onshot: oneshot::Sender<
+        signature_response_oneshot: oneshot::Sender<
             Result<SignatureSuiteInfo<VII>, SessionManagerError>,
         >,
     ) -> Result<(), SessionError<C>> {
@@ -144,7 +136,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
         signing_session
             .start_new_signing(msg, tx, |subsession_id| {
                 self.subsession_id_signaturesuite_map
-                    .insert(subsession_id, signature_response_onshot);
+                    .insert(subsession_id, signature_response_oneshot);
             })
             .await;
         return Ok(());
@@ -172,27 +164,10 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
     }
     async fn handle_instruction(&mut self, instruction: InstructionCipher<VII>) {
         match instruction {
-            InstructionCipher::IsCryptoType {
-                crypto_type,
-                response_onshot,
-            } => {
-                if crypto_type == C::crypto_type() {
-                    response_onshot.send(true).unwrap();
-                } else {
-                    response_onshot.send(false).unwrap();
-                }
-            }
-            InstructionCipher::PkIdExists {
-                pkid,
-                response_onshot,
-            } => {
-                let exists = self.find_pkid(pkid);
-                response_onshot.send(exists).unwrap();
-            }
             InstructionCipher::NewKey {
                 participants,
                 min_signers,
-                pkid_response_onshot,
+                pkid_response_oneshot,
             } => {
                 let session_id = self
                     .new_key(participants, min_signers, |id| C::Identifier::from_u16(id))
@@ -201,10 +176,10 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
                 match session_id {
                     Ok(session_id) => {
                         self.session_id_key_map
-                            .insert(session_id, pkid_response_onshot);
+                            .insert(session_id, pkid_response_oneshot);
                     }
                     Err(e) => {
-                        if let Err(e) = pkid_response_onshot.send(Err(e)) {
+                        if let Err(e) = pkid_response_oneshot.send(Err(e)) {
                             tracing::error!("Error sending pkid response: {:?}", e);
                         }
                     }
@@ -213,16 +188,16 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
             InstructionCipher::Sign {
                 pkid,
                 msg,
-                signature_response_onshot,
+                signature_response_oneshot,
             } => {
-                self.sign(pkid.to_bytes(), msg, signature_response_onshot)
+                self.sign(pkid.to_bytes(), msg, signature_response_oneshot)
                     .await;
             }
             InstructionCipher::ListPkIds {
-                list_pkids_response_onshot,
+                list_pkids_response_oneshot,
             } => {
                 let pkids = self.signing_sessions.keys().cloned().collect::<Vec<_>>();
-                if let Err(e) = list_pkids_response_onshot.send(pkids) {
+                if let Err(e) = list_pkids_response_oneshot.send(pkids) {
                     tracing::error!("Error sending pkids response: {:?}", e);
                 }
             }
@@ -234,8 +209,6 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
     ) -> Result<(), SessionError<C>> {
         match dkg_info {
             Ok(dkg_info) => {
-                // signing
-                // dkg_info.public_key_package.pkid()
                 self.signing_sessions.insert(
                     dkg_info
                         .public_key_package

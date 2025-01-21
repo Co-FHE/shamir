@@ -7,6 +7,7 @@ use tokio::sync::{
 };
 
 use crate::types::{
+    error::SessionError,
     message::{
         DKGRequest, DKGRequestWrap, DKGResponse, DKGResponseWrap, SigningRequest,
         SigningRequestWrap, SigningResponse, SigningResponseWrap,
@@ -29,24 +30,24 @@ pub(crate) enum SessionManagerError {
     InvalidMinSigners(u16, u16),
     #[error("Session error: {0}")]
     SessionError(String),
-    #[error("crypto type not supported: {0}")]
-    CryptoTypeNotSupported(String),
+    #[error("crypto type Error: {0}")]
+    CryptoTypeError(#[from] CryptoTypeError),
 }
 pub(crate) enum Instruction<VII: ValidatorIdentityIdentity> {
     NewKey {
         crypto_type: CryptoType,
         participants: Vec<(u16, VII)>,
         min_signers: u16,
-        pkid_response_onshot: oneshot::Sender<Result<PkId, SessionManagerError>>,
+        pkid_response_oneshot: oneshot::Sender<Result<PkId, SessionManagerError>>,
     },
     Sign {
         pkid: PkId,
         msg: Vec<u8>,
-        signature_response_onshot:
+        signature_response_oneshot:
             oneshot::Sender<Result<SignatureSuiteInfo<VII>, SessionManagerError>>,
     },
     ListPkIds {
-        list_pkids_response_onshot: oneshot::Sender<HashMap<CryptoType, Vec<PkId>>>,
+        list_pkids_response_oneshot: oneshot::Sender<HashMap<CryptoType, Vec<PkId>>>,
     },
 }
 macro_rules! new_session_wrap {
@@ -112,7 +113,7 @@ impl<VII: ValidatorIdentityIdentity> CoordiantorSessionManager<VII> {
     }
     pub(crate) fn listening(mut self) {
         tokio::spawn(async move {
-            'outer: loop {
+            loop {
                 let instruction = self.instructions_receiver.recv().await;
                 if let Some(instruction) = instruction {
                     match instruction {
@@ -120,95 +121,72 @@ impl<VII: ValidatorIdentityIdentity> CoordiantorSessionManager<VII> {
                             crypto_type,
                             participants,
                             min_signers,
-                            pkid_response_onshot,
+                            pkid_response_oneshot,
                         } => {
                             let session_inst_channel =
                                 self.session_inst_channels.get(&crypto_type).unwrap();
-                            let (tx, rx) = oneshot::channel();
-                            session_inst_channel
-                                .send(InstructionCipher::IsCryptoType {
-                                    crypto_type,
-                                    response_onshot: tx,
-                                })
-                                .unwrap();
-                            let result = rx.await.unwrap();
-                            if !result {
-                                pkid_response_onshot
-                                    .send(Err(SessionManagerError::CryptoTypeNotSupported(
-                                        format!("{:?}", crypto_type),
-                                    )))
-                                    .unwrap();
-                                continue;
-                            }
                             session_inst_channel
                                 .send(InstructionCipher::NewKey {
                                     participants,
                                     min_signers,
-                                    pkid_response_onshot,
+                                    pkid_response_oneshot,
                                 })
                                 .unwrap();
                         }
                         Instruction::Sign {
                             pkid,
                             msg,
-                            signature_response_onshot,
+                            signature_response_oneshot,
                         } => {
-                            let mut found = None;
-                            for (_, inst_chan) in self.session_inst_channels.iter_mut() {
-                                let (tx, rx) = oneshot::channel();
-                                inst_chan
-                                    .send(InstructionCipher::PkIdExists {
-                                        pkid: pkid.clone(),
-                                        response_onshot: tx,
-                                    })
+                            let crypto_type = pkid.to_crypto_type();
+                            if let Err(e) = crypto_type {
+                                tracing::error!("Error getting crypto type: {:?}", e);
+                                signature_response_oneshot
+                                    .send(Err(SessionManagerError::CryptoTypeError(e)))
                                     .unwrap();
-                                let result = rx.await.unwrap();
-                                if result && found.is_none() {
-                                    found = Some(inst_chan);
+                                continue;
+                            }
+                            let crypto_type = crypto_type.unwrap();
+                            let session_inst_channel = self.session_inst_channels.get(&crypto_type);
+                            match session_inst_channel {
+                                Some(session_inst_channel) => {
+                                    session_inst_channel
+                                        .send(InstructionCipher::Sign {
+                                            pkid: pkid.clone(),
+                                            msg: msg.clone(),
+                                            signature_response_oneshot,
+                                        })
+                                        .unwrap();
                                 }
-                                if result && found.is_some() {
-                                    signature_response_onshot
+                                None => {
+                                    tracing::error!(
+                                        "Session not found for crypto type: {:?}",
+                                        crypto_type
+                                    );
+                                    signature_response_oneshot
                                         .send(Err(SessionManagerError::SessionError(format!(
-                                            "PKID exists in multiple sessions: {:?}",
-                                            pkid
+                                            "crypto type not found: {:?}",
+                                            crypto_type
                                         ))))
                                         .unwrap();
-                                    continue 'outer;
                                 }
                             }
-                            if found.is_none() {
-                                signature_response_onshot
-                                    .send(Err(SessionManagerError::SessionError(format!(
-                                        "PKID not found: {:?}",
-                                        pkid
-                                    ))))
-                                    .unwrap();
-                                continue 'outer;
-                            }
-                            let inst_chan = found.unwrap();
-                            inst_chan
-                                .send(InstructionCipher::Sign {
-                                    pkid: pkid.clone(),
-                                    msg: msg.clone(),
-                                    signature_response_onshot,
-                                })
-                                .unwrap();
                         }
                         Instruction::ListPkIds {
-                            list_pkids_response_onshot,
+                            list_pkids_response_oneshot,
                         } => {
                             let mut pkids = HashMap::new();
                             for (crypto_type, inst_chan) in self.session_inst_channels.iter() {
                                 let (tx, rx) = oneshot::channel();
                                 inst_chan
                                     .send(InstructionCipher::ListPkIds {
-                                        list_pkids_response_onshot: tx,
+                                        list_pkids_response_oneshot: tx,
                                     })
                                     .unwrap();
                                 let result = rx.await.unwrap();
                                 pkids.insert(crypto_type.clone(), result);
                             }
-                            if let Err(e) = list_pkids_response_onshot.send(pkids) {
+                            if let Err(e) = list_pkids_response_oneshot.send(pkids) {
                                 tracing::error!("Error sending pkids response: {:?}", e);
                             }
                         }

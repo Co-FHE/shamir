@@ -1,4 +1,3 @@
-
 use rand::CryptoRng;
 
 use crate::{
@@ -12,8 +11,10 @@ use crate::{
 use rand_core::RngCore;
 use std::collections::BTreeMap;
 
+use super::SigningSession;
+
 #[derive(Debug, Clone)]
-pub(crate) enum DKGSignerState<C: Cipher> {
+enum DKGSignerState<C: Cipher> {
     Part1 {
         round1_secret_package: C::DKGRound1SecretPackage,
     },
@@ -26,10 +27,10 @@ pub(crate) enum DKGSignerState<C: Cipher> {
         public_key_package: C::PublicKeyPackage,
     },
 }
-pub(crate) struct DKGSignerSession<
+pub(crate) struct DKGSession<
     VII: ValidatorIdentityIdentity,
     C: Cipher,
-    R: CryptoRng + RngCore,
+    R: CryptoRng + RngCore + Clone,
 > {
     session_id: SessionId,
     min_signers: u16,
@@ -39,8 +40,11 @@ pub(crate) struct DKGSignerSession<
     identifier: C::Identifier,
     rng: R,
 }
-impl<VII: ValidatorIdentityIdentity, C: Cipher + PartialEq + Eq, R: CryptoRng + RngCore>
-    DKGSignerSession<VII, C, R>
+impl<
+        VII: ValidatorIdentityIdentity,
+        C: Cipher + PartialEq + Eq,
+        R: CryptoRng + RngCore + Clone,
+    > DKGSession<VII, C, R>
 {
     fn match_base_info(&self, base_info: &DKGBaseMessage<VII, C>) -> Result<(), SessionError<C>> {
         if self.session_id != base_info.session_id {
@@ -215,23 +219,23 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher + PartialEq + Eq, R: CryptoRng + 
         };
         Ok(resp)
     }
-    // pub(crate) fn is_completed(&self) -> Option<Result<SigningSignerSession<VI>, SessionError>> {
-    //     match self.dkg_state.clone() {
-    //         DKGSignerState::Completed {
-    //             key_package,
-    //             public_key_package,
-    //             ..
-    //         } => Some(SigningSignerSession::new(
-    //             self.session_id.clone(),
-    //             public_key_package,
-    //             self.min_signers,
-    //             self.participants.clone(),
-    //             self.crypto_type,
-    //             key_package,
-    //             self.identifier,
-    //             self.identity.clone(),
-    //         )),
-    //         _ => None,
-    //     }
-    // }
+    pub(crate) fn is_completed(
+        &self,
+    ) -> Result<Option<SigningSession<VII, C, R>>, SessionError<C>> {
+        match self.dkg_state.clone() {
+            DKGSignerState::Completed {
+                key_package,
+                public_key_package,
+            } => Ok(Some(SigningSession::new(
+                public_key_package,
+                self.min_signers,
+                self.participants.clone(),
+                key_package,
+                self.identifier.clone(),
+                self.identity.clone(),
+                self.rng.clone(),
+            )?)),
+            _ => Ok(None),
+        }
+    }
 }

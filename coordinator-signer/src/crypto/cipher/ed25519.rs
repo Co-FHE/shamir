@@ -151,6 +151,10 @@ impl PublicKeyPackage for frost_ed25519::keys::PublicKeyPackage {
     fn verifying_shares(&self) -> &BTreeMap<Self::Identifier, Self::VerifyingShare> {
         self.verifying_shares()
     }
+
+    fn crypto_type() -> CryptoType {
+        CryptoType::Ed25519
+    }
 }
 
 impl VerifyingKey for frost_ed25519::VerifyingKey {

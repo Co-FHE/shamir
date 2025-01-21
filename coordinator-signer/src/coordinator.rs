@@ -531,7 +531,7 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                         self.instruction_sender.send(Instruction::Sign {
                             pkid,
                             msg: msg.as_bytes().to_vec(),
-                            signature_response_onshot: sender,
+                            signature_response_oneshot: sender,
                         });
                         tokio::spawn(async move {
                             let result = receiver.await.unwrap();
@@ -554,7 +554,7 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                         tracing::info!("Received list pkid request");
                         let (sender, receiver) = oneshot::channel();
                         self.instruction_sender.send(Instruction::ListPkIds {
-                            list_pkids_response_onshot: sender,
+                            list_pkids_response_oneshot: sender,
                         });
                         let pkids = receiver.await.unwrap();
                         for (crypto_type, pkids) in pkids {
@@ -580,7 +580,7 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                             min_signers,
                             crypto_type,
                             participants,
-                            pkid_response_onshot: sender,
+                            pkid_response_oneshot: sender,
                         });
                         tokio::spawn(async move {
                             let result = receiver.await.unwrap();

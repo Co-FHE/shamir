@@ -16,7 +16,7 @@ use crate::{
 };
 
 mod subsession;
-pub(crate) struct SigningSignerSession<
+pub(crate) struct SigningSession<
     VII: ValidatorIdentityIdentity,
     C: Cipher,
     R: CryptoRng + RngCore + Clone,
@@ -26,7 +26,7 @@ pub(crate) struct SigningSignerSession<
     rng: R,
 }
 impl<VII: ValidatorIdentityIdentity, C: Cipher, R: CryptoRng + RngCore + Clone>
-    SigningSignerSession<VII, C, R>
+    SigningSession<VII, C, R>
 {
     pub(crate) fn new(
         public_key_package: C::PublicKeyPackage,
@@ -57,7 +57,11 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher, R: CryptoRng + RngCore + Clone>
         let subsession_id = request.base_info.subsession_id.clone();
         let subsession = self.subsessions.get_mut(&subsession_id);
         if let Some(subsession) = subsession {
-            Ok(subsession.update_from_request(request)?)
+            let response = subsession.update_from_request(request)?;
+            if subsession.is_completed() {
+                self.subsessions.remove(&subsession_id);
+            }
+            Ok(response)
         } else {
             let (subsession, response) = SignerSubsession::<VII, C, R>::new_from_request(
                 request,
@@ -67,5 +71,8 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher, R: CryptoRng + RngCore + Clone>
             self.subsessions.insert(subsession_id, subsession);
             Ok(response)
         }
+    }
+    pub(crate) fn pkid(&self) -> PkId {
+        self.base.pkid.clone()
     }
 }

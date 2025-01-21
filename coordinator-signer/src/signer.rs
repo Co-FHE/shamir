@@ -1,9 +1,14 @@
 mod command;
 mod manager;
 mod session;
-use libp2p::request_response::ProtocolSupport;
+use futures::stream::FuturesUnordered;
+use libp2p::request_response::{InboundRequestId, ProtocolSupport, ResponseChannel};
 use libp2p::{ping, rendezvous, request_response, PeerId, StreamProtocol};
+use manager::{Request, SessionManagerError};
+use rand::{CryptoRng, RngCore};
+use session::SessionWrap;
 use std::collections::HashMap;
+use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -11,6 +16,8 @@ use std::u64;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::unix::SocketAddr;
 use tokio::net::{UnixListener, UnixStream};
+use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::oneshot;
 
 use common::Settings;
 use futures::StreamExt;
@@ -22,33 +29,33 @@ use libp2p::{
 };
 use tokio::io::AsyncWriteExt;
 
-use crate::behaviour::{
-    CoorToSigRequest, CoorToSigResponse, SigBehaviour, SigBehaviourEvent, SigToCoorRequest,
-    SigToCoorResponse, ValidatorIdentityRequest,
-};
 use crate::crypto::PkId;
 use crate::crypto::{
     ValidatorIdentity, ValidatorIdentityIdentity, ValidatorIdentityKeypair,
     ValidatorIdentityPublicKey,
 };
-mod command;
+use crate::types::message::{
+    CoorToSigRequest, CoorToSigResponse, DKGRequestWrap, DKGResponseWrap, SigBehaviour,
+    SigBehaviourEvent, SigToCoorRequest, SigToCoorResponse, SigningResponseWrap,
+    ValidatorIdentityRequest,
+};
 use crate::utils::{self, concat_string_hash};
 use command::Command;
 
-pub struct Signer<VI: ValidatorIdentity> {
+pub struct Signer<VI: ValidatorIdentity, R: CryptoRng + RngCore> {
     validator_keypair: VI::Keypair,
     p2p_keypair: libp2p::identity::Keypair,
     swarm: libp2p::Swarm<SigBehaviour<VI::Identity>>,
     coordinator_addr: Multiaddr,
-    sessions: HashMap<SessionId<VI::Identity>, SignerSession<VI>>,
-    signing_sessions: HashMap<PKID, SigningSignerSession<VI>>,
     ipc_path: PathBuf,
     coordinator_peer_id: PeerId,
     register_request_id: Option<request_response::OutboundRequestId>,
+    request_sender: UnboundedSender<Request<VI::Identity>>,
+    _phantom: PhantomData<R>,
 }
 
-impl<VI: ValidatorIdentity> Signer<VI> {
-    pub fn new(validator_keypair: VI::Keypair) -> Result<Self, anyhow::Error> {
+impl<VI: ValidatorIdentity, R: CryptoRng + RngCore + Clone + Send + Sync + 'static> Signer<VI, R> {
+    pub fn new(validator_keypair: VI::Keypair, rng: R) -> Result<Self, anyhow::Error> {
         let keypair = libp2p::identity::Keypair::generate_ed25519();
         let mut swarm = libp2p::SwarmBuilder::with_existing_identity(keypair.clone())
             .with_tokio()
@@ -87,6 +94,13 @@ impl<VI: ValidatorIdentity> Signer<VI> {
         let coordinator_peer_id =
             <PeerId as FromStr>::from_str(&Settings::global().coordinator.peer_id).unwrap();
         swarm.add_peer_address(coordinator_peer_id, coordinator_addr.clone());
+        let (request_sender, request_receiver) = tokio::sync::mpsc::unbounded_channel();
+        manager::SignerSessionManager::new(request_receiver, rng).listening(|ch,response| {
+            swarm
+                .behaviour_mut()
+                .coor2sig
+                .send_response(ch, response);
+        });
         Ok(Self {
             validator_keypair: validator_keypair.clone(),
             p2p_keypair: keypair,
@@ -99,13 +113,13 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                     .to_identity()
                     .to_fmt_string()
             )),
-            sessions: HashMap::new(),
-            signing_sessions: HashMap::new(),
             coordinator_peer_id: <PeerId as FromStr>::from_str(
                 &Settings::global().coordinator.peer_id,
             )
             .unwrap(),
             register_request_id: None,
+            request_sender,
+            _phantom: PhantomData,
         })
     }
     pub(crate) async fn start_listening(mut self) -> Result<(), anyhow::Error> {
@@ -271,6 +285,11 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                 );
                 match request {
                     CoorToSigRequest::DKGRequest(request) => {
+                        let (tx, rx) = tokio::sync::oneshot::channel();
+                        self.request_sender
+                            .send(Request::DKG((request_id, request), tx))
+                            .unwrap();
+
                         let session_id = request.get_session_id();
                         if let Some(existing_session) = self.sessions.get_mut(&session_id) {
                             match existing_session.update_from_request(request) {
@@ -311,6 +330,7 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                                 }
                                 Err(e) => {
                                     tracing::error!("Failed to update session: {}", e);
+                                    channel.
                                     if let Err(e) =
                                         self.swarm.behaviour_mut().coor2sig.send_response(
                                             channel,
@@ -375,6 +395,9 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                     }
                     CoorToSigRequest::SigningRequest(request) => {
                         tracing::info!("Received signing request: {:?}", request);
+                        self.request_sender
+                            .send(Request::Signing(request, sender))
+                            .unwrap();
                         let pkid = request.get_pkid();
                         if let Some(existing_session) = self.signing_sessions.get_mut(&pkid) {
                             match existing_session.apply_request(request) {
@@ -434,6 +457,22 @@ impl<VI: ValidatorIdentity> Signer<VI> {
             }
             other => {
                 tracing::debug!("Unhandled {:?}", other);
+            }
+        }
+        Ok(())
+    }
+    pub(crate) async fn dkg_handle_response(
+        &mut self,
+        response: Result<(InboundRequestId, DKGResponseWrap<VI::Identity>), SessionManagerError>,
+    ) -> Result<(), anyhow::Error> {
+        match response {
+            Ok((request_id, response)) => self
+                .swarm
+                .behaviour_mut()
+                .coor2sig
+                .send_response(channel, CoorToSigResponse::DKGResponse(response.clone())),
+            Err(e) => {
+                tracing::error!("Failed to handle response: {:?}", e);
             }
         }
         Ok(())

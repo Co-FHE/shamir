@@ -24,10 +24,10 @@ pub trait Cipher: Clone + std::fmt::Debug + Send + Sync + 'static + PartialEq + 
         + Clone
         + Send
         + Sync;
-    type SigningNonces: Serialize + for<'de> Deserialize<'de> + fmt::Debug + Clone;
+    type SigningNonces: Serialize + for<'de> Deserialize<'de> + fmt::Debug + Clone + Send + Sync;
     type SignatureShare: Serialize + for<'de> Deserialize<'de> + fmt::Debug + Clone + Send + Sync;
 
-    type KeyPackage: Serialize + for<'de> Deserialize<'de> + fmt::Debug + Clone;
+    type KeyPackage: Serialize + for<'de> Deserialize<'de> + fmt::Debug + Clone + Send + Sync;
     type SigningPackage: SigningPackage<
         Identifier = Self::Identifier,
         SigningCommitments = Self::SigningCommitments,
@@ -40,9 +40,9 @@ pub trait Cipher: Clone + std::fmt::Debug + Send + Sync + 'static + PartialEq + 
         VerifyingKey = Self::VerifyingKey,
     >;
 
-    type DKGRound1SecretPackage: fmt::Debug + Clone;
+    type DKGRound1SecretPackage: fmt::Debug + Clone + Send + Sync;
     type DKGRound1Package: Serialize + for<'de> Deserialize<'de> + fmt::Debug + Clone + Send + Sync;
-    type DKGRound2SecretPackage: fmt::Debug + Clone;
+    type DKGRound2SecretPackage: fmt::Debug + Clone + Send + Sync;
     type DKGRound2Package: Serialize + for<'de> Deserialize<'de> + fmt::Debug + Clone + Send + Sync;
     type CryptoError: std::error::Error
         + std::marker::Send
@@ -128,10 +128,13 @@ pub trait PublicKeyPackage:
     fn verifying_key(&self) -> &Self::VerifyingKey;
     fn serialize(&self) -> Result<Vec<u8>, Self::CryptoError>;
     fn deserialize(bytes: &[u8]) -> Result<Self, Self::CryptoError>;
+    fn crypto_type() -> CryptoType;
     fn pkid(&self) -> Result<PkId, Self::CryptoError> {
-        Ok(PkId::new(
-            Sha256::digest(<Self as PublicKeyPackage>::serialize(&self)?).to_vec(),
-        ))
+        let mut bytes = vec![<Self as PublicKeyPackage>::crypto_type().into()];
+        bytes.extend(Sha256::digest(<Self as PublicKeyPackage>::serialize(
+            &self,
+        )?));
+        Ok(PkId::new(bytes))
     }
     fn verifying_shares(&self) -> &BTreeMap<Self::Identifier, Self::VerifyingShare>;
 }

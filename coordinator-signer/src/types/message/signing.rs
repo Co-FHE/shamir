@@ -102,6 +102,13 @@ impl<VII: ValidatorIdentityIdentity> SigningRequestWrap<VII> {
             SigningRequestWrap::Secp256k1Tr(r) => &r.base_info.identity,
         }
     }
+    pub(crate) fn crypto_type(&self) -> CryptoType {
+        match self {
+            SigningRequestWrap::Ed25519(_) => CryptoType::Ed25519,
+            SigningRequestWrap::Secp256k1(_) => CryptoType::Secp256k1,
+            SigningRequestWrap::Secp256k1Tr(_) => CryptoType::Secp256k1Tr,
+        }
+    }
 
     pub(crate) fn failure(&self, msg: String) -> SigningResponseWrap<VII> {
         match self {

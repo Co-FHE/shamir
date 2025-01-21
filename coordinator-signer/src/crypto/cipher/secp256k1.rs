@@ -142,6 +142,10 @@ impl PublicKeyPackage for frost_secp256k1::keys::PublicKeyPackage {
     fn verifying_shares(&self) -> &BTreeMap<Self::Identifier, Self::VerifyingShare> {
         self.verifying_shares()
     }
+
+    fn crypto_type() -> CryptoType {
+        CryptoType::Secp256k1
+    }
 }
 
 impl VerifyingKey for frost_secp256k1::VerifyingKey {

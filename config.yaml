@@ -22,6 +22,3 @@ connection:
   ping_interval: 1
 session:
   state_channel_retry_interval: 1
-  signing_round1_timeout: 10
-  # if no response in this time, the cooridnator will retry the signing
-  signing_round2_timeout: 10

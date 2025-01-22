@@ -1,12 +1,6 @@
 [workspace]
 resolver = "2"
-members = [
-    "common",
-    "coordinator-signer",
-    "frost-core",
-    "frost-rerandomized",
-    "veritss",
-]
+members = ["common", "coordinator-signer"]
 
 [profile.test.package."*"]
 opt-level = 3

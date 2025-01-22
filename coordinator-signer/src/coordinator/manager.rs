@@ -1,33 +1,22 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
 use strum::IntoEnumIterator;
 use tokio::sync::{
-    mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+    mpsc::{UnboundedReceiver, UnboundedSender},
     oneshot,
 };
 
 use crate::types::{
-    error::SessionError,
-    message::{
-        DKGRequest, DKGRequestWrap, DKGResponse, DKGResponseWrap, SigningRequest,
-        SigningRequestWrap, SigningResponse, SigningResponseWrap,
-    },
+    message::{DKGRequestWrap, DKGResponseWrap, SigningRequestWrap, SigningResponseWrap},
     SignatureSuiteInfo,
 };
 
 use crate::crypto::*;
 
-use super::{
-    session::{self, InstructionCipher},
-    SessionWrap,
-};
+use super::{session::InstructionCipher, SessionWrap};
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum SessionManagerError {
-    #[error("Invalid participants: {0}")]
-    InvalidParticipants(String),
-    #[error("Invalid min signers: {0}, max signers: {1}")]
-    InvalidMinSigners(u16, u16),
     #[error("Session error: {0}")]
     SessionError(String),
     #[error("crypto type Error: {0}")]

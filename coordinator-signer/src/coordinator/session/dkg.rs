@@ -1,21 +1,17 @@
 use std::collections::BTreeMap;
 
-use common::Settings;
 use futures::stream::{FuturesUnordered, StreamExt};
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
-use super::{signing::CoordinatorSigningSession, SessionId, ValidatorIdentity};
+use super::SessionId;
 use super::{DKGRequestWrap, DKGResponseWrap};
 use crate::crypto::*;
 use crate::{
-    crypto::{Cipher, CryptoType},
+    crypto::Cipher,
     types::{
         error::SessionError,
-        message::{
-            DKGBaseMessage, DKGRequest, DKGRequestStage, DKGResponse, DKGResponseStage,
-            SigningRequest, SigningResponse,
-        },
-        Participants, SignatureSuite,
+        message::{DKGBaseMessage, DKGRequest, DKGRequestStage, DKGResponse, DKGResponseStage},
+        Participants,
     },
 };
 
@@ -228,6 +224,8 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher + PartialEq + Eq> CoordinatorDKGS
                 .participants
                 .iter()
                 .map(|(id, identity)| {
+                    let mut round1_package_map = round1_package_map.clone();
+                    round1_package_map.remove(&id);
                     Ok(DKGRequest {
                         base_info: DKGBaseMessage {
                             min_signers: self.min_signers,
@@ -237,7 +235,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher + PartialEq + Eq> CoordinatorDKGS
                             session_id: self.session_id.clone(),
                         },
                         stage: DKGRequestStage::Part2 {
-                            round1_package_map: round1_package_map.clone(),
+                            round1_package_map: round1_package_map,
                         },
                     })
                 })
@@ -245,43 +243,45 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher + PartialEq + Eq> CoordinatorDKGS
             CoordinatorDKGState::GenPublicKey {
                 round1_package_map,
                 round2_package_map_map,
-            } => {
-                self.participants
-                    .iter()
-                    .map(|(id, identity)| {
-                        let mut round2_packages = BTreeMap::new();
-                        for (oid, round2_package_map) in round2_package_map_map.iter() {
-                            if oid == id {
-                                continue;
+            } => self
+                .participants
+                .iter()
+                .map(|(id, identity)| {
+                    let mut round1_package_map = round1_package_map.clone();
+                    round1_package_map.remove(&id);
+                    let mut round2_packagess = BTreeMap::new();
+                    for (oid, round2_package_map) in round2_package_map_map.iter() {
+                        if oid == id {
+                            continue;
+                        }
+                        let value = round2_package_map.get(&id);
+                        match value {
+                            Some(round2_package) => {
+                                round2_packagess.insert(oid.clone(), round2_package.clone());
                             }
-                            let value = round2_package_map.get(&oid);
-                            match value {
-                                Some(round2_package) => {
-                                    round2_packages.insert(oid.clone(), round2_package.clone());
-                                }
-                                None => {
-                                    return Err(SessionError::MissingDataForSplitIntoRequest(
-                                        format!("response not found for id: {}", id.to_string()),
-                                    ));
-                                }
+                            None => {
+                                return Err(SessionError::MissingDataForSplitIntoRequest(format!(
+                                    "response not found for id in gen public key: {}",
+                                    id.to_string()
+                                )));
                             }
                         }
-                        Ok(DKGRequest {
-                            base_info: DKGBaseMessage {
-                                min_signers: self.min_signers,
-                                participants: self.participants.clone(),
-                                identifier: id.clone(),
-                                identity: identity.clone(),
-                                session_id: self.session_id.clone(),
-                            },
-                            stage: DKGRequestStage::GenPublicKey {
-                                round1_package_map: round1_package_map.clone(),
-                                round2_package_map: round2_packages.clone(),
-                            },
-                        })
+                    }
+                    Ok(DKGRequest {
+                        base_info: DKGBaseMessage {
+                            min_signers: self.min_signers,
+                            participants: self.participants.clone(),
+                            identifier: id.clone(),
+                            identity: identity.clone(),
+                            session_id: self.session_id.clone(),
+                        },
+                        stage: DKGRequestStage::GenPublicKey {
+                            round1_package_map: round1_package_map.clone(),
+                            round2_package_map: round2_packagess.clone(),
+                        },
                     })
-                    .collect()
-            }
+                })
+                .collect(),
             CoordinatorDKGState::Completed { .. } => Ok(vec![]),
         }
     }
@@ -300,7 +300,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher + PartialEq + Eq> CoordinatorDKGS
                     // find in response
                     let response = response.get(id).ok_or(
                         crate::types::error::SessionError::<C>::InvalidResponse(format!(
-                            "response not found for id: {}",
+                            "response not found for id in part 1: {}",
                             id.to_string()
                         )),
                     )?;
@@ -326,7 +326,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher + PartialEq + Eq> CoordinatorDKGS
                         response
                             .get(id)
                             .ok_or(SessionError::InvalidResponse(format!(
-                                "response not found for id: {}",
+                                "response not found for id in part 2: {}",
                                 id.to_string()
                             )))?;
                     // TODO: need more checks
@@ -346,17 +346,14 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher + PartialEq + Eq> CoordinatorDKGS
                     round2_package_map_map: packagess,
                 })
             }
-            CoordinatorDKGState::GenPublicKey {
-                round1_package_map,
-                round2_package_map_map,
-            } => {
+            CoordinatorDKGState::GenPublicKey { .. } => {
                 let mut public_key = None;
                 for (id, _) in self.participants.iter() {
                     let response =
                         response
                             .get(id)
                             .ok_or(SessionError::InvalidResponse(format!(
-                                "response not found for id: {}",
+                                "response not found for id in gen public key: {}",
                                 id.to_string()
                             )))?;
                     match response.stage.clone() {

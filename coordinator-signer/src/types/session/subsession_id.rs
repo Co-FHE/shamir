@@ -1,10 +1,9 @@
 use crate::crypto::{CryptoType, Identifier, PkId, ValidatorIdentityIdentity};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest, Sha256};
-use std::{collections::BTreeMap, marker::PhantomData};
 use uuid::Uuid;
 
-use super::{Cipher, Participants, SessionId};
+use super::{Cipher, Participants};
 use crate::types::error::SessionIdError;
 
 // SubSessionId format:
@@ -18,7 +17,7 @@ use crate::types::error::SessionIdError;
 // 16 bytes: uuid of subsession
 // The SessionId cannot be used in any consensus
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
-pub(crate) struct SubsessionId([u8; 101]);
+pub(crate) struct SubsessionId([u8; 102]);
 
 impl Serialize for SubsessionId {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
@@ -41,7 +40,7 @@ impl SubsessionId {
         sign_message: Vec<u8>,
         pkid: PkId,
     ) -> Result<Self, SessionIdError> {
-        let mut bytes = [0u8; 101];
+        let mut bytes = [0u8; 102];
 
         // 1 byte crypto type
         bytes[0] = crypto_type as u8;
@@ -74,20 +73,20 @@ impl SubsessionId {
         }
         let hash = hasher.finalize();
         bytes[13..21].copy_from_slice(&hash[0..8]);
-        if pkid.to_bytes().len() != 32 {
+        if pkid.to_bytes().len() != 33 {
             return Err(SessionIdError::InvalidPkIdLength(pkid.to_bytes().len()));
         }
-        bytes[21..53].copy_from_slice(&pkid.to_bytes());
+        bytes[21..54].copy_from_slice(&pkid.to_bytes());
 
         // Calculate sign message hash
         let mut hasher = Sha256::new();
         hasher.update(sign_message);
         let hash = hasher.finalize();
-        bytes[53..85].copy_from_slice(&hash[..]);
+        bytes[54..86].copy_from_slice(&hash[..]);
 
         // Generate random UUID for subsession
         let subsession_uuid = Uuid::new_v4();
-        bytes[86..101].copy_from_slice(subsession_uuid.as_bytes());
+        bytes[86..102].copy_from_slice(subsession_uuid.as_bytes());
 
         Ok(SubsessionId(bytes))
     }
@@ -98,15 +97,14 @@ impl SubsessionId {
         let max_signers = format!("{:04x}", u16::from_be_bytes([self.0[3], self.0[4]]));
         let hash1 = hex::encode(&self.0[5..13]);
         let hash2 = hex::encode(&self.0[13..21]);
-        let pkid = hex::encode(&self.0[21..53]);
-        let message_hash = hex::encode(&self.0[53..69]);
-        let uuid = hex::encode(&self.0[69..85]);
+        let pkid = hex::encode(&self.0[21..54]);
+        let message_hash = hex::encode(&self.0[54..86]);
+        let uuid = hex::encode(&self.0[86..102]);
         format!(
             "subsession-{}-{}-{}-{}-{}-{}-{}-{}",
             crypto_type, min_signers, max_signers, hash1, hash2, pkid, message_hash, uuid
         )
     }
-
     pub fn from_string(s: &str) -> Result<Self, SessionIdError> {
         if !s.starts_with("subsession-") {
             return Err(SessionIdError::InvalidSubSessionIdFormat(format!(
@@ -123,7 +121,7 @@ impl SubsessionId {
             )));
         }
 
-        let mut bytes = [0u8; 101];
+        let mut bytes = [0u8; 102];
 
         // Parse crypto type (1 byte)
         let crypto_type = u8::from_str_radix(parts[0], 16).map_err(|e| {
@@ -187,23 +185,23 @@ impl SubsessionId {
         }
         bytes[13..21].copy_from_slice(&identifiers_hash);
 
-        // Parse pkid (32 bytes)
+        // Parse pkid (33 bytes)
         let pkid = hex::decode(parts[5]).map_err(|e| {
             SessionIdError::InvalidSubSessionIdFormat(format!(
                 "subsession id {} invalid pkid: {}",
                 s, e
             ))
         })?;
-        if pkid.len() != 32 {
+        if pkid.len() != 33 {
             return Err(SessionIdError::InvalidSubSessionIdFormat(format!(
                 "subsession id {} invalid pkid length: {}",
                 s,
                 pkid.len(),
             )));
         }
-        bytes[21..53].copy_from_slice(&pkid);
+        bytes[21..54].copy_from_slice(&pkid);
 
-        // Parse message hash (16 bytes)
+        // Parse message hash (32 bytes)
         let message_hash = hex::decode(parts[6]).map_err(|e| {
             SessionIdError::InvalidSubSessionIdFormat(format!(
                 "subsession id {} invalid message hash: {}",
@@ -217,7 +215,7 @@ impl SubsessionId {
                 message_hash.len(),
             )));
         }
-        bytes[86..101].copy_from_slice(&message_hash);
+        bytes[54..86].copy_from_slice(&message_hash);
 
         // Parse UUID (16 bytes)
         let uuid = hex::decode(parts[7]).map_err(|e| {
@@ -233,7 +231,7 @@ impl SubsessionId {
                 uuid.len(),
             )));
         }
-        bytes[69..85].copy_from_slice(&uuid);
+        bytes[86..102].copy_from_slice(&uuid);
 
         Ok(SubsessionId(bytes))
     }

@@ -1,4 +1,4 @@
-use rand::{rngs::ThreadRng, thread_rng, CryptoRng};
+use rand::CryptoRng;
 
 use crate::{
     crypto::*,
@@ -19,7 +19,7 @@ enum DKGSignerState<C: Cipher> {
         round1_secret_package: C::DKGRound1SecretPackage,
     },
     Part2 {
-        round1_package_map: BTreeMap<C::Identifier, C::DKGRound1Package>,
+        _round1_package_map: BTreeMap<C::Identifier, C::DKGRound1Package>,
         round2_secret_package: C::DKGRound2SecretPackage,
     },
     Completed {
@@ -117,10 +117,9 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher + PartialEq + Eq> DKGSession<VII,
             )))
         }
     }
-    pub(crate) fn update_from_request<R: RngCore + CryptoRng>(
+    pub(crate) fn update_from_request(
         &mut self,
         request: DKGRequest<VII, C>,
-        rng: R,
     ) -> Result<DKGResponse<VII, C>, SessionError<C>> {
         let DKGBaseMessage {
             identifier,
@@ -143,7 +142,8 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher + PartialEq + Eq> DKGSession<VII,
                 } = &self.dkg_state
                 {
                     let mut round1_package_map = round1_package_map.clone();
-                    self.participants.check_keys_equal(&round1_package_map)?;
+                    self.participants
+                        .check_keys_equal_except_self(&self.identifier, &round1_package_map)?;
                     round1_package_map.remove(&self.identifier);
                     let (round2_secret_package, round2_package_map) =
                         C::dkg_part2(round1_secret_package.clone(), &round1_package_map)
@@ -156,7 +156,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher + PartialEq + Eq> DKGSession<VII,
                     };
                     // TODO: cannot update directly, need to judge whether coordinator is in part1 or part2
                     self.dkg_state = DKGSignerState::Part2 {
-                        round1_package_map: round1_package_map.clone(),
+                        _round1_package_map: round1_package_map.clone(),
                         round2_secret_package: round2_secret_package.clone(),
                     };
                     response
@@ -176,12 +176,14 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher + PartialEq + Eq> DKGSession<VII,
                     ..
                 } = &self.dkg_state
                 {
-                    self.participants.check_keys_equal(&round1_package_map)?;
-                    let mut round1_package_map = round1_package_map.clone();
-                    round1_package_map.remove(&self.identifier);
-                    self.participants.check_keys_equal(&round2_package_map)?;
-                    let mut round2_package_map = round2_package_map.clone();
-                    round2_package_map.remove(&self.identifier);
+                    self.participants
+                        .check_keys_equal_except_self(&self.identifier, &round1_package_map)?;
+                    // let mut round1_package_map = round1_package_map.clone();
+                    // round1_package_map.remove(&self.identifier);
+                    self.participants
+                        .check_keys_equal_except_self(&self.identifier, &round2_package_map)?;
+                    // let mut round2_package_map = round2_package_map.clone();
+                    // round2_package_map.remove(&self.identifier);
                     let (key_package, public_key_package) = C::dkg_part3(
                         &round2_secret_package,
                         &round1_package_map,

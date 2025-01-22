@@ -3,19 +3,17 @@ mod signing;
 use std::collections::HashMap;
 
 use dkg::DKGSession;
-use futures::StreamExt;
-use libp2p::request_response::InboundRequestId;
-use rand::{rngs::ThreadRng, thread_rng, CryptoRng, RngCore};
+use rand::thread_rng;
 use signing::SigningSession;
-use tokio::sync::{broadcast, mpsc::UnboundedReceiver, oneshot};
+use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::{
     crypto::Cipher,
     types::{
         error::SessionError,
         message::{
-            DKGRequest, DKGRequestWrap, DKGResponse, DKGResponseWrap, SigningRequest,
-            SigningRequestWrap, SigningResponse, SigningResponseWrap,
+            DKGRequest, DKGRequestWrap, DKGResponseWrap, SigningRequest, SigningRequestWrap,
+            SigningResponseWrap,
         },
         SessionId,
     },
@@ -29,9 +27,6 @@ pub(crate) struct SessionWrap<VII: ValidatorIdentityIdentity, C: Cipher> {
     request_receiver: UnboundedReceiver<Request<VII>>,
 }
 impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
-    pub(crate) fn pkid_exists(&self, pkid: PkId) -> bool {
-        self.signing_sessions.contains_key(&pkid)
-    }
     pub(crate) fn dkg_apply_request(
         &mut self,
         request: DKGRequestWrap<VII>,
@@ -43,7 +38,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
         match self.dkg_sessions.get_mut(&session_id) {
             Some(session) => {
                 let response = session
-                    .update_from_request(request, rng)
+                    .update_from_request(request)
                     .map_err(|e| SessionManagerError::SessionError(e.to_string()))?;
                 if let Some(session) = session
                     .is_completed()

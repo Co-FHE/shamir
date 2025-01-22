@@ -58,6 +58,8 @@ pub struct ConnectionSettings {
 #[derive(Debug, Deserialize, Clone)]
 pub struct SessionSettings {
     pub state_channel_retry_interval: u64,
+    pub signing_round1_timeout: u64,
+    pub signing_round2_timeout: u64,
 }
 
 lazy_static! {

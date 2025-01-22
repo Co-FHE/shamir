@@ -1,18 +1,11 @@
 mod dkg;
 mod signing;
 use super::manager::SessionManagerError;
-use super::{
-    Cipher, CryptoType, Ed25519Sha512, PkId, PublicKeyPackage, Secp256K1Sha256, Secp256K1Sha256TR,
-    Signature, ValidatorIdentity, ValidatorIdentityIdentity,
-};
+use super::{Cipher, PkId, PublicKeyPackage, ValidatorIdentityIdentity};
 use crate::crypto::Identifier;
-use crate::crypto::*;
 use crate::types::{
     error::SessionError,
-    message::{
-        DKGRequest, DKGRequestWrap, DKGResponse, DKGResponseWrap, SigningRequest,
-        SigningRequestWrap, SigningResponse, SigningResponseWrap,
-    },
+    message::{DKGRequestWrap, DKGResponseWrap, SigningRequestWrap, SigningResponseWrap},
     Participants, SessionId, SignatureSuite,
 };
 use crate::types::{SignatureSuiteInfo, SubsessionId};
@@ -20,9 +13,9 @@ use dkg::{CoordinatorDKGSession as DkgSession, DKGInfo};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use signing::CoordinatorSigningSession as SigningSession;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use tokio::sync::{
-    mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+    mpsc::{UnboundedReceiver, UnboundedSender},
     oneshot,
 };
 pub(crate) enum InstructionCipher<VII: ValidatorIdentityIdentity> {
@@ -123,14 +116,24 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
         signature_response_oneshot: oneshot::Sender<
             Result<SignatureSuiteInfo<VII>, SessionManagerError>,
         >,
-    ) -> Result<(), SessionError<C>> {
+    ) {
         let pkid = PkId::new(pkid_raw.as_ref().to_vec());
-        let signing_session =
-            self.signing_sessions
-                .get_mut(&pkid)
-                .ok_or(SessionError::SignerSessionError(
-                    "Signing session not found".to_string(),
-                ))?;
+        let signing_session = self
+            .signing_sessions
+            .get_mut(&pkid)
+            .ok_or(SessionError::<C>::SignerSessionError(
+                "Signing session not found".to_string(),
+            ))
+            .map_err(|e| SessionManagerError::SessionError(e.to_string()));
+        let signing_session = match signing_session {
+            Ok(signing_session) => signing_session,
+            Err(e) => {
+                if let Err(e) = signature_response_oneshot.send(Err(e)) {
+                    tracing::error!("Error sending signature response: {:?}", e);
+                }
+                return;
+            }
+        };
         let (tx, rx) = oneshot::channel();
         self.signing_futures.push(rx);
         signing_session
@@ -139,10 +142,6 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
                     .insert(subsession_id, signature_response_oneshot);
             })
             .await;
-        return Ok(());
-    }
-    pub(crate) fn find_pkid(&self, pkid: PkId) -> bool {
-        self.signing_sessions.contains_key(&pkid)
     }
     pub(crate) fn listening(mut self) {
         tokio::spawn(async move {
@@ -152,10 +151,16 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
                         self.handle_instruction(instruction).await;
                     }
                      Some(Result::Ok(dkg_info))= self.dkg_futures.next() => {
-                        self.handle_dkg_future(dkg_info).await;
+                        let r = self.handle_dkg_future(dkg_info).await;
+                        if let Err(e) = r {
+                            tracing::error!("Error in DKG future: {:?}", e);
+                        }
                     }
-                    Some(Result::Ok(signing_session))= self.signing_futures.next() => {
-                        self.handle_signing_future(signing_session).await;
+                    Some(Result::Ok(signing_session)) = self.signing_futures.next() => {
+                        let r = self.handle_signing_future(signing_session).await;
+                        if let Err(e) = r {
+                            tracing::error!("Error in signing future: {:?}", e);
+                        }
                     }
 
                 }

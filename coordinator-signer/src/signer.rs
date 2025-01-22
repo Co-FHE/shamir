@@ -5,14 +5,11 @@ use futures::stream::FuturesUnordered;
 use libp2p::request_response::{InboundRequestId, ProtocolSupport, ResponseChannel};
 use libp2p::{ping, rendezvous, request_response, PeerId, StreamProtocol};
 use manager::{Request, SessionManagerError};
-use rand::{CryptoRng, RngCore};
 use session::SessionWrap;
 use std::collections::HashMap;
-use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use std::u64;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::unix::SocketAddr;
 use tokio::net::{UnixListener, UnixStream};
@@ -38,7 +35,7 @@ use crate::types::message::{
     CoorToSigRequest, CoorToSigResponse, DKGResponseWrap, SigBehaviour, SigBehaviourEvent,
     SigToCoorRequest, SigToCoorResponse, SigningResponseWrap, ValidatorIdentityRequest,
 };
-use crate::utils::{self, concat_string_hash};
+use crate::utils::concat_string_hash;
 use command::Command;
 
 pub struct Signer<VI: ValidatorIdentity> {
@@ -148,13 +145,13 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                         tracing::error!("Error handling command: {}", e);
                     }
                 }
-                event = self.dkg_response_futures.select_next_some() => {
-                    if let Err(e) = self.dkg_handle_response(event.unwrap()).await {
+                Some(Result::Ok(dkg_request)) = self.dkg_response_futures.next() => {
+                    if let Err(e) = self.dkg_handle_response(dkg_request).await {
                         tracing::error!("Error handling dkg response: {}", e);
                     }
                 }
-                event = self.signing_response_futures.select_next_some() => {
-                    if let Err(e) = self.signing_handle_response(event.unwrap()).await {
+                Some(Result::Ok(signing_request)) = self.signing_response_futures.next() => {
+                    if let Err(e) = self.signing_handle_response(signing_request).await {
                         tracing::error!("Error handling signing response: {}", e);
                     }
                 }
@@ -226,7 +223,7 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                 tracing::info!(
                     "Sent registration request to coordinator with request_id: {:?}, pk: {}, validator_peer_id: {:?}, nonce: {:?}",
                     request_id,
-                    utils::to_hex(request.public_key),
+                    hex::encode(request.public_key),
                     self.validator_keypair.to_public_key().to_identity().to_fmt_string(),
                     request.nonce,
                 );
@@ -338,7 +335,11 @@ impl<VI: ValidatorIdentity> Signer<VI> {
             )) => {
                 if Some(request_id) == self.register_request_id {
                     if peer != self.coordinator_peer_id {
-                        tracing::error!("Received response from invalid peer: {}", peer);
+                        tracing::error!(
+                            "Received response from invalid peer: {}, {}",
+                            peer,
+                            connection_id
+                        );
                         return Err(anyhow::anyhow!(
                             "Received response from invalid peer: {}",
                             peer
@@ -373,10 +374,19 @@ impl<VI: ValidatorIdentity> Signer<VI> {
         match response.1 {
             Ok(response) => {
                 let channel = self.channel_mapping.remove(&id).unwrap();
-                self.swarm
+                let r = self
+                    .swarm
                     .behaviour_mut()
                     .coor2sig
                     .send_response(channel, CoorToSigResponse::DKGResponse(response.clone()));
+                match r {
+                    Ok(_) => {
+                        tracing::info!("Sent dkg response to coordinator");
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to send dkg response to coordinator: {:?}", e);
+                    }
+                }
             }
             Err(e) => {
                 tracing::error!("Failed to handle response: {:?}", e);
@@ -395,10 +405,18 @@ impl<VI: ValidatorIdentity> Signer<VI> {
         match response.1 {
             Ok(response) => {
                 let channel = self.channel_mapping.remove(&request_id).unwrap();
-                self.swarm.behaviour_mut().coor2sig.send_response(
+                let r = self.swarm.behaviour_mut().coor2sig.send_response(
                     channel,
                     CoorToSigResponse::SigningResponse(response.clone()),
                 );
+                match r {
+                    Ok(_) => {
+                        tracing::info!("Sent signing response to coordinator");
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to send signing response to coordinator: {:?}", e);
+                    }
+                }
             }
             Err(e) => {
                 tracing::error!("Failed to handle response: {:?}", e);

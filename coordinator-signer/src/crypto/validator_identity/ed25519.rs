@@ -10,12 +10,12 @@ use super::{
 };
 
 #[derive(Debug, Clone)]
-pub struct Ed25519Identity;
+pub struct _Ed25519Identity;
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Ed25519Id(pub [u8; 32]); // SHA256 hash of public key
 
-impl ValidatorIdentity for Ed25519Identity {
+impl ValidatorIdentity for _Ed25519Identity {
     type Keypair = SigningKey;
     type PublicKey = VerifyingKey;
     type Identity = Ed25519Id;

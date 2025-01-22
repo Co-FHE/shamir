@@ -4,8 +4,6 @@ use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::types::error::SessionError;
-
 use super::{CryptoType, PkId};
 mod ed25519;
 mod secp256k1;
@@ -150,6 +148,6 @@ pub trait VerifyingKey: Serialize + for<'de> Deserialize<'de> + fmt::Debug + Clo
     type Signature;
     type CryptoError;
     fn verify(&self, message: &[u8], signature: &Self::Signature) -> Result<(), Self::CryptoError>;
-    fn serialize(&self) -> Result<Vec<u8>, Self::CryptoError>;
-    fn deserialize(bytes: &[u8]) -> Result<Self, Self::CryptoError>;
+    fn serialize_frost(&self) -> Result<Vec<u8>, Self::CryptoError>;
+    fn deserialize_frost(bytes: &[u8]) -> Result<Self, Self::CryptoError>;
 }

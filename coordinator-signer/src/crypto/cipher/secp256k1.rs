@@ -1,6 +1,5 @@
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 use super::{
     Cipher, CryptoType, Identifier, PublicKeyPackage, Signature, SigningPackage, VerifyingKey,
@@ -154,11 +153,11 @@ impl VerifyingKey for frost_secp256k1::VerifyingKey {
     fn verify(&self, msg: &[u8], signature: &Self::Signature) -> Result<(), Self::CryptoError> {
         self.verify(msg, signature)
     }
-    fn serialize(&self) -> Result<Vec<u8>, Self::CryptoError> {
+    fn serialize_frost(&self) -> Result<Vec<u8>, Self::CryptoError> {
         self.serialize()
     }
 
-    fn deserialize(bytes: &[u8]) -> Result<Self, Self::CryptoError> {
+    fn deserialize_frost(bytes: &[u8]) -> Result<Self, Self::CryptoError> {
         Self::deserialize(bytes)
     }
 }

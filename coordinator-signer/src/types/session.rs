@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 pub(crate) use session_id::SessionId;
 pub(crate) use subsession_id::SubsessionId;
 
-use crate::crypto::{Identifier, PkId};
+use crate::crypto::Identifier;
 
 use super::{error::SessionError, Cipher, ValidatorIdentityIdentity};
 
@@ -15,18 +15,6 @@ pub(crate) struct Participants<VII: ValidatorIdentityIdentity, C: Cipher>(
     BTreeMap<C::Identifier, VII>,
 );
 
-pub(crate) struct DKGBaseState<VII: ValidatorIdentityIdentity, C: Cipher> {
-    pub(crate) session_id: SessionId,
-    pub(crate) participants: Participants<VII, C>,
-    pub(crate) min_signers: u16,
-}
-
-pub(crate) struct SigningBaseState<VII: ValidatorIdentityIdentity, C: Cipher> {
-    pub(crate) participants: Participants<VII, C>,
-    pub(crate) pkid: PkId,
-    pub(crate) subsession_id: SubsessionId,
-    pub(crate) public_key: C::PublicKeyPackage,
-}
 impl<VII: ValidatorIdentityIdentity, C: Cipher> Participants<VII, C> {
     pub(crate) fn new<T: IntoIterator<Item = (C::Identifier, VII)>>(
         participants: T,
@@ -107,6 +95,77 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> Participants<VII, C> {
             if !other.contains_key(key) {
                 return Err(SessionError::InvalidParticipants(format!(
                     "participants keys do not match: {:?} vs {:?}",
+                    self.keys(),
+                    other.keys()
+                )));
+            }
+        }
+        Ok(())
+    }
+    pub(crate) fn check_keys_includes<V>(
+        &self,
+        other: &BTreeMap<C::Identifier, V>,
+        min_signers: u16,
+    ) -> Result<(), SessionError<C>> {
+        if self.len() < min_signers as usize {
+            return Err(SessionError::InvalidParticipants(format!(
+                "participants length does not match: {:?} vs {:?}",
+                self.len(),
+                other.len()
+            )));
+        }
+        for (key, _) in other.iter() {
+            if !self.contains_key(key) {
+                return Err(SessionError::InvalidParticipants(format!(
+                    "participants key not included: p:{:?} vs o:{:?}",
+                    self.keys(),
+                    other.keys()
+                )));
+            }
+        }
+        Ok(())
+    }
+    pub(crate) fn extract_identifiers<V>(
+        &self,
+        other: &BTreeMap<C::Identifier, V>,
+    ) -> Result<Participants<VII, C>, SessionError<C>> {
+        let o = other
+            .iter()
+            .map(|(id, _)| match self.get(&id) {
+                Some(v) => Ok((id.clone(), v.clone())),
+                None => {
+                    return Err(SessionError::InvalidParticipants(format!(
+                        "participants key not included: p:{:?} vs o:{:?}",
+                        self.keys(),
+                        other.keys()
+                    )));
+                }
+            })
+            .collect::<Result<Vec<(C::Identifier, VII)>, SessionError<C>>>()?;
+
+        let participants = Participants::new(o)?;
+        participants.check_keys_equal(other)?;
+        Ok(participants)
+    }
+    pub(crate) fn check_keys_equal_except_self<V>(
+        &self,
+        identifier: &C::Identifier,
+        other: &BTreeMap<C::Identifier, V>,
+    ) -> Result<(), SessionError<C>> {
+        if self.len() != other.len() + 1 {
+            return Err(SessionError::InvalidParticipants(format!(
+                "participants length does not match except self: {:?} vs {:?}",
+                self.len(),
+                other.len()
+            )));
+        }
+        for (key, _) in self.iter() {
+            if key == identifier {
+                continue;
+            }
+            if !other.contains_key(key) {
+                return Err(SessionError::InvalidParticipants(format!(
+                    "participants keys do not match except self: {:?} vs {:?}",
                     self.keys(),
                     other.keys()
                 )));

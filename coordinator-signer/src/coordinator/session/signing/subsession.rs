@@ -1,9 +1,15 @@
-use std::collections::BTreeMap;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    time::Duration,
+};
 
 use common::Settings;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
-use tokio::sync::{mpsc::UnboundedSender, oneshot};
+use tokio::sync::{
+    mpsc::{unbounded_channel, UnboundedSender},
+    oneshot,
+};
 
 use crate::{
     crypto::*,
@@ -11,22 +17,28 @@ use crate::{
 };
 
 use super::{
-    Cipher, Participants, PkId, SessionError, SessionId, SignatureSuite, SigningRequest,
-    SigningRequestWrap, SigningResponse, SigningResponseWrap, SubsessionId, ValidatorIdentity,
+    Cipher, Participants, PkId, SessionError, SignatureSuite, SigningRequest, SigningRequestWrap,
+    SigningResponse, SigningResponseWrap, SubsessionId,
 };
 
 #[derive(Debug, Clone)]
-pub(crate) enum CoordinatorSigningState<C: Cipher> {
+pub(crate) enum CoordinatorSigningState<VII: ValidatorIdentityIdentity, C: Cipher> {
     Round1,
-    Round2 { signing_package: C::SigningPackage },
-    Completed { signature: C::Signature },
+    Round2 {
+        joined_participants: Participants<VII, C>,
+        signing_package: C::SigningPackage,
+    },
+    Completed {
+        signature: C::Signature,
+        joined_participants: Participants<VII, C>,
+    },
 }
 pub(crate) struct CoordinatorSubsession<VII: ValidatorIdentityIdentity, C: Cipher> {
     message: Vec<u8>,
     subsession_id: SubsessionId,
     min_signers: u16,
     participants: Participants<VII, C>,
-    state: CoordinatorSigningState<C>,
+    state: CoordinatorSigningState<VII, C>,
     public_key: C::PublicKeyPackage,
     pkid: PkId,
     signing_sender: UnboundedSender<(
@@ -71,105 +83,261 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
             Result<SignatureSuite<VII, C>, (Option<SubsessionId>, SessionError<C>)>,
         >,
     ) {
-        tracing::debug!("Starting Signing session with id: {:?}", self.subsession_id);
         let msg = msg.as_ref().to_vec();
         tokio::spawn(async move {
-            let result = 'out: loop {
-                if let Some(signature) = self.state.completed() {
-                    break Ok(signature);
-                }
-                tracing::info!("Starting new Signing round");
-                let mut futures = FuturesUnordered::new();
-                for request in self.split_into_single_requests() {
-                    tracing::debug!("Sending Signing request: {:?}", request);
-                    let (tx, rx) = oneshot::channel();
-                    futures.push(rx);
-                    let request_wrap = SigningRequestWrap::from(request);
-                    match request_wrap {
-                        Ok(request_wrap) => {
-                            if let Err(e) = self.signing_sender.send((request_wrap, tx)) {
-                                break 'out Err(SessionError::CoordinatorSessionError(
-                                    e.to_string(),
-                                ));
-                            }
-                        }
-                        Err(e) => {
-                            break 'out Err(e);
+            tracing::debug!("Starting Signing session with id: {:?}", self.subsession_id);
+
+            let mut futures = FuturesUnordered::new();
+            let mut round1_sent = 0;
+            for request in self.split_into_single_requests() {
+                tracing::debug!("Sending Signing request: {:?}", request);
+                let (tx, rx) = oneshot::channel();
+                futures.push(rx);
+                let request_wrap = SigningRequestWrap::from(request);
+                match request_wrap {
+                    Ok(request_wrap) => {
+                        if let Err(e) = self.signing_sender.send((request_wrap, tx)) {
+                            tracing::error!(
+                                "Failed to send signing request: {:?}, but continue",
+                                e
+                            );
+                        } else {
+                            round1_sent += 1;
                         }
                     }
+                    Err(e) => {
+                        tracing::error!("Failed to get signing request: {:?}", e);
+                    }
                 }
-                let mut responses = BTreeMap::new();
-                tracing::info!("Waiting for {} responses", self.participants.len());
-                for i in 0..self.participants.len() {
-                    tracing::debug!("Waiting for response {}/{}", i + 1, self.participants.len());
-                    let response = futures.next().await;
+            }
+            tracing::info!("Sent {} round 1 requests", round1_sent);
+            let (event_channel_tx, mut event_channel_rx) = unbounded_channel();
+            // round1 thread
+            tokio::spawn(async move {
+                for _ in 0..round1_sent {
+                    let response = tokio::select! {
+                        response = futures.next() => response.unwrap(),
+                        _ = tokio::time::sleep(Duration::from_secs(Settings::global().session.signing_round1_timeout)) => {
+                            tracing::warn!("Signing round 1 timeout,retry");
+                            break;
+                        }
+                    };
                     match response {
-                        Some(Ok(response)) => {
+                        Ok(response) => {
                             let response = SigningResponse::<VII, C>::from(response);
                             match response {
                                 Ok(response) => {
                                     tracing::debug!(
-                                        "Received valid response: {:?}",
-                                        response.clone()
+                                        "Received valid round 1 response: {:?}",
+                                        response
                                     );
-                                    responses
-                                        .insert(response.base_info.identifier.clone(), response);
+                                    event_channel_tx.send(Some(response)).unwrap();
                                 }
                                 Err(e) => {
-                                    break 'out Err(e);
+                                    tracing::error!("Error receiving Signing state: {}", e);
                                 }
                             }
                         }
-                        Some(Err(e)) => {
+                        Err(e) => {
                             tracing::error!("Error receiving Signing state: {}", e);
-                            break 'out Err(SessionError::CoordinatorSessionError(e.to_string()));
+                        }
+                    }
+                }
+                tracing::debug!("Round 1 thread completed, sending None");
+                event_channel_tx.send(None).unwrap();
+                event_channel_tx.closed().await;
+            });
+            let mut round1_responses_pool = BTreeMap::new();
+            let original_state = self.state.clone();
+            let selected_responses: Result<SignatureSuite<VII, C>, SessionError<C>> = 'out: loop {
+                self.state = original_state.clone();
+                // if round1 response is None and no enough participants, break
+                if round1_responses_pool.len() >= self.min_signers as usize {
+                    tracing::debug!(
+                        "Have enough round 1 responses: {}",
+                        round1_responses_pool.len()
+                    );
+                } else {
+                    let response = event_channel_rx.recv().await.unwrap();
+                    match response {
+                        Some(response) => {
+                            tracing::debug!(
+                                "Adding response to pool from: {:?}",
+                                response.base_info.identifier
+                            );
+                            round1_responses_pool
+                                .insert(response.base_info.identifier.clone(), response);
+                            continue 'out;
                         }
                         None => {
-                            tracing::error!("DKG state is not completed");
-                            tracing::debug!(
-                                "Received None response, breaking out of collection loop"
-                            );
+                            tracing::error!("Not enough responses for round 1, breaking");
                             break 'out Err(SessionError::CoordinatorSessionError(
-                                "DKG state is not completed".to_string(),
+                                "not enough responses for round 1".to_string(),
                             ));
                         }
                     }
                 }
-                if responses.len() == self.participants.len() {
-                    tracing::debug!("Received all {} responses, handling them", responses.len());
-                    let result = self.handle_response(responses);
-                    match result {
-                        Ok(next_state) => {
-                            tracing::debug!("Successfully transitioned to next DKG state");
-                            self.state = next_state;
+                // select first min_signers responses
+                let round1_responses = round1_responses_pool
+                    .clone()
+                    .into_iter()
+                    .take(self.min_signers as usize)
+                    .collect::<BTreeMap<_, _>>();
+                tracing::debug!("Selected {} responses for round 1", round1_responses.len());
+                let mut error_ids: BTreeSet<C::Identifier> =
+                    round1_responses.keys().cloned().collect();
+                let result = self.handle_response(round1_responses);
+                // check result if not ok, remove id and continue
+                match result {
+                    Ok(next_state) => {
+                        tracing::debug!("Successfully handled round 1 responses");
+                        self.state = next_state;
+                    }
+                    Err((e, Some(id))) => {
+                        tracing::warn!(
+                            "Error handling Signing state: {},remove id: {}, retry",
+                            e,
+                            id.to_string()
+                        );
+                        round1_responses_pool.remove(&id);
+                        continue 'out;
+                    }
+                    Err((e, None)) => {
+                        tracing::error!("Error handling Signing state: {}, retry", e);
+                        break 'out Err(e);
+                    }
+                }
+                // generate round2 requests
+                let mut futures = FuturesUnordered::new();
+                // check if the number of split requests equals min_signers
+                let round2_requests = self.split_into_single_requests();
+                tracing::debug!("Generated {} round 2 requests", round2_requests.len());
+                if round2_requests.len() != self.min_signers as usize {
+                    tracing::error!(
+                        "Round 2 requests count {} doesn't match min_signers {}",
+                        round2_requests.len(),
+                        self.min_signers
+                    );
+                    response_sender
+                        .send(Err((
+                            Some(self.subsession_id),
+                            SessionError::CoordinatorSessionError(
+                                "not enough responses for round 1".to_string(),
+                            ),
+                        )))
+                        .unwrap();
+                    return;
+                }
+                //check round2 request is valid, if valid send to signer
+                for request in round2_requests {
+                    tracing::debug!("Sending round 2 request: {:?}", request);
+                    let (tx, rx) = oneshot::channel();
+                    futures.push(rx);
+                    let request_wrap = SigningRequestWrap::from(request.clone());
+                    match request_wrap {
+                        Ok(request_wrap) => {
+                            self.signing_sender.send((request_wrap, tx)).unwrap();
                         }
                         Err(e) => {
-                            tracing::error!("Error handling DKG state: {}", e);
-                            break 'out Err(e);
+                            tracing::error!("Failed to get signing request: {:?}", e);
+                            round1_responses_pool.remove(&request.base_info.identifier.clone());
+                            continue 'out;
                         }
                     }
-                } else {
-                    tracing::error!(
-                        "DKG state is not completed, got {}/{} responses",
-                        responses.len(),
-                        self.participants.len()
-                    );
-                    break 'out Err(SessionError::CoordinatorSessionError(format!(
-                        "DKG state is not completed, got {}/{} responses",
-                        responses.len(),
-                        self.participants.len()
-                    )));
                 }
-            }
-            .map(|signature| SignatureSuite {
-                signature,
-                pk: self.public_key.clone(),
-                subsession_id: self.subsession_id.clone(),
-                pkid: self.pkid.clone(),
-                message: msg,
-                participants: self.participants.clone(),
-            });
-            if let Err(e) = response_sender.send(result.map_err(|e| (Some(self.subsession_id), e)))
+                // receive round2 response
+                let mut round2_responses = BTreeMap::new();
+                for i in 0..self.min_signers as usize {
+                    tracing::debug!(
+                        "Waiting for round 2 response {}/{}",
+                        i + 1,
+                        self.min_signers
+                    );
+                    let response = tokio::select! {
+                        response = futures.next() => response.unwrap(),
+                        _ = tokio::time::sleep(Duration::from_secs(Settings::global().session.signing_round2_timeout)) => {
+                            tracing::warn!("Signing round 2 timeout,retry");
+                            break;
+                        }
+                    };
+                    match response {
+                        Ok(response) => {
+                            let response = SigningResponse::<VII, C>::from(response);
+                            match response {
+                                Ok(response) => {
+                                    let id = response.base_info.identifier.clone();
+                                    tracing::debug!(
+                                        "Received valid round 2 response from: {:?}",
+                                        id
+                                    );
+                                    round2_responses.insert(id.clone(), response);
+                                    error_ids.remove(&id);
+                                }
+                                Err(e) => {
+                                    tracing::warn!("Error receiving Signing state: {}, retry", e);
+                                    continue;
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!("Error receiving Signing state: {}, retry", e);
+                            continue;
+                        }
+                    }
+                }
+                // remove all response error ids
+                if !error_ids.is_empty() {
+                    tracing::warn!("Found {} error IDs to remove", error_ids.len());
+                    for id in error_ids {
+                        round2_responses.remove(&id);
+                    }
+                    continue 'out;
+                }
+                // handle round2 response
+                let result = self.handle_response(round2_responses.clone());
+                match result {
+                    Ok(next_state) => {
+                        self.state = next_state;
+                        if let Some((signature, joined_participants)) = self.state.completed() {
+                            tracing::info!("Signing completed successfully");
+                            break 'out Ok(SignatureSuite {
+                                signature,
+                                pk: self.public_key.clone(),
+                                subsession_id: self.subsession_id.clone(),
+                                pkid: self.pkid.clone(),
+                                message: msg,
+                                participants: self.participants.clone(),
+                                joined_participants: joined_participants.clone(),
+                            });
+                        } else {
+                            tracing::error!("Signing state not completed after round 2");
+                            break 'out Err(SessionError::CoordinatorSessionError(
+                                "signing state is not completed after round 2".to_string(),
+                            ));
+                        }
+                    }
+                    Err((e, id)) => match id {
+                        Some(id) => {
+                            tracing::error!(
+                                "Error handling Signing state: {},remove id: {}",
+                                e,
+                                id.to_string()
+                            );
+                            round2_responses.remove(&id);
+                            continue 'out;
+                        }
+                        None => {
+                            tracing::error!("Error handling Signing state: {}", e);
+                            response_sender
+                                .send(Err((Some(self.subsession_id), e)))
+                                .unwrap();
+                            return;
+                        }
+                    },
+                }
+            };
+            if let Err(e) =
+                response_sender.send(selected_responses.map_err(|e| (Some(self.subsession_id), e)))
             {
                 tracing::error!("Failed to send response: {:?}", e);
             }
@@ -198,8 +366,10 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
                     },
                 })
                 .collect(),
-            CoordinatorSigningState::Round2 { signing_package } => self
-                .participants
+            CoordinatorSigningState::Round2 {
+                joined_participants,
+                signing_package,
+            } => joined_participants
                 .iter()
                 .map(|(id, identity)| SigningRequest {
                     base_info: SigningBaseMessage {
@@ -211,6 +381,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
                         public_key: self.public_key.clone(),
                     },
                     stage: SigningRequestStage::Round2 {
+                        joined_participants: joined_participants.clone(),
                         signing_package: signing_package.clone(),
                     },
                 })
@@ -250,14 +421,23 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
 
         Ok(())
     }
+    // return which participants error
     pub(crate) fn handle_response(
         &self,
         response: BTreeMap<C::Identifier, SigningResponse<VII, C>>,
-    ) -> Result<CoordinatorSigningState<C>, SessionError<C>> {
-        for (_, response) in response.iter() {
-            self.match_base_info(&response.base_info)?;
+    ) -> Result<CoordinatorSigningState<VII, C>, (SessionError<C>, Option<C::Identifier>)> {
+        for (id, response) in response.iter() {
+            self.match_base_info(&response.base_info)
+                .map_err(|e| (e, Some(id.clone())))?;
         }
-        self.participants.check_keys_equal(&response)?;
+        self.participants
+            .check_keys_includes(&response, self.min_signers as u16)
+            .map_err(|e| (e, None))?;
+
+        let joined_participants = self
+            .participants
+            .extract_identifiers(&response)
+            .map_err(|e| (e, None))?;
         match self.state.clone() {
             CoordinatorSigningState::Round1 => {
                 let commitments_map = response
@@ -266,17 +446,26 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
                         if let SigningResponseStage::Round1 { ref commitments } = resp.stage {
                             Ok((id.clone(), commitments.clone()))
                         } else {
-                            Err(SessionError::<C>::InvalidResponse(format!(
-                                "expected round 1 response but got round 2 response"
-                            )))
+                            Err((
+                                SessionError::<C>::InvalidResponse(format!(
+                                    "expected round 1 response but got round 2 response"
+                                )),
+                                Some(id.clone()),
+                            ))
                         }
                     })
-                    .collect::<Result<BTreeMap<C::Identifier, C::SigningCommitments>, SessionError<C>>>()?;
+                    .collect::<Result<BTreeMap<C::Identifier, C::SigningCommitments>, _>>()?;
                 let signing_package = C::SigningPackage::new(commitments_map, &self.message)
-                    .map_err(|e| SessionError::CryptoError(e))?;
-                Ok(CoordinatorSigningState::Round2 { signing_package })
+                    .map_err(|e| (SessionError::CryptoError(e), None))?;
+                Ok(CoordinatorSigningState::Round2 {
+                    signing_package,
+                    joined_participants,
+                })
             }
-            CoordinatorSigningState::Round2 { signing_package } => {
+            CoordinatorSigningState::Round2 {
+                signing_package,
+                joined_participants,
+            } => {
                 let mut signature_shares = BTreeMap::new();
                 for (id, resp) in response.iter() {
                     if let SigningResponseStage::Round2 {
@@ -286,28 +475,38 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
                     {
                         signature_shares.insert(id.clone(), signature_share.clone());
                     } else {
-                        return Err(SessionError::InvalidResponse(format!(
-                            "need round 2 package but got round 1 package"
-                        )));
+                        return Err((
+                            SessionError::InvalidResponse(format!(
+                                "need round 2 package but got round 1 package"
+                            )),
+                            Some(id.clone()),
+                        ));
                     }
                 }
                 let signature = C::aggregate(&signing_package, &signature_shares, &self.public_key)
-                    .map_err(|e| SessionError::CryptoError(e))?;
-                Ok(CoordinatorSigningState::Completed { signature })
+                    .map_err(|e| (SessionError::CryptoError(e), None))?;
+                Ok(CoordinatorSigningState::Completed {
+                    signature,
+                    joined_participants,
+                })
             }
             CoordinatorSigningState::Completed { .. } => {
-                return Err(SessionError::InvalidResponse(format!(
-                    "signing already completed"
-                )));
+                return Err((
+                    SessionError::InvalidResponse(format!("signing already completed")),
+                    None,
+                ));
             }
         }
     }
 }
 
-impl<C: Cipher> CoordinatorSigningState<C> {
-    pub(crate) fn completed(&self) -> Option<C::Signature> {
+impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSigningState<VII, C> {
+    pub(crate) fn completed(&self) -> Option<(C::Signature, Participants<VII, C>)> {
         match self {
-            CoordinatorSigningState::Completed { signature } => Some(signature.clone()),
+            CoordinatorSigningState::Completed {
+                signature,
+                joined_participants,
+            } => Some((signature.clone(), joined_participants.clone())),
             _ => None,
         }
     }

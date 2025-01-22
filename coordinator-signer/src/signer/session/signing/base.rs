@@ -8,8 +8,8 @@ use crate::types::message::SigningRequest;
 pub(crate) struct SigningSignerBase<VII: ValidatorIdentityIdentity, C: Cipher> {
     pub(crate) pkid: PkId,
     pub(crate) key_package: C::KeyPackage,
-    pub(crate) public_key_package: C::PublicKeyPackage,
-    pub(crate) min_signers: u16,
+    pub(crate) _public_key_package: C::PublicKeyPackage,
+    pub(crate) _min_signers: u16,
     pub(crate) participants: Participants<VII, C>,
     pub(crate) identifier: C::Identifier,
     pub(crate) identity: VII,
@@ -28,8 +28,8 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SigningSignerBase<VII, C> {
                 .pkid()
                 .map_err(|e| SessionError::CryptoError(e))?,
             key_package,
-            public_key_package,
-            min_signers,
+            _public_key_package: public_key_package,
+            _min_signers: min_signers,
             participants,
             identifier,
             identity,

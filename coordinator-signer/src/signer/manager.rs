@@ -1,38 +1,28 @@
-use std::collections::{BTreeMap, HashMap};
-use std::marker::PhantomData;
+use std::collections::HashMap;
 
 use crate::crypto::CryptoTypeError;
-use crate::types::{
-    message::{
-        DKGRequest, DKGRequestWrap, DKGResponse, DKGResponseWrap, SigningRequest,
-        SigningRequestWrap, SigningResponse, SigningResponseWrap,
-    },
-    SignatureSuiteInfo,
+use crate::types::message::{
+    DKGRequestWrap, DKGResponseWrap, SigningRequestWrap, SigningResponseWrap,
 };
-use libp2p::request_response::{InboundRequestId, ResponseChannel};
-use rand::{CryptoRng, RngCore};
+use libp2p::request_response::InboundRequestId;
 use strum::IntoEnumIterator;
 use tokio::sync::{
-    mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+    mpsc::{UnboundedReceiver, UnboundedSender},
     oneshot,
 };
 
 use crate::crypto::*;
 
-use super::CoorToSigResponse;
 use super::SessionWrap;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum SessionManagerError {
-    #[error("Invalid participants: {0}")]
-    InvalidParticipants(String),
-    #[error("Invalid min signers: {0}, max signers: {1}")]
-    InvalidMinSigners(u16, u16),
     #[error("Session error: {0}")]
     SessionError(String),
     #[error("crypto type not supported: {0}")]
     CryptoTypeError(#[from] CryptoTypeError),
 }
+#[derive(Debug)]
 pub(crate) enum Request<VII: ValidatorIdentityIdentity> {
     DKG(
         (InboundRequestId, DKGRequestWrap<VII>),
@@ -104,6 +94,7 @@ impl<VII: ValidatorIdentityIdentity> SignerSessionManager<VII> {
                                 .session_inst_channels
                                 .get(&signing_request_wrap.crypto_type());
                             if let Some(session_inst_channel) = session_inst_channel {
+                                tracing::info!("sending signing request");
                                 session_inst_channel
                                     .send(Request::Signing(
                                         (request_id, signing_request_wrap),

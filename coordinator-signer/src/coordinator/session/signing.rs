@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use subsession::CoordinatorSubsession;
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
@@ -12,7 +10,7 @@ use crate::{
     },
 };
 
-use super::{Cipher, SessionId, SigningRequestWrap, SigningResponseWrap, ValidatorIdentity};
+use super::{Cipher, SigningRequestWrap, SigningResponseWrap};
 
 mod subsession;
 pub(crate) struct CoordinatorSigningSession<VII: ValidatorIdentityIdentity, C: Cipher> {

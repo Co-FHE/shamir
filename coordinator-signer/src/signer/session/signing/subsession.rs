@@ -1,4 +1,4 @@
-use rand::{thread_rng, CryptoRng, RngCore};
+use rand::{CryptoRng, RngCore};
 
 use crate::types::message::{
     SigningRequest, SigningRequestStage, SigningResponse, SigningResponseStage,
@@ -9,23 +9,23 @@ use super::{Cipher, SessionError, SigningSignerBase, SubsessionId, ValidatorIden
 #[derive(Debug, Clone)]
 pub(crate) enum SignerSigningState<C: Cipher> {
     Round1 {
-        signing_commitments: C::SigningCommitments,
+        _signing_commitments: C::SigningCommitments,
         nonces: C::SigningNonces,
     },
-    Round2 {
-        signing_package: C::SigningPackage,
-        nonces: C::SigningNonces,
-        signature_share: C::SignatureShare,
+    _Round2 {
+        _signing_package: C::SigningPackage,
+        _nonces: C::SigningNonces,
+        _signature_share: C::SignatureShare,
     },
-    Completed {
+    _Completed {
         signature: C::Signature,
     },
 }
 pub(crate) struct SignerSubsession<VII: ValidatorIdentityIdentity, C: Cipher> {
-    pub(crate) subsession_id: SubsessionId,
+    pub(crate) _subsession_id: SubsessionId,
     pub(crate) base: SigningSignerBase<VII, C>,
     pub(crate) signing_state: SignerSigningState<C>,
-    pub(crate) message: Vec<u8>,
+    pub(crate) _message: Vec<u8>,
 }
 impl<VII: ValidatorIdentityIdentity, C: Cipher> SignerSubsession<VII, C> {
     pub(crate) fn new_from_request<R: RngCore + CryptoRng>(
@@ -35,6 +35,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SignerSubsession<VII, C> {
     ) -> Result<(Self, SigningResponse<VII, C>), SessionError<C>> {
         if let SigningRequestStage::Round1 { message } = request.stage.clone() {
             base.check_request(&request)?;
+            tracing::info!("round1 {:?}", base.key_package);
             let (nonces, commitments) = C::commit(&base.key_package, &mut rng);
             let response = SigningResponse {
                 base_info: request.base_info.clone(),
@@ -44,13 +45,13 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SignerSubsession<VII, C> {
             };
             Ok((
                 Self {
-                    subsession_id: request.base_info.subsession_id.clone(),
+                    _subsession_id: request.base_info.subsession_id.clone(),
                     base: base,
                     signing_state: SignerSigningState::Round1 {
-                        signing_commitments: commitments.clone(),
+                        _signing_commitments: commitments.clone(),
                         nonces,
                     },
-                    message: message,
+                    _message: message,
                 },
                 response,
             ))
@@ -73,8 +74,12 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SignerSubsession<VII, C> {
                     request
                 )));
             }
-            SigningRequestStage::Round2 { signing_package } => {
+            SigningRequestStage::Round2 {
+                signing_package, ..
+            } => {
                 if let SignerSigningState::Round1 { nonces, .. } = &self.signing_state {
+                    tracing::info!("round2 {:?}", signing_package);
+                    tracing::info!("round2 {:?}", nonces);
                     let signature_share =
                         C::sign(&signing_package, &nonces, &self.base.key_package)
                             .map_err(|e| SessionError::CryptoError(e))?;
@@ -84,11 +89,11 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SignerSubsession<VII, C> {
                             signature_share: signature_share.clone(),
                         },
                     };
-                    self.signing_state = SignerSigningState::Round2 {
-                        signing_package: signing_package.clone(),
-                        nonces: nonces.clone(),
-                        signature_share: signature_share.clone(),
-                    };
+                    // self.signing_state = SignerSigningState::Round2 {
+                    //     _signing_package: signing_package.clone(),
+                    //     _nonces: nonces.clone(),
+                    //     _signature_share: signature_share.clone(),
+                    // };
                     Ok(response)
                 } else {
                     return Err(SessionError::InvalidRequest(format!(
@@ -101,7 +106,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SignerSubsession<VII, C> {
     }
     pub(crate) fn is_completed(&self) -> bool {
         match &self.signing_state {
-            SignerSigningState::Completed { .. } => true,
+            SignerSigningState::_Completed { .. } => true,
             _ => false,
         }
     }

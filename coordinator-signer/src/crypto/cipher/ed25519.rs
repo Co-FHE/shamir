@@ -1,20 +1,10 @@
-use core::fmt;
-use std::{any::Any, collections::BTreeMap};
+use std::collections::BTreeMap;
 
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-
-use crate::{
-    crypto::ValidatorIdentityIdentity,
-    types::{
-        error::SessionError,
-        message::{DKGResponse, DKGResponseWrap},
-    },
-};
 
 use super::{
-    Cipher, CryptoType, Identifier, PkId, PublicKeyPackage, Signature, SigningPackage, VerifyingKey,
+    Cipher, CryptoType, Identifier, PublicKeyPackage, Signature, SigningPackage, VerifyingKey,
 };
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct Ed25519Sha512;
@@ -164,10 +154,10 @@ impl VerifyingKey for frost_ed25519::VerifyingKey {
         self.verify(msg, signature)
     }
 
-    fn serialize(&self) -> Result<Vec<u8>, Self::CryptoError> {
+    fn serialize_frost(&self) -> Result<Vec<u8>, Self::CryptoError> {
         self.serialize()
     }
-    fn deserialize(bytes: &[u8]) -> Result<Self, Self::CryptoError> {
+    fn deserialize_frost(bytes: &[u8]) -> Result<Self, Self::CryptoError> {
         Self::deserialize(bytes)
     }
 }

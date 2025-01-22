@@ -5,12 +5,8 @@ pub(crate) enum SessionError<C: Cipher> {
     InvalidParticipants(String),
     #[error("Missing data for split into request: {0}")]
     MissingDataForSplitIntoRequest(String),
-    #[error("Invalid crypto type: {0}")]
-    InvalidCryptoType(String),
     #[error("Invalid request: {0}")]
     InvalidRequest(String),
-    #[error("Invalid subsession id: {0}")]
-    InvalidSessionId(SessionIdError),
     #[error("Frost error: {0}")]
     CryptoError(C::CryptoError),
     #[error("Session id error: {0}")]

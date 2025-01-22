@@ -29,7 +29,7 @@ impl Command {
                 Command::Dial(peer_id.to_string())
             }
             ["list", "signer", "info"] | ["ls"] | ["list"] => Command::ListSignerAddr,
-            ["sign", public_key, message] => {
+            ["sign", _public_key, _message] => {
                 Command::Sign(origin[1].to_string(), origin[2].to_string())
             }
             ["lspk"] => Command::ListPkId,

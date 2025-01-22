@@ -3,7 +3,6 @@ mod pkid;
 mod validator_identity;
 
 pub(crate) use cipher::*;
-use libp2p::{Multiaddr, PeerId};
 use serde::{Deserialize, Serialize};
 
 pub(crate) use pkid::*;

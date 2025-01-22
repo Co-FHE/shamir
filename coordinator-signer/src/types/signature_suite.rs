@@ -3,7 +3,6 @@ use crate::crypto::{
     VerifyingKey,
 };
 use crate::crypto::{CryptoType, Identifier};
-use frost_secp256k1::Secp256K1Group;
 use serde::{Deserialize, Serialize};
 use serde_json;
 use std::{
@@ -11,7 +10,7 @@ use std::{
     fmt::{Display, Formatter},
 };
 
-use super::{Participants, SessionId, SubsessionId, ValidatorIdentityIdentity};
+use super::{Participants, SubsessionId, ValidatorIdentityIdentity};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct SignatureSuite<VII: ValidatorIdentityIdentity, C: Cipher> {
@@ -21,18 +20,16 @@ pub(crate) struct SignatureSuite<VII: ValidatorIdentityIdentity, C: Cipher> {
     pub(crate) participants: Participants<VII, C>,
     pub(crate) pkid: PkId,
     pub(crate) message: Vec<u8>,
-}
-pub(crate) trait SignatureSuiteTrait<VII: ValidatorIdentityIdentity> {
-    // fn pretty_print(&self) -> String;
-    // fn verify<C: Cipher>(&self) -> Result<bool, C::CryptoError>;
+    pub(crate) joined_participants: Participants<VII, C>,
 }
 impl<VII: ValidatorIdentityIdentity, C: Cipher> SignatureSuite<VII, C> {
     fn pretty_print(&self) -> String {
         format!(
-            "Crypto Type: {}\nSignature: {}\nParticipants: {}\nPK: {}\nSubsession ID: {}\nPKID: \"{}\"\nMessage: \"{}\"\nVerification: {}",
+            "Crypto Type: {}\nSignature: {}\nParticipants: {}\nJoined Participants: {}\nPK: {}\nSubsession ID: {}\nPKID: \"{}\"\nMessage: \"{}\"\nVerification: {}",
             C::crypto_type(),
             serde_json::to_string_pretty(&self.signature).unwrap(),
             serde_json::to_string_pretty(&self.participants.iter().map(|(k, v)| (k.to_string(), v.to_fmt_string())).collect::<BTreeMap<_,_>>()).unwrap(),
+            serde_json::to_string_pretty(&self.joined_participants.iter().map(|(k, v)| (k.to_string(), v.to_fmt_string())).collect::<BTreeMap<_,_>>()).unwrap(),
             serde_json::to_string_pretty(&self.pk).unwrap(),
             serde_json::to_string_pretty(&self.subsession_id).unwrap(),
             self.pkid,
@@ -65,52 +62,61 @@ impl<VII: ValidatorIdentityIdentity + Serialize + for<'de> Deserialize<'de>> Dis
 impl<VII: ValidatorIdentityIdentity, C: Cipher> SignatureSuite<VII, C> {
     pub(crate) fn to_signature_info(&self) -> Result<SignatureSuiteInfo<VII>, String> {
         Ok(SignatureSuiteInfo {
-            signature: self.signature.to_bytes().map_err(|e| e.to_string())?,
-            pk: PublicKeyPackage::serialize(&self.pk).map_err(|e| e.to_string())?,
+            signature: hex::encode(self.signature.to_bytes().map_err(|e| e.to_string())?),
+            pk: hex::encode(PublicKeyPackage::serialize(&self.pk).map_err(|e| e.to_string())?),
             subsession_id: self.subsession_id,
             participants: self
                 .participants
                 .iter()
-                .map(|(k, v)| (k.to_bytes(), v.clone()))
+                .map(|(k, v)| (k.to_string(), v.clone()))
                 .collect(),
-            pkid: self.pkid.clone(),
-            message: self.message.clone(),
+            joined_participants: self
+                .joined_participants
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.clone()))
+                .collect(),
+            pkid: self.pkid.to_string(),
+            message: String::from_utf8_lossy(&self.message).to_string(),
             crypto_type: C::crypto_type(),
-            original_serialized: self.pretty_print(),
+            _original_serialized: self.pretty_print(),
         })
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub(crate) struct SignatureSuiteInfo<VII: ValidatorIdentityIdentity> {
-    pub(crate) signature: Vec<u8>,
-    pub(crate) pk: Vec<u8>,
+    pub(crate) signature: String,
+    pub(crate) pk: String,
     pub(crate) subsession_id: SubsessionId,
-    pub(crate) participants: BTreeMap<Vec<u8>, VII>,
-    pub(crate) pkid: PkId,
-    pub(crate) message: Vec<u8>,
+    pub(crate) participants: BTreeMap<String, VII>,
+    pub(crate) joined_participants: BTreeMap<String, VII>,
+    pub(crate) pkid: String,
+    pub(crate) message: String,
     pub(crate) crypto_type: CryptoType,
-    pub(crate) original_serialized: String,
+    #[serde(skip_serializing)]
+    pub(crate) _original_serialized: String,
 }
 impl<VII: ValidatorIdentityIdentity + Serialize + for<'de> Deserialize<'de>>
     SignatureSuiteInfo<VII>
 {
     fn pretty_print(&self) -> String {
-        format!(
-            "Crypto Type: {}\nSignature: {}\nParticipants: {}\nPK: {}\nSubsession ID: {}\nPKID: \"{}\"\nMessage: \"{}\"",
-            self.crypto_type,
-            serde_json::to_string_pretty(&self.signature).unwrap(),
-            serde_json::to_string_pretty(&self.participants).unwrap(),
-            serde_json::to_string_pretty(&self.pk).unwrap(),
-            serde_json::to_string_pretty(&self.subsession_id).unwrap(),
-            self.pkid,
-            String::from_utf8_lossy(&self.message),
-        )
+        serde_json::to_string_pretty(&self).unwrap()
     }
-    fn verify<C: Cipher>(&self) -> Result<(), C::CryptoError> {
-        let pk = <<C as Cipher>::PublicKeyPackage as PublicKeyPackage>::deserialize(&self.pk)?;
-        let signature = C::Signature::from_bytes(&self.signature)?;
-        pk.verifying_key().verify(&self.message, &signature)
+    fn verify<C: Cipher>(&self) -> Result<(), String> {
+        let pk = <<C as Cipher>::PublicKeyPackage as PublicKeyPackage>::deserialize(
+            &hex::decode(&self.pk).map_err(|e| e.to_string())?.as_slice(),
+        )
+        .map_err(|e| e.to_string())?;
+        let signature = C::Signature::from_bytes(
+            hex::decode(&self.signature)
+                .map_err(|e| e.to_string())?
+                .as_slice(),
+        )
+        .map_err(|e| e.to_string())?;
+        let message = self.message.as_bytes();
+        pk.verifying_key()
+            .verify(message, &signature)
+            .map_err(|e| e.to_string())
     }
 }
 impl<VII: ValidatorIdentityIdentity + Serialize + for<'de> Deserialize<'de>>
@@ -118,9 +124,8 @@ impl<VII: ValidatorIdentityIdentity + Serialize + for<'de> Deserialize<'de>>
 {
     pub(crate) fn pretty_print_original(&self) -> String {
         format!(
-            "{}\nOriginal: {}\nVerification: {}",
+            "{}\nVerification with encoded message: {}",
             self.pretty_print(),
-            self.original_serialized,
             self.try_verify()
                 .map_or_else(|e| e.to_string(), |_| "OK".to_string())
         )

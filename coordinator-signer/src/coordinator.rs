@@ -11,10 +11,8 @@ use crate::types::Validator;
 use crate::utils::*;
 use command::Command;
 use common::Settings;
-use futures::stream::FuturesUnordered;
 use futures::StreamExt;
-use hex::{FromHex, ToHex};
-use libp2p::request_response::{OutboundFailure, OutboundRequestId, ProtocolSupport};
+use libp2p::request_response::{OutboundRequestId, ProtocolSupport};
 use libp2p::{
     identify::{self},
     noise,
@@ -27,14 +25,13 @@ use session::SessionWrap;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::unix::SocketAddr;
 use tokio::net::{UnixListener, UnixStream};
-use tokio::sync::mpsc::{Receiver, Sender, UnboundedReceiver, UnboundedSender};
-use tokio::sync::{oneshot, RwLock};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::oneshot;
 pub struct Coordinator<VI: ValidatorIdentity> {
     p2p_keypair: libp2p::identity::Keypair,
     swarm: libp2p::Swarm<CoorBehaviour<VI::Identity>>,
@@ -246,22 +243,13 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                 tracing::warn!("Disconnected from {}", peer_id);
                 // self.p2ppeerid_2_endpoint.remove(&peer_id);
             }
-            SwarmEvent::OutgoingConnectionError {
-                connection_id,
-                peer_id,
-                error,
-            } => {
+            SwarmEvent::OutgoingConnectionError { error, .. } => {
                 tracing::error!("Outgoing connection error: {:?}", error);
             }
-            SwarmEvent::IncomingConnectionError {
-                connection_id,
-                local_addr,
-                send_back_addr,
-                error,
-            } => {
+            SwarmEvent::IncomingConnectionError { error, .. } => {
                 tracing::error!("Incoming connection error: {:?}", error);
             }
-            SwarmEvent::ListenerError { listener_id, error } => {
+            SwarmEvent::ListenerError { error, .. } => {
                 tracing::error!("Listener error: {:?}", error);
             }
             SwarmEvent::Behaviour(CoorBehaviourEvent::Rendezvous(
@@ -293,7 +281,7 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                             request_id,
                             response,
                         },
-                    connection_id,
+                    ..
                 },
             )) => match response {
                 CoorToSigResponse::DKGResponse(response) => {
@@ -347,7 +335,7 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                             request,
                             channel,
                         },
-                    connection_id,
+                    ..
                 },
             )) => {
                 tracing::debug!(
@@ -396,7 +384,7 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                             let new_validator = Validator {
                                 p2p_peer_id: peer,
                                 validator_peer_id: validator_peer.clone(),
-                                validator_public_key: public_key,
+                                _validator_public_key: public_key,
                                 nonce,
                                 address,
                             };

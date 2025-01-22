@@ -4,9 +4,25 @@ use std::fmt::{Display, Formatter};
 
 use super::{CryptoType, CryptoTypeError};
 
-#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash, PartialOrd, Ord)]
 pub(crate) struct PkId(Vec<u8>);
-
+impl Serialize for PkId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+impl<'de> Deserialize<'de> for PkId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Ok(PkId::from(s))
+    }
+}
 impl PkId {
     pub fn new(pkid: Vec<u8>) -> Self {
         Self(pkid)

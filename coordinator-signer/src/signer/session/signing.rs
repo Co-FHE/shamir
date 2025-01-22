@@ -1,6 +1,6 @@
 mod base;
 use base::SigningSignerBase;
-use rand::{rngs::ThreadRng, thread_rng, CryptoRng, RngCore};
+use rand::{CryptoRng, RngCore};
 use std::collections::BTreeMap;
 
 use subsession::SignerSubsession;

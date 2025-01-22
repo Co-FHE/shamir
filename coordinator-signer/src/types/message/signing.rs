@@ -21,12 +21,17 @@ pub(crate) struct SigningBaseMessage<VII: ValidatorIdentityIdentity, C: Cipher> 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct SigningRequest<VII: ValidatorIdentityIdentity, C: Cipher> {
     pub(crate) base_info: SigningBaseMessage<VII, C>,
-    pub(crate) stage: SigningRequestStage<C>,
+    pub(crate) stage: SigningRequestStage<VII, C>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) enum SigningRequestStage<C: Cipher> {
-    Round1 { message: Vec<u8> },
-    Round2 { signing_package: C::SigningPackage },
+pub(crate) enum SigningRequestStage<VII: ValidatorIdentityIdentity, C: Cipher> {
+    Round1 {
+        message: Vec<u8>,
+    },
+    Round2 {
+        joined_participants: Participants<VII, C>,
+        signing_package: C::SigningPackage,
+    },
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum SigningRequestWrap<VII: ValidatorIdentityIdentity> {

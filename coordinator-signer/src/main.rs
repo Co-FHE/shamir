@@ -12,7 +12,6 @@ mod utils;
 use common::Settings;
 use coordinator::Coordinator;
 use crypto::P2pIdentity;
-use rand::rngs::ThreadRng;
 #[allow(unused)]
 fn generate_keypair(path: &str) {
     let keypair = libp2p::identity::Keypair::generate_ed25519();
@@ -36,7 +35,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         commands::Commands::Coordinator => {
             // default keypair = 12D3KooWB3LpKiErRF3byUAsCvY6JL8TtQeSCrF5Hw23UoKJ7F88
             let keypair = load_keypair(Settings::global().coordinator.keypair_path.as_str());
-            let mut coordinator = Coordinator::<P2pIdentity>::new(keypair)?;
+            let coordinator = Coordinator::<P2pIdentity>::new(keypair)?;
             // coordinator.start_listening().await?;
             coordinator.start_listening().await?;
         }
@@ -51,7 +50,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             // convert id to peer id
             let peer_id = keypair.public().to_peer_id();
             tracing::info!("Starting signer with validator peer id: {}", peer_id);
-            let mut signer = signer::Signer::<P2pIdentity>::new(keypair)?;
+            let signer = signer::Signer::<P2pIdentity>::new(keypair)?;
             signer.start_listening().await?;
         }
     }

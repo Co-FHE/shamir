@@ -3,7 +3,6 @@ use crate::crypto::{CryptoType, ValidatorIdentityIdentity};
 use crate::types::error::SessionIdError;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest, Sha256};
-use std::{collections::BTreeMap, marker::PhantomData};
 use uuid::Uuid;
 
 use super::{Cipher, Participants};

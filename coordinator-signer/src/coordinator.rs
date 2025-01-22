@@ -537,6 +537,12 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                                 }
                                 Err(e) => {
                                     tracing::error!("Error signing: {}", e);
+                                    reader
+                                        .get_mut()
+                                        .write_all(e.to_string().as_bytes())
+                                        .await
+                                        .unwrap();
+                                    reader.get_mut().write_all(b"\n").await.unwrap();
                                 }
                             }
                         });

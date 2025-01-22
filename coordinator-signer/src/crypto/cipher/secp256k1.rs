@@ -1,9 +1,25 @@
-use rand::{CryptoRng, RngCore};
-use serde::{Deserialize, Serialize};
+use crate::utils;
 
 use super::{
-    Cipher, CryptoType, Identifier, PublicKeyPackage, Signature, SigningPackage, VerifyingKey,
+    Cipher, CryptoType, Identifier, KeyPackage, PublicKeyPackage, Signature, SigningPackage, Tweak,
+    TweakCipher, VerifyingKey,
 };
+use k256::elliptic_curve::ops::Reduce;
+use k256::{
+    elliptic_curve::{
+        bigint::U256,
+        group::prime::PrimeCurveAffine,
+        hash2curve::{hash_to_field, ExpandMsgXmd},
+        point::AffineCoordinates,
+        sec1::{FromEncodedPoint, ToEncodedPoint},
+        Field as FFField, PrimeField,
+    },
+    AffinePoint, ProjectivePoint, Scalar,
+};
+use rand::{CryptoRng, RngCore};
+use serde::{Deserialize, Serialize};
+use sha2::digest::Digest;
+use sha2::Sha256;
 use std::collections::BTreeMap;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
@@ -146,7 +162,9 @@ impl PublicKeyPackage for frost_secp256k1::keys::PublicKeyPackage {
         CryptoType::Secp256k1
     }
 }
-
+impl KeyPackage for frost_secp256k1::keys::KeyPackage {
+    type CryptoError = frost_secp256k1::Error;
+}
 impl VerifyingKey for frost_secp256k1::VerifyingKey {
     type Signature = frost_secp256k1::Signature;
     type CryptoError = frost_secp256k1::Error;
@@ -161,3 +179,75 @@ impl VerifyingKey for frost_secp256k1::VerifyingKey {
         Self::deserialize(bytes)
     }
 }
+
+/// Digest the hasher to a Scalar
+pub fn hasher_to_scalar(hasher: Sha256) -> Scalar {
+    // This is acceptable because secp256k1 curve order is close to 2^256,
+    // and the input is uniformly random since it is a hash output, therefore
+    // the bias is negligibly small.
+    Scalar::reduce(U256::from_be_slice(&hasher.finalize()))
+}
+
+pub fn tagged_hash(tag: &str) -> Sha256 {
+    let mut hasher = Sha256::new();
+    let mut tag_hasher = Sha256::new();
+    tag_hasher.update(tag.as_bytes());
+    let tag_hash = tag_hasher.finalize();
+    hasher.update(tag_hash);
+    hasher.update(tag_hash);
+    hasher
+}
+fn tweak<T: AsRef<[u8]>>(
+    public_key: &<<frost_secp256k1::Secp256K1Sha256 as frost_core::Ciphersuite>::Group as frost_core::Group>::Element,
+    data: Option<T>,
+) -> frost_core::Scalar<frost_secp256k1::Secp256K1Sha256> {
+    let mut hasher = tagged_hash("veritss/secp256k1/tweak");
+    hasher.update(public_key.to_affine().x());
+    if let Some(data) = data {
+        hasher.update(data.as_ref());
+    }
+    hasher_to_scalar(hasher)
+}
+impl Tweak for frost_secp256k1::keys::KeyPackage {
+    fn tweak<T: AsRef<[u8]>>(self, data: Option<T>) -> Self {
+        let t = tweak(&self.verifying_key().to_element(), data);
+        let tp = ProjectivePoint::GENERATOR * t;
+        let key_package = self;
+        let verifying_key =
+            frost_secp256k1::VerifyingKey::new(key_package.verifying_key().to_element() + tp);
+        let signing_share =
+            frost_secp256k1::keys::SigningShare::new(key_package.signing_share().to_scalar() + t);
+        let verifying_share = frost_secp256k1::keys::VerifyingShare::new(
+            key_package.verifying_share().to_element() + tp,
+        );
+        frost_secp256k1::keys::KeyPackage::new(
+            *key_package.identifier(),
+            signing_share,
+            verifying_share,
+            verifying_key,
+            *key_package.min_signers(),
+        )
+    }
+}
+impl Tweak for frost_secp256k1::keys::PublicKeyPackage {
+    fn tweak<T: AsRef<[u8]>>(self, data: Option<T>) -> Self {
+        let t = tweak(&self.verifying_key().to_element(), data);
+        let tp = ProjectivePoint::GENERATOR * t;
+        let public_key_package = self;
+        let verifying_key = frost_secp256k1::VerifyingKey::new(
+            public_key_package.verifying_key().to_element() + tp,
+        );
+        // Recreate verifying share map with negated VerifyingShares
+        // values.
+        let verifying_shares: BTreeMap<_, _> = public_key_package
+            .verifying_shares()
+            .iter()
+            .map(|(i, vs)| {
+                let vs = frost_secp256k1::keys::VerifyingShare::new(vs.to_element() + tp);
+                (*i, vs)
+            })
+            .collect();
+        frost_secp256k1::keys::PublicKeyPackage::new(verifying_shares, verifying_key)
+    }
+}
+impl TweakCipher for Secp256K1Sha256 {}

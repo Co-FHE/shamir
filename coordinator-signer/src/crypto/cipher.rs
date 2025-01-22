@@ -8,6 +8,8 @@ use super::{CryptoType, PkId};
 mod ed25519;
 mod secp256k1;
 mod secp256k1_tr;
+mod tweak;
+pub use tweak::*;
 
 pub use ed25519::*;
 pub use secp256k1::*;
@@ -25,7 +27,7 @@ pub trait Cipher: Clone + std::fmt::Debug + Send + Sync + 'static + PartialEq + 
     type SigningNonces: Serialize + for<'de> Deserialize<'de> + fmt::Debug + Clone + Send + Sync;
     type SignatureShare: Serialize + for<'de> Deserialize<'de> + fmt::Debug + Clone + Send + Sync;
 
-    type KeyPackage: Serialize + for<'de> Deserialize<'de> + fmt::Debug + Clone + Send + Sync;
+    type KeyPackage: KeyPackage;
     type SigningPackage: SigningPackage<
         Identifier = Self::Identifier,
         SigningCommitments = Self::SigningCommitments,
@@ -94,6 +96,11 @@ impl RngType for rand::rngs::ThreadRng {
         Self::default()
     }
 }
+pub trait KeyPackage:
+    Serialize + for<'de> Deserialize<'de> + fmt::Debug + Clone + Send + Sync
+{
+    type CryptoError: std::error::Error + std::marker::Send + std::marker::Sync + 'static;
+}
 pub trait Signature:
     Serialize + for<'de> Deserialize<'de> + fmt::Debug + Clone + Send + Sync
 {
@@ -143,6 +150,31 @@ pub trait PublicKeyPackage:
         Ok(PkId::new(bytes))
     }
     fn verifying_shares(&self) -> &BTreeMap<Self::Identifier, Self::VerifyingShare>;
+    // fn has_even_y(&self) -> bool {
+    //     let verifying_key = self.verifying_key();
+    //     (!verifying_key.to_element().to_affine().y_is_odd()).into()
+    // }
+
+    // fn into_even_y(self, is_even: Option<bool>) -> Self {
+    //     let is_even = is_even.unwrap_or_else(|| self.has_even_y());
+    //     if !is_even {
+    //         // Negate verifying key
+    //         let verifying_key = Self::VerifyingKey::new(-self.verifying_key().to_element());
+    //         // Recreate verifying share map with negated VerifyingShares
+    //         // values.
+    //         let verifying_shares: BTreeMap<_, _> = self
+    //             .verifying_shares()
+    //             .iter()
+    //             .map(|(i, vs)| {
+    //                 let vs = Self::VerifyingShare::new(-vs.to_element());
+    //                 (*i, vs)
+    //             })
+    //             .collect();
+    //         PublicKeyPackage::new(verifying_shares, verifying_key)
+    //     } else {
+    //         self
+    //     }
+    // }
 }
 pub trait VerifyingKey: Serialize + for<'de> Deserialize<'de> + fmt::Debug + Clone {
     type Signature;

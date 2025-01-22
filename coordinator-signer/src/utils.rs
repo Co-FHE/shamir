@@ -1,3 +1,5 @@
+use k256::elliptic_curve::ops::Reduce;
+use k256::{elliptic_curve::bigint::U256, Scalar};
 use sha2::{Digest, Sha256};
 
 /// Concatenates data and calculates their SHA256 hash

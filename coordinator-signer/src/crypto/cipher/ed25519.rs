@@ -1,10 +1,32 @@
 use std::collections::BTreeMap;
 
+use ed25519_dalek::ed25519;
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha512};
+
+use crate::utils;
 
 use super::{
-    Cipher, CryptoType, Identifier, PublicKeyPackage, Signature, SigningPackage, VerifyingKey,
+    Cipher, CryptoType, Identifier, KeyPackage, PublicKeyPackage, Signature, SigningPackage, Tweak,
+    TweakCipher, VerifyingKey,
+};
+use curve25519_dalek::{
+    constants::ED25519_BASEPOINT_POINT,
+    edwards::{CompressedEdwardsY, EdwardsPoint},
+    scalar::Scalar,
+    traits::Identity,
+};
+use k256::{
+    elliptic_curve::{
+        bigint::U256,
+        group::prime::PrimeCurveAffine,
+        hash2curve::{hash_to_field, ExpandMsgXmd},
+        point::AffineCoordinates,
+        sec1::{FromEncodedPoint, ToEncodedPoint},
+        Field as FFField, PrimeField,
+    },
+    AffinePoint, ProjectivePoint,
 };
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct Ed25519Sha512;
@@ -146,7 +168,9 @@ impl PublicKeyPackage for frost_ed25519::keys::PublicKeyPackage {
         CryptoType::Ed25519
     }
 }
-
+impl KeyPackage for frost_ed25519::keys::KeyPackage {
+    type CryptoError = frost_ed25519::Error;
+}
 impl VerifyingKey for frost_ed25519::VerifyingKey {
     type Signature = frost_ed25519::Signature;
     type CryptoError = frost_ed25519::Error;
@@ -161,3 +185,68 @@ impl VerifyingKey for frost_ed25519::VerifyingKey {
         Self::deserialize(bytes)
     }
 }
+
+pub fn tagged_hash(tag: &str) -> Sha512 {
+    let mut hasher = Sha512::new();
+    let mut tag_hasher = Sha512::new();
+    tag_hasher.update(tag.as_bytes());
+    let tag_hash = tag_hasher.finalize();
+    hasher.update(tag_hash);
+    hasher.update(tag_hash);
+    hasher
+}
+fn tweak<T: AsRef<[u8]>>(
+    public_key: &EdwardsPoint,
+    data: Option<T>,
+) -> frost_core::Scalar<frost_ed25519::Ed25519Sha512> {
+    let mut hasher = tagged_hash("veritss/ed25519/tweak");
+    hasher.update(public_key.compress().to_bytes());
+    if let Some(data) = data {
+        hasher.update(data.as_ref());
+    }
+    let mut output = [0u8; 64];
+    output.copy_from_slice(hasher.finalize().as_slice());
+    Scalar::from_bytes_mod_order_wide(&output)
+}
+impl Tweak for frost_ed25519::keys::KeyPackage {
+    fn tweak<T: AsRef<[u8]>>(self, data: Option<T>) -> Self {
+        let t = tweak(&self.verifying_key().to_element(), data);
+        let tp = <<frost_ed25519::Ed25519Sha512 as frost_core::Ciphersuite>::Group as frost_core::Group>::generator() * t;
+        let key_package = self;
+        let verifying_key =
+            frost_ed25519::VerifyingKey::new(key_package.verifying_key().to_element() + tp);
+        let signing_share =
+            frost_ed25519::keys::SigningShare::new(key_package.signing_share().to_scalar() + t);
+        let verifying_share = frost_ed25519::keys::VerifyingShare::new(
+            key_package.verifying_share().to_element() + tp,
+        );
+        frost_ed25519::keys::KeyPackage::new(
+            *key_package.identifier(),
+            signing_share,
+            verifying_share,
+            verifying_key,
+            *key_package.min_signers(),
+        )
+    }
+}
+impl Tweak for frost_ed25519::keys::PublicKeyPackage {
+    fn tweak<T: AsRef<[u8]>>(self, data: Option<T>) -> Self {
+        let t = tweak(&self.verifying_key().to_element(), data);
+        let tp = <<frost_ed25519::Ed25519Sha512 as frost_core::Ciphersuite>::Group as frost_core::Group>::generator() * t;
+        let public_key_package = self;
+        let verifying_key =
+            frost_ed25519::VerifyingKey::new(public_key_package.verifying_key().to_element() + tp);
+        // Recreate verifying share map with negated VerifyingShares
+        // values.
+        let verifying_shares: BTreeMap<_, _> = public_key_package
+            .verifying_shares()
+            .iter()
+            .map(|(i, vs)| {
+                let vs = frost_ed25519::keys::VerifyingShare::new(vs.to_element() + tp);
+                (*i, vs)
+            })
+            .collect();
+        frost_ed25519::keys::PublicKeyPackage::new(verifying_shares, verifying_key)
+    }
+}
+impl TweakCipher for Ed25519Sha512 {}

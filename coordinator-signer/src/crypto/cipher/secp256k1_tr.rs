@@ -4,7 +4,8 @@ use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    Cipher, CryptoType, Identifier, PublicKeyPackage, Signature, SigningPackage, VerifyingKey,
+    Cipher, CryptoType, Identifier, KeyPackage, PublicKeyPackage, Signature, SigningPackage, Tweak,
+    TweakCipher, VerifyingKey,
 };
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct Secp256K1Sha256TR;
@@ -144,7 +145,9 @@ impl PublicKeyPackage for frost_secp256k1_tr::keys::PublicKeyPackage {
         CryptoType::Secp256k1Tr
     }
 }
-
+impl KeyPackage for frost_secp256k1_tr::keys::KeyPackage {
+    type CryptoError = frost_secp256k1_tr::Error;
+}
 impl VerifyingKey for frost_secp256k1_tr::VerifyingKey {
     type Signature = frost_secp256k1_tr::Signature;
     type CryptoError = frost_secp256k1_tr::Error;
@@ -160,3 +163,15 @@ impl VerifyingKey for frost_secp256k1_tr::VerifyingKey {
         Self::deserialize(bytes)
     }
 }
+
+impl Tweak for frost_secp256k1_tr::keys::PublicKeyPackage {
+    fn tweak<T: AsRef<[u8]>>(self, data: Option<T>) -> Self {
+        frost_secp256k1_tr::keys::Tweak::tweak(self, data)
+    }
+}
+impl Tweak for frost_secp256k1_tr::keys::KeyPackage {
+    fn tweak<T: AsRef<[u8]>>(self, data: Option<T>) -> Self {
+        frost_secp256k1_tr::keys::Tweak::tweak(self, data)
+    }
+}
+impl TweakCipher for Secp256K1Sha256TR {}

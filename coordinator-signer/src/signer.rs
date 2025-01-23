@@ -90,7 +90,10 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                 ),
                 rendezvous: rendezvous::client::Behaviour::new(key.clone()),
             })?
-            .with_swarm_config(|cfg| cfg.with_idle_connection_timeout(Duration::from_secs(1000)))
+            .with_swarm_config(|cfg| {
+                cfg.with_idle_connection_timeout(Duration::from_secs(1000))
+                    .with_max_negotiating_inbound_streams(100000)
+            })
             .build();
         let coordinator_addr: Multiaddr = format!(
             "/ip4/{}/tcp/{}/p2p/{}",

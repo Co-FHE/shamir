@@ -86,6 +86,24 @@ pub trait Cipher: Clone + std::fmt::Debug + Send + Sync + 'static + PartialEq + 
         key_package: &Self::KeyPackage,
         rng: &mut R,
     ) -> (Self::SigningNonces, Self::SigningCommitments);
+    fn sign_with_tweak<T: AsRef<[u8]>>(
+        signing_package: &Self::SigningPackage,
+        nonces: &Self::SigningNonces,
+        key_package: &Self::KeyPackage,
+        data: Option<T>,
+    ) -> Result<Self::SignatureShare, Self::CryptoError> {
+        let key_package = key_package.clone().tweak(data);
+        Self::sign(signing_package, nonces, &key_package)
+    }
+    fn aggregate_with_tweak<T: AsRef<[u8]>>(
+        signing_package: &Self::SigningPackage,
+        signature_shares: &BTreeMap<Self::Identifier, Self::SignatureShare>,
+        public_key: &Self::PublicKeyPackage,
+        data: Option<T>,
+    ) -> Result<Self::Signature, Self::CryptoError> {
+        let public_key = public_key.clone().tweak(data);
+        Self::aggregate(signing_package, signature_shares, &public_key)
+    }
 }
 
 pub trait RngType: CryptoRng + RngCore + Clone {
@@ -97,7 +115,7 @@ impl RngType for rand::rngs::ThreadRng {
     }
 }
 pub trait KeyPackage:
-    Serialize + for<'de> Deserialize<'de> + fmt::Debug + Clone + Send + Sync
+    Serialize + for<'de> Deserialize<'de> + fmt::Debug + Clone + Send + Sync + Tweak
 {
     type CryptoError: std::error::Error + std::marker::Send + std::marker::Sync + 'static;
 }
@@ -131,7 +149,7 @@ pub trait SigningPackage:
     ) -> Result<Self, Self::CryptoError>;
 }
 pub trait PublicKeyPackage:
-    Serialize + for<'de> Deserialize<'de> + fmt::Debug + Clone + Send + Sync + PartialEq + Eq
+    Serialize + for<'de> Deserialize<'de> + fmt::Debug + Clone + Send + Sync + PartialEq + Eq + Tweak
 {
     type Signature;
     type CryptoError;

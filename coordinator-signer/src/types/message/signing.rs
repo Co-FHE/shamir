@@ -25,10 +25,10 @@ pub(crate) struct SigningRequest<VII: ValidatorIdentityIdentity, C: Cipher> {
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum SigningRequestStage<VII: ValidatorIdentityIdentity, C: Cipher> {
-    Round1 {
-        message: Vec<u8>,
-    },
+    Round1 {},
     Round2 {
+        message: Vec<u8>,
+        tweak_data: Option<Vec<u8>>,
         joined_participants: Participants<VII, C>,
         signing_package: C::SigningPackage,
     },

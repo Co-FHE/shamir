@@ -8,7 +8,8 @@ pub(crate) enum Command {
     StartDkg(u16, CryptoType),
     Unknown(String),
     Dial(String),
-    Sign(String, String),
+    Sign(String, String, Option<String>),
+    LoopSign(String, usize),
 }
 
 impl Command {
@@ -30,7 +31,15 @@ impl Command {
             }
             ["list", "signer", "info"] | ["ls"] | ["list"] => Command::ListSignerAddr,
             ["sign", _public_key, _message] => {
-                Command::Sign(origin[1].to_string(), origin[2].to_string())
+                Command::Sign(origin[1].to_string(), origin[2].to_string(), None)
+            }
+            ["sign", _public_key, _message, _tweak_data] => Command::Sign(
+                origin[1].to_string(),
+                origin[2].to_string(),
+                Some(origin[3].to_string()),
+            ),
+            ["loopsign", _public_key, times] => {
+                Command::LoopSign(origin[1].to_string(), times.parse::<usize>().unwrap())
             }
             ["lspk"] => Command::ListPkId,
             ["start", "dkg", num, crypto_type] | ["dkg", num, crypto_type] => {

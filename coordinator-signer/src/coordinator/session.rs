@@ -27,6 +27,7 @@ pub(crate) enum InstructionCipher<VII: ValidatorIdentityIdentity> {
     Sign {
         pkid: PkId,
         msg: Vec<u8>,
+        tweak_data: Option<Vec<u8>>,
         signature_response_oneshot:
             oneshot::Sender<Result<SignatureSuiteInfo<VII>, SessionManagerError>>,
     },
@@ -112,7 +113,8 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
     async fn sign<T: AsRef<[u8]>>(
         &mut self,
         pkid_raw: T,
-        msg: Vec<u8>,
+        msg: T,
+        tweak_data: Option<T>,
         signature_response_oneshot: oneshot::Sender<
             Result<SignatureSuiteInfo<VII>, SessionManagerError>,
         >,
@@ -137,7 +139,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
         let (tx, rx) = oneshot::channel();
         self.signing_futures.push(rx);
         signing_session
-            .start_new_signing(msg, tx, |subsession_id| {
+            .start_new_signing(msg, tweak_data, tx, |subsession_id| {
                 self.subsession_id_signaturesuite_map
                     .insert(subsession_id, signature_response_oneshot);
             })
@@ -193,9 +195,10 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
             InstructionCipher::Sign {
                 pkid,
                 msg,
+                tweak_data,
                 signature_response_oneshot,
             } => {
-                self.sign(pkid.to_bytes(), msg, signature_response_oneshot)
+                self.sign(pkid.to_bytes(), msg, tweak_data, signature_response_oneshot)
                     .await;
             }
             InstructionCipher::ListPkIds {

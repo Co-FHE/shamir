@@ -32,6 +32,7 @@ pub(crate) enum Instruction<VII: ValidatorIdentityIdentity> {
     Sign {
         pkid: PkId,
         msg: Vec<u8>,
+        tweak_data: Option<Vec<u8>>,
         signature_response_oneshot:
             oneshot::Sender<Result<SignatureSuiteInfo<VII>, SessionManagerError>>,
     },
@@ -125,6 +126,7 @@ impl<VII: ValidatorIdentityIdentity> CoordiantorSessionManager<VII> {
                         Instruction::Sign {
                             pkid,
                             msg,
+                            tweak_data,
                             signature_response_oneshot,
                         } => {
                             let crypto_type = pkid.to_crypto_type();
@@ -143,6 +145,7 @@ impl<VII: ValidatorIdentityIdentity> CoordiantorSessionManager<VII> {
                                         .send(InstructionCipher::Sign {
                                             pkid: pkid.clone(),
                                             msg: msg.clone(),
+                                            tweak_data,
                                             signature_response_oneshot,
                                         })
                                         .unwrap();

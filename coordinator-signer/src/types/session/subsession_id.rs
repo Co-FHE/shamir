@@ -17,7 +17,7 @@ use crate::types::error::SessionIdError;
 // 16 bytes: uuid of subsession
 // The SessionId cannot be used in any consensus
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
-pub(crate) struct SubsessionId([u8; 102]);
+pub(crate) struct SubsessionId([u8; 118]);
 
 impl Serialize for SubsessionId {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
@@ -38,9 +38,10 @@ impl SubsessionId {
         min_signers: u16,
         participants: &Participants<VII, C>,
         sign_message: Vec<u8>,
+        tweak_data: Option<Vec<u8>>,
         pkid: PkId,
     ) -> Result<Self, SessionIdError> {
-        let mut bytes = [0u8; 102];
+        let mut bytes = [0u8; 118];
 
         // 1 byte crypto type
         bytes[0] = crypto_type as u8;
@@ -84,9 +85,19 @@ impl SubsessionId {
         let hash = hasher.finalize();
         bytes[54..86].copy_from_slice(&hash[..]);
 
+        // if tweak_data is not None, calculate hash of tweak_data,else all zero
+        if let Some(tweak_data) = tweak_data {
+            let mut hasher = Sha256::new();
+            hasher.update(tweak_data);
+            let hash = hasher.finalize();
+            bytes[86..102].copy_from_slice(&hash[..16]);
+        } else {
+            bytes[86..102].copy_from_slice(&[0u8; 16]);
+        }
+
         // Generate random UUID for subsession
         let subsession_uuid = Uuid::new_v4();
-        bytes[86..102].copy_from_slice(subsession_uuid.as_bytes());
+        bytes[102..118].copy_from_slice(subsession_uuid.as_bytes());
 
         Ok(SubsessionId(bytes))
     }
@@ -99,10 +110,19 @@ impl SubsessionId {
         let hash2 = hex::encode(&self.0[13..21]);
         let pkid = hex::encode(&self.0[21..54]);
         let message_hash = hex::encode(&self.0[54..86]);
-        let uuid = hex::encode(&self.0[86..102]);
+        let tweak_data = hex::encode(&self.0[86..102]);
+        let uuid = hex::encode(&self.0[102..118]);
         format!(
-            "subsession-{}-{}-{}-{}-{}-{}-{}-{}",
-            crypto_type, min_signers, max_signers, hash1, hash2, pkid, message_hash, uuid
+            "subsession-{}-{}-{}-{}-{}-{}-{}-{}-{}",
+            crypto_type,
+            min_signers,
+            max_signers,
+            hash1,
+            hash2,
+            pkid,
+            message_hash,
+            tweak_data,
+            uuid
         )
     }
     pub fn from_string(s: &str) -> Result<Self, SessionIdError> {
@@ -114,14 +134,14 @@ impl SubsessionId {
         }
 
         let parts: Vec<&str> = s[11..].split('-').collect();
-        if parts.len() != 8 {
+        if parts.len() != 9 {
             return Err(SessionIdError::InvalidSubSessionIdFormat(format!(
-                "subsession id {} must have 8 parts",
+                "subsession id {} must have 9 parts",
                 s
             )));
         }
 
-        let mut bytes = [0u8; 102];
+        let mut bytes = [0u8; 118];
 
         // Parse crypto type (1 byte)
         let crypto_type = u8::from_str_radix(parts[0], 16).map_err(|e| {
@@ -217,8 +237,24 @@ impl SubsessionId {
         }
         bytes[54..86].copy_from_slice(&message_hash);
 
+        // Parse tweak data (16 bytes)
+        let tweak_data = hex::decode(parts[7]).map_err(|e| {
+            SessionIdError::InvalidSubSessionIdFormat(format!(
+                "subsession id {} invalid tweak data: {}",
+                s, e
+            ))
+        })?;
+        if tweak_data.len() != 16 {
+            return Err(SessionIdError::InvalidSubSessionIdFormat(format!(
+                "subsession id {} invalid tweak data length: {}",
+                s,
+                tweak_data.len(),
+            )));
+        }
+        bytes[86..102].copy_from_slice(&tweak_data);
+
         // Parse UUID (16 bytes)
-        let uuid = hex::decode(parts[7]).map_err(|e| {
+        let uuid = hex::decode(parts[8]).map_err(|e| {
             SessionIdError::InvalidSubSessionIdFormat(format!(
                 "subsession id {} invalid uuid: {}",
                 s, e
@@ -231,7 +267,7 @@ impl SubsessionId {
                 uuid.len(),
             )));
         }
-        bytes[86..102].copy_from_slice(&uuid);
+        bytes[102..118].copy_from_slice(&uuid);
 
         Ok(SubsessionId(bytes))
     }

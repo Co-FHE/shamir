@@ -46,6 +46,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSigningSession<VII, C
     pub(crate) async fn start_new_signing<T: AsRef<[u8]>>(
         &mut self,
         msg: T,
+        tweak_data: Option<T>,
         response: oneshot::Sender<
             Result<SignatureSuite<VII, C>, (Option<SubsessionId>, SessionError<C>)>,
         >,
@@ -58,13 +59,14 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSigningSession<VII, C
             self.min_signers,
             self.participants.clone(),
             msg.clone(),
+            tweak_data.map(|s| s.as_ref().to_vec()),
             self.signing_sender.clone(),
         );
         match subsession_result {
             Ok(subsession) => {
                 let subsession_id = subsession.subsession_id();
                 callback(subsession_id);
-                subsession.start_signing(msg, response).await
+                subsession.start_signing(response).await
             }
             Err(e) => {
                 if let Err(e) = response.send(Err((None, e))) {

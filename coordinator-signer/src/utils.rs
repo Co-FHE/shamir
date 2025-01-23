@@ -1,5 +1,6 @@
 use k256::elliptic_curve::ops::Reduce;
 use k256::{elliptic_curve::bigint::U256, Scalar};
+use rand::Rng;
 use sha2::{Digest, Sha256};
 
 /// Concatenates data and calculates their SHA256 hash
@@ -23,6 +24,14 @@ where
 
     // Return hash bytes
     hasher.finalize().to_vec()
+}
+pub fn random_readable_string(length: usize) -> String {
+    let mut rng = rand::thread_rng();
+    let mut bytes = Vec::with_capacity(length);
+    for _ in 0..length {
+        bytes.push(rng.gen::<u8>());
+    }
+    hex::encode(bytes)
 }
 #[cfg(test)]
 mod tests {

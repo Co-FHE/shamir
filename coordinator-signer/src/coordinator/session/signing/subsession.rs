@@ -4,7 +4,7 @@ use std::{
 };
 
 use common::Settings;
-use futures::stream::FuturesUnordered;
+use futures::stream::{Abortable, FuturesUnordered};
 use futures::StreamExt;
 use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedSender},
@@ -35,6 +35,7 @@ pub(crate) enum CoordinatorSigningState<VII: ValidatorIdentityIdentity, C: Ciphe
 }
 pub(crate) struct CoordinatorSubsession<VII: ValidatorIdentityIdentity, C: Cipher> {
     message: Vec<u8>,
+    tweak_data: Option<Vec<u8>>,
     subsession_id: SubsessionId,
     min_signers: u16,
     participants: Participants<VII, C>,
@@ -53,6 +54,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
         min_signers: u16,
         participants: Participants<VII, C>,
         sign_message: Vec<u8>,
+        tweak_data: Option<Vec<u8>>,
         sender: UnboundedSender<(
             SigningRequestWrap<VII>,
             oneshot::Sender<SigningResponseWrap<VII>>,
@@ -63,9 +65,11 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
             min_signers,
             &participants,
             sign_message.clone(),
+            tweak_data.clone(),
             pkid.clone(),
         )?;
         Ok(Self {
+            tweak_data,
             subsession_id: subsession_id.clone(),
             min_signers,
             participants: participants.clone(),
@@ -76,14 +80,12 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
             message: sign_message,
         })
     }
-    pub(crate) async fn start_signing<T: AsRef<[u8]>>(
+    pub(crate) async fn start_signing(
         mut self,
-        msg: T,
         response_sender: oneshot::Sender<
             Result<SignatureSuite<VII, C>, (Option<SubsessionId>, SessionError<C>)>,
         >,
     ) {
-        let msg = msg.as_ref().to_vec();
         tokio::spawn(async move {
             tracing::debug!("Starting Signing session with id: {:?}", self.subsession_id);
 
@@ -113,7 +115,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
             tracing::info!("Sent {} round 1 requests", round1_sent);
             let (event_channel_tx, mut event_channel_rx) = unbounded_channel();
             // round1 thread
-            tokio::spawn(async move {
+            let handle = tokio::spawn(async move {
                 for _ in 0..round1_sent {
                     let response = tokio::select! {
                         response = futures.next() => response.unwrap(),
@@ -226,6 +228,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
                             ),
                         )))
                         .unwrap();
+                    handle.abort();
                     return;
                 }
                 //check round2 request is valid, if valid send to signer
@@ -303,9 +306,10 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
                             break 'out Ok(SignatureSuite {
                                 signature,
                                 pk: self.public_key.clone(),
+                                tweak_data: self.tweak_data.clone(),
                                 subsession_id: self.subsession_id.clone(),
                                 pkid: self.pkid.clone(),
-                                message: msg,
+                                message: self.message.clone(),
                                 participants: self.participants.clone(),
                                 joined_participants: joined_participants.clone(),
                             });
@@ -331,11 +335,13 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
                             response_sender
                                 .send(Err((Some(self.subsession_id), e)))
                                 .unwrap();
+                            handle.abort();
                             return;
                         }
                     },
                 }
             };
+            handle.abort();
             if let Err(e) =
                 response_sender.send(selected_responses.map_err(|e| (Some(self.subsession_id), e)))
             {
@@ -361,9 +367,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
                         identity: identity.clone(),
                         public_key: self.public_key.clone(),
                     },
-                    stage: SigningRequestStage::Round1 {
-                        message: self.message.clone(),
-                    },
+                    stage: SigningRequestStage::Round1 {},
                 })
                 .collect(),
             CoordinatorSigningState::Round2 {
@@ -381,6 +385,8 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
                         public_key: self.public_key.clone(),
                     },
                     stage: SigningRequestStage::Round2 {
+                        message: self.message.clone(),
+                        tweak_data: self.tweak_data.clone(),
                         joined_participants: joined_participants.clone(),
                         signing_package: signing_package.clone(),
                     },
@@ -483,8 +489,13 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
                         ));
                     }
                 }
-                let signature = C::aggregate(&signing_package, &signature_shares, &self.public_key)
-                    .map_err(|e| (SessionError::CryptoError(e), None))?;
+                let signature = C::aggregate_with_tweak(
+                    &signing_package,
+                    &signature_shares,
+                    &self.public_key,
+                    self.tweak_data.clone(),
+                )
+                .map_err(|e| (SessionError::CryptoError(e), None))?;
                 Ok(CoordinatorSigningState::Completed {
                     signature,
                     joined_participants,

@@ -25,7 +25,6 @@ pub(crate) struct SignerSubsession<VII: ValidatorIdentityIdentity, C: Cipher> {
     pub(crate) _subsession_id: SubsessionId,
     pub(crate) base: SigningSignerBase<VII, C>,
     pub(crate) signing_state: SignerSigningState<C>,
-    pub(crate) _message: Vec<u8>,
 }
 impl<VII: ValidatorIdentityIdentity, C: Cipher> SignerSubsession<VII, C> {
     pub(crate) fn new_from_request<R: RngCore + CryptoRng>(
@@ -33,7 +32,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SignerSubsession<VII, C> {
         base: SigningSignerBase<VII, C>,
         mut rng: R,
     ) -> Result<(Self, SigningResponse<VII, C>), SessionError<C>> {
-        if let SigningRequestStage::Round1 { message } = request.stage.clone() {
+        if let SigningRequestStage::Round1 {} = request.stage.clone() {
             base.check_request(&request)?;
             tracing::info!("round1 {:?}", base.key_package);
             let (nonces, commitments) = C::commit(&base.key_package, &mut rng);
@@ -51,7 +50,6 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SignerSubsession<VII, C> {
                         _signing_commitments: commitments.clone(),
                         nonces,
                     },
-                    _message: message,
                 },
                 response,
             ))
@@ -75,14 +73,21 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SignerSubsession<VII, C> {
                 )));
             }
             SigningRequestStage::Round2 {
-                signing_package, ..
+                signing_package,
+                message,
+                tweak_data,
+                ..
             } => {
                 if let SignerSigningState::Round1 { nonces, .. } = &self.signing_state {
                     tracing::info!("round2 {:?}", signing_package);
                     tracing::info!("round2 {:?}", nonces);
-                    let signature_share =
-                        C::sign(&signing_package, &nonces, &self.base.key_package)
-                            .map_err(|e| SessionError::CryptoError(e))?;
+                    let signature_share = C::sign_with_tweak(
+                        &signing_package,
+                        &nonces,
+                        &self.base.key_package,
+                        tweak_data,
+                    )
+                    .map_err(|e| SessionError::CryptoError(e))?;
                     let response = SigningResponse {
                         base_info: request.base_info.clone(),
                         stage: SigningResponseStage::Round2 {

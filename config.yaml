@@ -1,6 +1,6 @@
 logging:
   console:
-    level: "debug"
+    level: "warn"
   file:
     level: "info"
     dir_path: "logs"
@@ -22,3 +22,5 @@ connection:
   ping_interval: 1
 session:
   state_channel_retry_interval: 1
+  signing_round1_timeout: 10
+  signing_round2_timeout: 10

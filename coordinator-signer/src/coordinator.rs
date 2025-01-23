@@ -32,6 +32,7 @@ use tokio::net::unix::SocketAddr;
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot;
+use tokio::time::Instant;
 pub struct Coordinator<VI: ValidatorIdentity> {
     p2p_keypair: libp2p::identity::Keypair,
     swarm: libp2p::Swarm<CoorBehaviour<VI::Identity>>,
@@ -513,7 +514,7 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                             tracing::error!("Invalid peer id: {}", peer_id);
                         }
                     }
-                    Command::Sign(pkid, msg) => {
+                    Command::Sign(pkid, msg, tweak_data) => {
                         tracing::info!("Received sign request: {}", msg);
                         let pkid = PkId::from(pkid);
                         let (sender, receiver) = oneshot::channel();
@@ -521,6 +522,7 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                             .send(Instruction::Sign {
                                 pkid,
                                 msg: msg.as_bytes().to_vec(),
+                                tweak_data: tweak_data.map(|s| s.as_bytes().to_vec()),
                                 signature_response_oneshot: sender,
                             })
                             .unwrap();
@@ -545,6 +547,64 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                                     reader.get_mut().write_all(b"\n").await.unwrap();
                                 }
                             }
+                        });
+                    }
+                    Command::LoopSign(pkid, times) => {
+                        let pkid = PkId::from(pkid);
+                        let mut queue = Vec::new();
+                        for _ in 0..times {
+                            let (sender, receiver) = oneshot::channel();
+                            //random generate msg
+                            let msg: Vec<u8> = random_readable_string(10).as_bytes().to_vec();
+                            let tweak_data: Option<Vec<u8>> =
+                                Some(random_readable_string(10).as_bytes().to_vec());
+                            queue.push(receiver);
+                            self.instruction_sender
+                                .send(Instruction::Sign {
+                                    pkid: pkid.clone(),
+                                    msg: msg.clone(),
+                                    tweak_data: tweak_data.clone(),
+                                    signature_response_oneshot: sender,
+                                })
+                                .unwrap();
+                        }
+                        let start = Instant::now();
+                        tokio::spawn(async move {
+                            for receiver in queue {
+                                match receiver.await.unwrap() {
+                                    Ok(signature) => {
+                                        if let Err(e) = signature.try_verify() {
+                                            reader
+                                                .get_mut()
+                                                .write_all(format!("Error: {:?}\n", e).as_bytes())
+                                                .await
+                                                .unwrap();
+                                            reader
+                                                .get_mut()
+                                                .write_all(
+                                                    signature.pretty_print_original().as_bytes(),
+                                                )
+                                                .await
+                                                .unwrap();
+                                        }
+                                    }
+                                    Err(e) => {
+                                        reader
+                                            .get_mut()
+                                            .write_all(e.to_string().as_bytes())
+                                            .await
+                                            .unwrap();
+                                    }
+                                }
+                            }
+                            reader.get_mut().write_all(b"complete\n").await.unwrap();
+                            let end = Instant::now();
+                            let duration = end.duration_since(start);
+                            reader
+                                .get_mut()
+                                .write_all(format!("Time: {:?}\n", duration).as_bytes())
+                                .await
+                                .unwrap();
                         });
                     }
                     Command::ListPkId => {

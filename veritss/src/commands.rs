@@ -1,4 +1,5 @@
 use clap::{command, Parser, Subcommand};
+use coordinator_signer::crypto::CryptoType;
 
 // Define the structure for the command-line application
 #[derive(Parser)]
@@ -16,6 +17,18 @@ pub struct CommandLineApp {
 pub enum Commands {
     /// Run as a coordinator role
     Coordinator,
+    /// Run as a node role
+    DKG {
+        min_signer: u16,
+        #[arg(value_parser = parse_crypto_type)]
+        crypto_type: CryptoType,
+    },
+    ///
+    Sign {
+        pkid: String,
+        message: String,
+        tweak: Option<String>,
+    },
 
     /// Run as a signer role and require the 'id' argument
     Signer {
@@ -23,6 +36,17 @@ pub enum Commands {
         id: u16,
     },
 }
+
+fn parse_crypto_type(s: &str) -> Result<CryptoType, String> {
+    let value = s.parse::<u8>().map_err(|e| e.to_string())?;
+    match value {
+        0 => Ok(CryptoType::Ed25519),
+        1 => Ok(CryptoType::Secp256k1),
+        2 => Ok(CryptoType::Secp256k1Tr),
+        _ => Err("crypto_type must be 0 (Ed25519), 1 (Secp256k1), or 2 (Secp256k1Tr)".to_string()),
+    }
+}
+
 pub fn parse_args() -> Commands {
     CommandLineApp::parse().command
 }

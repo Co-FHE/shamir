@@ -1,6 +1,6 @@
 logging:
   console:
-    level: "warn"
+    level: "info"
   file:
     level: "info"
     dir_path: "logs"
@@ -24,3 +24,6 @@ session:
   state_channel_retry_interval: 1
   signing_round1_timeout: 10
   signing_round2_timeout: 10
+node:
+  keypair_path: "keys_for_test/node.key"
+  ipc_socket_path: ".ipc_socket/"

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use strum::IntoEnumIterator;
+use strum::EnumCount;
 use tokio::sync::{
     mpsc::{UnboundedReceiver, UnboundedSender},
     oneshot,
@@ -19,6 +19,8 @@ use super::{session::InstructionCipher, SessionWrap};
 pub(crate) enum SessionManagerError {
     #[error("Session error: {0}")]
     SessionError(String),
+    #[error("Instruction Response error: {0}")]
+    InstructionResponseError(String),
     #[error("crypto type Error: {0}")]
     CryptoTypeError(#[from] CryptoTypeError),
 }
@@ -95,7 +97,7 @@ impl<VII: ValidatorIdentityIdentity> CoordiantorSessionManager<VII> {
             session_inst_channels
         );
 
-        assert!(session_inst_channels.len() == CryptoType::iter().len());
+        assert!(session_inst_channels.len() == CryptoType::COUNT);
         Self {
             session_inst_channels,
             instructions_receiver,

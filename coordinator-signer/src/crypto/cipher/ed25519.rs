@@ -1,33 +1,14 @@
 use std::collections::BTreeMap;
 
-use ed25519_dalek::ed25519;
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha512};
 
-use crate::utils;
-
 use super::{
     Cipher, CryptoType, Identifier, KeyPackage, PublicKeyPackage, Signature, SigningPackage, Tweak,
-    TweakCipher, VerifyingKey,
+    VerifyingKey,
 };
-use curve25519_dalek::{
-    constants::ED25519_BASEPOINT_POINT,
-    edwards::{CompressedEdwardsY, EdwardsPoint},
-    scalar::Scalar,
-    traits::Identity,
-};
-use k256::{
-    elliptic_curve::{
-        bigint::U256,
-        group::prime::PrimeCurveAffine,
-        hash2curve::{hash_to_field, ExpandMsgXmd},
-        point::AffineCoordinates,
-        sec1::{FromEncodedPoint, ToEncodedPoint},
-        Field as FFField, PrimeField,
-    },
-    AffinePoint, ProjectivePoint,
-};
+use curve25519_dalek::{edwards::EdwardsPoint, scalar::Scalar};
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct Ed25519Sha512;
 impl Cipher for Ed25519Sha512 {
@@ -249,4 +230,3 @@ impl Tweak for frost_ed25519::keys::PublicKeyPackage {
         frost_ed25519::keys::PublicKeyPackage::new(verifying_shares, verifying_key)
     }
 }
-impl TweakCipher for Ed25519Sha512 {}

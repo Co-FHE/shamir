@@ -664,8 +664,9 @@ dependencies = [
  "bytes",
  "clap",
  "common",
- "crypto-bigint",
+ "crypto-bigint 0.6.0",
  "curve25519-dalek",
+ "dashmap",
  "ed25519-dalek",
  "frost-core",
  "frost-ed25519",
@@ -774,6 +775,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "crypto-bigint"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4919aa33c410cb537c1b2a8458a896f9e47ed4349a2002e5b240f358f7bf6ffc"
+dependencies = [
+ "num-traits",
+ "rand_core",
+ "subtle",
+]
+
+[[package]]
 name = "crypto-common"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -854,6 +866,20 @@ dependencies = [
  "darling_core",
  "quote",
  "syn 2.0.95",
+]
+
+[[package]]
+name = "dashmap"
+version = "6.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5041cc499144891f3790297212f32a74fb938e5136a14943f338ef9e0ae276cf"
+dependencies = [
+ "cfg-if",
+ "crossbeam-utils",
+ "hashbrown 0.14.5",
+ "lock_api",
+ "once_cell",
+ "parking_lot_core",
 ]
 
 [[package]]
@@ -1032,7 +1058,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b5e6043086bf7973472e0c7dff2142ea0b680d30e18d9cc40f267efbf222bd47"
 dependencies = [
  "base16ct",
- "crypto-bigint",
+ "crypto-bigint 0.5.5",
  "digest",
  "ff",
  "generic-array",
@@ -4303,6 +4329,29 @@ name = "valuable"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "830b7e5d4d90034032940e4ace0d9a9a057e7a45cd94e6c007832e39edb82f6d"
+
+[[package]]
+name = "veritss"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "common",
+ "coordinator-signer",
+ "futures",
+ "hex",
+ "libp2p",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "veritss_sdk"
+version = "0.1.0"
+dependencies = [
+ "common",
+ "coordinator-signer",
+ "tracing",
+]
 
 [[package]]
 name = "version_check"

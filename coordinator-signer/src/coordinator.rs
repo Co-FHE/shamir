@@ -4,15 +4,18 @@ mod session;
 use crate::crypto::*;
 use crate::types::message::{
     CoorBehaviour, CoorBehaviourEvent, CoorToSigRequest, CoorToSigResponse, DKGRequestWrap,
-    DKGResponseWrap, SigToCoorRequest, SigToCoorResponse, SigningRequestWrap, SigningResponseWrap,
-    ValidatorIdentityRequest,
+    DKGResponseWrap, NodeToCoorRequest, NodeToCoorResponse, SigToCoorRequest, SigToCoorResponse,
+    SigningRequestWrap, SigningResponseWrap, ValidatorIdentityRequest,
 };
-use crate::types::Validator;
+use crate::types::{SignatureSuiteInfo, Validator};
 use crate::utils::*;
 use command::Command;
 use common::Settings;
+use futures::stream::FuturesUnordered;
 use futures::StreamExt;
-use libp2p::request_response::{OutboundRequestId, ProtocolSupport};
+use libp2p::request_response::{
+    InboundRequestId, OutboundRequestId, ProtocolSupport, ResponseChannel,
+};
 use libp2p::{
     identify::{self},
     noise,
@@ -21,6 +24,7 @@ use libp2p::{
 };
 use libp2p::{ping, rendezvous, request_response, PeerId, StreamProtocol};
 use manager::Instruction;
+pub(crate) use manager::SessionManagerError;
 use session::SessionWrap;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -53,6 +57,19 @@ pub struct Coordinator<VI: ValidatorIdentity> {
         oneshot::Sender<SigningResponseWrap<VI::Identity>>,
     )>,
     instruction_sender: UnboundedSender<Instruction<VI::Identity>>,
+
+    dkg_response_futures_for_node: FuturesUnordered<
+        oneshot::Receiver<(
+            Result<PkId, SessionManagerError>,
+            ResponseChannel<NodeToCoorResponse<VI::Identity>>,
+        )>,
+    >,
+    signing_response_futures_for_node: FuturesUnordered<
+        oneshot::Receiver<(
+            Result<SignatureSuiteInfo<VI::Identity>, SessionManagerError>,
+            ResponseChannel<NodeToCoorResponse<VI::Identity>>,
+        )>,
+    >,
 }
 impl<VI: ValidatorIdentity> Coordinator<VI> {
     pub fn new(p2p_keypair: libp2p::identity::Keypair) -> anyhow::Result<Self> {
@@ -73,6 +90,11 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                 ),
                 rendezvous: rendezvous::server::Behaviour::new(
                     rendezvous::server::Config::default(),
+                ),
+                node2coor: request_response::cbor::Behaviour::new(
+                    [(StreamProtocol::new("/node2coor"), ProtocolSupport::Full)],
+                    request_response::Config::default()
+                        .with_request_timeout(Duration::from_secs(10)),
                 ),
                 sig2coor: request_response::cbor::Behaviour::new(
                     [(StreamProtocol::new("/sig2coor"), ProtocolSupport::Full)],
@@ -108,6 +130,8 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
             dkg_session_receiver,
             signing_session_receiver,
             instruction_sender,
+            dkg_response_futures_for_node: FuturesUnordered::new(),
+            signing_response_futures_for_node: FuturesUnordered::new(),
         })
     }
 
@@ -147,10 +171,38 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                         tracing::error!("Error handling command: {}", e);
                     }
                 }
+                Some(Ok((result, channel))) = self.dkg_response_futures_for_node.next()=> {
+                    match result {
+                        Ok(pkid) => {
+                            if let Err(e) = self.swarm.behaviour_mut().node2coor.send_response(channel, NodeToCoorResponse::DKGResponse { pkid }) {
+                                tracing::error!("Error sending DKG response to node: {:?}", e);
+                            }
+                        }
+                        Err(e) => {
+                            if let Err(e) = self.swarm.behaviour_mut().node2coor.send_response(channel, NodeToCoorResponse::Failure(e.to_string())) {
+                                tracing::error!("Error sending DKG failure response to node: {:?}", e);
+                            }
+                        }
+                    }
+                }
+                Some(Ok((result, channel))) = self.signing_response_futures_for_node.next()=> {
+                    match result {
+                        Ok(signature_suite_info) => {
+                            if let Err(e) = self.swarm.behaviour_mut().node2coor.send_response(channel, NodeToCoorResponse::SigningResponse { signature_suite_info }) {
+                                tracing::error!("Error sending signing response to node: {:?}", e);
+                            }
+                        }
+                        Err(e) => {
+                            if let Err(e) = self.swarm.behaviour_mut().node2coor.send_response(channel, NodeToCoorResponse::Failure(e.to_string())) {
+                                tracing::error!("Error sending signing failure response to node: {:?}", e);
+                            }
+                        }
+                    }
+                }
             }
         }
     }
-    pub async fn handle_dkg_request(
+    pub(crate) async fn handle_dkg_request(
         &mut self,
         request: DKGRequestWrap<VI::Identity>,
         sender: oneshot::Sender<DKGResponseWrap<VI::Identity>>,
@@ -189,7 +241,7 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
         Ok(())
     }
 
-    pub async fn handle_signing_request(
+    pub(crate) async fn handle_signing_request(
         &mut self,
         request: SigningRequestWrap<VI::Identity>,
         sender: oneshot::Sender<SigningResponseWrap<VI::Identity>>,
@@ -228,7 +280,7 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
         Ok(())
     }
 
-    pub async fn handle_swarm_event(
+    pub(crate) async fn handle_swarm_event(
         &mut self,
         event: SwarmEvent<CoorBehaviourEvent<VI::Identity>>,
     ) -> Result<(), anyhow::Error> {
@@ -327,7 +379,8 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                     }
                 }
             },
-            SwarmEvent::Behaviour(CoorBehaviourEvent::Sig2coor(
+
+            SwarmEvent::Behaviour(CoorBehaviourEvent::Node2coor(
                 request_response::Event::Message {
                     peer,
                     message:
@@ -339,111 +392,274 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                     ..
                 },
             )) => {
-                tracing::debug!(
-                    "Received request from {:?} with request_id {:?}",
-                    peer,
-                    request_id
-                );
-                match request {
-                    SigToCoorRequest::ValidatorIndentity(ValidatorIdentityRequest {
-                        signature,
-                        public_key,
-                        nonce,
-                    }) => {
-                        // Reconstruct the hash that was signed by concatenating the same strings
-                        let public_key = VI::PublicKey::from_bytes(public_key)
-                            .inspect_err(|e| tracing::error!("Invalid public key: {}", e))?;
-                        let validator_peer = public_key.to_identity();
-                        if !Settings::global()
-                            .coordinator
-                            .peer_id_whitelist
-                            .contains(&validator_peer.to_fmt_string())
-                        {
-                            tracing::warn!(
-                                "Validator peerid {} is not in whitelist",
-                                validator_peer.to_fmt_string()
-                            );
-                            let _ = self.swarm.behaviour_mut().sig2coor.send_response(
+                let request_instruction = request.clone();
+                let request = match request {
+                    NodeToCoorRequest::DKGRequest {
+                        validator_identity, ..
+                    } => validator_identity,
+                    NodeToCoorRequest::SigningRequest {
+                        validator_identity, ..
+                    } => validator_identity,
+                };
+                if let Err(e) = self
+                    .handle_vi_request(peer, request_id, request, false)
+                    .await
+                {
+                    tracing::error!("Error handling vi request: {}", e);
+                    if let Err(e) = self
+                        .swarm
+                        .behaviour_mut()
+                        .node2coor
+                        .send_response(channel, NodeToCoorResponse::Failure(e.to_string()))
+                    {
+                        tracing::error!("Error sending failure response to node: {:?}", e);
+                    }
+                    return Ok(());
+                }
+                match request_instruction {
+                    NodeToCoorRequest::DKGRequest {
+                        crypto_type,
+                        participants,
+                        min_signers,
+                        ..
+                    } => {
+                        if participants.len() > 255 {
+                            tracing::error!("Invalid participants: {:?}", participants);
+                            if let Err(e) = self.swarm.behaviour_mut().node2coor.send_response(
                                 channel,
-                                SigToCoorResponse::Failure(format!(
-                                    "Validator peerid {} is not in whitelist",
-                                    validator_peer.to_fmt_string()
-                                ))
-                                .into(),
-                            );
+                                NodeToCoorResponse::Failure("Too many participants".to_string()),
+                            ) {
+                                tracing::error!("Error sending failure response to node: {:?}", e);
+                            }
                             return Ok(());
                         }
-                        let hash = concat_string_hash(&[
-                            "register".as_bytes(),
-                            validator_peer.to_bytes().as_slice(),
-                            peer.to_bytes().as_slice(),
-                            self.p2p_keypair.public().to_peer_id().to_bytes().as_slice(),
-                        ]);
-                        // Verify the signature
-                        if public_key.verify(&hash, &signature) {
-                            let address = self.p2ppeerid_2_endpoint.get(&peer).cloned();
-                            let new_validator = Validator {
-                                p2p_peer_id: peer,
-                                validator_peer_id: validator_peer.clone(),
-                                _validator_public_key: public_key,
-                                nonce,
-                                address,
-                            };
-
-                            let old_validator = self.valid_validators.get(&validator_peer).cloned();
-
-                            let should_insert = match &old_validator {
-                                Some(v) => v.nonce < nonce,
-                                None => true,
-                            };
-
-                            if should_insert {
-                                self.valid_validators
-                                    .insert(validator_peer.clone(), new_validator.clone());
+                        let participants = participants
+                            .iter()
+                            .enumerate()
+                            .map(|(i, v)| ((i + 1) as u16, v.clone()))
+                            .collect();
+                        let (instruction_sender, instruction_receiver) = oneshot::channel();
+                        let (node_response_sender, node_response_receiver) = oneshot::channel();
+                        self.dkg_response_futures_for_node
+                            .push(node_response_receiver);
+                        let instruction = Instruction::NewKey {
+                            crypto_type,
+                            participants,
+                            min_signers,
+                            pkid_response_oneshot: instruction_sender,
+                        };
+                        self.instruction_sender.send(instruction).unwrap();
+                        tokio::spawn(async move {
+                            let result = instruction_receiver.await;
+                            match result {
+                                Ok(pkid_result) => {
+                                    if let Err(e) =
+                                        node_response_sender.send((pkid_result, channel))
+                                    {
+                                        tracing::error!("Error sending response to node: {:?}", e);
+                                    }
+                                }
+                                Err(e) => {
+                                    if let Err(e) = node_response_sender.send((
+                                        Err(SessionManagerError::InstructionResponseError(
+                                            e.to_string(),
+                                        )),
+                                        channel,
+                                    )) {
+                                        tracing::error!(
+                                            "Error sending failure response to node: {:?}",
+                                            e
+                                        );
+                                    }
+                                }
                             }
-
-                            tracing::info!(
-                                "Validator_peerid: {}, p2p_peerid : {}, total validators: {}",
-                                validator_peer.to_fmt_string(),
-                                peer,
-                                self.valid_validators.len()
-                            );
-
-                            if old_validator.is_none() {
-                                tracing::info!("{:#?}", new_validator);
-                            } else {
-                                tracing::info!("{:#?}", old_validator.unwrap());
-                                tracing::info!("{:#?}", new_validator);
+                        });
+                        return Ok(());
+                    }
+                    NodeToCoorRequest::SigningRequest {
+                        pkid,
+                        msg,
+                        tweak_data,
+                        ..
+                    } => {
+                        let (instruction_sender, instruction_receiver) = oneshot::channel();
+                        let (node_response_sender, node_response_receiver) = oneshot::channel();
+                        self.signing_response_futures_for_node
+                            .push(node_response_receiver);
+                        let instruction = Instruction::Sign {
+                            pkid,
+                            msg,
+                            tweak_data,
+                            signature_response_oneshot: instruction_sender,
+                        };
+                        self.instruction_sender.send(instruction).unwrap();
+                        tokio::spawn(async move {
+                            let result = instruction_receiver.await;
+                            match result {
+                                Ok(signature_suite_info) => {
+                                    if let Err(e) =
+                                        node_response_sender.send((signature_suite_info, channel))
+                                    {
+                                        tracing::error!("Error sending response to node: {:?}", e);
+                                    }
+                                }
+                                Err(e) => {
+                                    if let Err(e) = node_response_sender.send((
+                                        Err(SessionManagerError::InstructionResponseError(
+                                            e.to_string(),
+                                        )),
+                                        channel,
+                                    )) {
+                                        tracing::error!(
+                                            "Error sending failure response to node: {:?}",
+                                            e
+                                        );
+                                    }
+                                }
                             }
-
-                            if let Some(addr) = self.p2ppeerid_2_endpoint.get(&peer) {
-                                self.swarm.add_peer_address(peer, addr.clone());
-                            }
-
-                            // Send success response
-                            let _ = self
-                                .swarm
-                                .behaviour_mut()
-                                .sig2coor
-                                .send_response(channel, SigToCoorResponse::Success.into());
-                        } else {
-                            tracing::error!(
-                                "Invalid signature from validator {}",
-                                validator_peer.to_fmt_string()
-                            );
-                            return Err(anyhow::anyhow!(
-                                "Invalid signature from validator {}",
-                                validator_peer.to_fmt_string()
-                            ));
-                        }
+                        });
+                        return Ok(());
                     }
                 }
             }
+            SwarmEvent::Behaviour(CoorBehaviourEvent::Sig2coor(
+                request_response::Event::Message {
+                    peer,
+                    message:
+                        request_response::Message::Request {
+                            request_id,
+                            request,
+                            channel,
+                        },
+                    ..
+                },
+            )) => match request {
+                SigToCoorRequest::ValidatorIndentity(request) => {
+                    if let Err(e) = self
+                        .handle_vi_request(peer, request_id, request, true)
+                        .await
+                    {
+                        tracing::error!("Error handling vi request: {}", e);
+                        if let Err(e) = self
+                            .swarm
+                            .behaviour_mut()
+                            .sig2coor
+                            .send_response(channel, SigToCoorResponse::Failure(e.to_string()))
+                        {
+                            tracing::error!("Error sending failure response to signer: {:?}", e);
+                        }
+                    } else {
+                        if let Err(e) = self
+                            .swarm
+                            .behaviour_mut()
+                            .sig2coor
+                            .send_response(channel, SigToCoorResponse::Success.into())
+                        {
+                            tracing::error!("Error sending success response to signer: {:?}", e);
+                        }
+                    }
+                }
+            },
             other => {
                 tracing::debug!("Unhandled {:?}", other);
             }
         }
         Ok(())
+    }
+    pub(crate) async fn handle_vi_request(
+        &mut self,
+        peer: PeerId,
+        request_id: InboundRequestId,
+        request: ValidatorIdentityRequest,
+        verify_whitelist: bool,
+    ) -> Result<(), String> {
+        tracing::debug!(
+            "Received request from {:?} with request_id {:?}",
+            peer,
+            request_id
+        );
+        let ValidatorIdentityRequest {
+            signature,
+            public_key,
+            nonce,
+        } = request;
+        // Reconstruct the hash that was signed by concatenating the same strings
+        let public_key = VI::PublicKey::from_bytes(public_key)
+            .map_err(|e| format!("Invalid public key: {}", e))?;
+        let validator_peer = public_key.to_identity();
+        if !Settings::global()
+            .coordinator
+            .peer_id_whitelist
+            .contains(&validator_peer.to_fmt_string())
+            && verify_whitelist
+        {
+            tracing::warn!(
+                "Validator peerid {} is not in whitelist",
+                validator_peer.to_fmt_string()
+            );
+            return Err(format!(
+                "Validator peerid {} is not in whitelist",
+                validator_peer.to_fmt_string()
+            ));
+        }
+        let hash = concat_string_hash(&[
+            "register".as_bytes(),
+            validator_peer.to_bytes().as_slice(),
+            peer.to_bytes().as_slice(),
+            self.p2p_keypair.public().to_peer_id().to_bytes().as_slice(),
+        ]);
+        // Verify the signature
+        if public_key.verify(&hash, &signature) {
+            let address = self.p2ppeerid_2_endpoint.get(&peer).cloned();
+            let new_validator = Validator {
+                p2p_peer_id: peer,
+                validator_peer_id: validator_peer.clone(),
+                _validator_public_key: public_key,
+                nonce,
+                address,
+            };
+
+            let old_validator = self.valid_validators.get(&validator_peer).cloned();
+
+            let should_insert = match &old_validator {
+                Some(v) => v.nonce < nonce,
+                None => true,
+            };
+
+            if should_insert {
+                self.valid_validators
+                    .insert(validator_peer.clone(), new_validator.clone());
+            }
+
+            tracing::info!(
+                "Validator_peerid: {}, p2p_peerid : {}, total validators: {}",
+                validator_peer.to_fmt_string(),
+                peer,
+                self.valid_validators.len()
+            );
+
+            if old_validator.is_none() {
+                tracing::info!("{:#?}", new_validator);
+            } else {
+                tracing::info!("{:#?}", old_validator.unwrap());
+                tracing::info!("{:#?}", new_validator);
+            }
+
+            if let Some(addr) = self.p2ppeerid_2_endpoint.get(&peer) {
+                self.swarm.add_peer_address(peer, addr.clone());
+            }
+
+            return Ok(());
+        } else {
+            tracing::error!(
+                "Invalid signature from validator {}",
+                validator_peer.to_fmt_string()
+            );
+            return Err(format!(
+                "Invalid signature from validator {}",
+                validator_peer.to_fmt_string()
+            ));
+        }
     }
     pub async fn handle_command(
         &mut self,

@@ -1,8 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::hash::Hash;
-mod ed25519;
-mod p2p_identity;
-pub(crate) use p2p_identity::*;
+pub mod ed25519;
+pub mod p2p_identity;
 use std::{cmp, fmt};
 pub trait ValidatorIdentity: fmt::Debug + Clone + 'static {
     type Keypair: ValidatorIdentityKeypair<PublicKey = Self::PublicKey>;
@@ -13,7 +12,7 @@ pub trait ValidatorIdentity: fmt::Debug + Clone + 'static {
 }
 pub trait ValidatorIdentityPublicKey
 where
-    Self: Sized + fmt::Debug + Clone,
+    Self: Sized + fmt::Debug + Clone + std::marker::Send + std::marker::Sync + 'static,
 {
     type Identity: ValidatorIdentityIdentity;
     type Keypair: ValidatorIdentityKeypair;
@@ -27,7 +26,7 @@ where
 }
 pub trait ValidatorIdentityKeypair
 where
-    Self: Clone,
+    Self: Clone + std::marker::Send + std::marker::Sync + 'static,
 {
     type PublicKey: ValidatorIdentityPublicKey;
     type SignError: std::error::Error + std::marker::Send + std::marker::Sync + 'static;

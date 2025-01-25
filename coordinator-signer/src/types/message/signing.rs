@@ -27,7 +27,6 @@ pub(crate) struct SigningRequest<VII: ValidatorIdentityIdentity, C: Cipher> {
 pub(crate) enum SigningRequestStage<VII: ValidatorIdentityIdentity, C: Cipher> {
     Round1 {},
     Round2 {
-        message: Vec<u8>,
         tweak_data: Option<Vec<u8>>,
         joined_participants: Participants<VII, C>,
         signing_package: C::SigningPackage,

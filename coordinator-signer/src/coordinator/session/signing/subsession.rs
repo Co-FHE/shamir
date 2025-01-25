@@ -4,7 +4,7 @@ use std::{
 };
 
 use common::Settings;
-use futures::stream::{Abortable, FuturesUnordered};
+use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedSender},
@@ -385,7 +385,6 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
                         public_key: self.public_key.clone(),
                     },
                     stage: SigningRequestStage::Round2 {
-                        message: self.message.clone(),
                         tweak_data: self.tweak_data.clone(),
                         joined_participants: joined_participants.clone(),
                         signing_package: signing_package.clone(),

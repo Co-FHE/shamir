@@ -5,7 +5,7 @@ use std::fmt::{Display, Formatter};
 use super::{CryptoType, CryptoTypeError};
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, PartialOrd, Ord)]
-pub(crate) struct PkId(Vec<u8>);
+pub struct PkId(Vec<u8>);
 impl Serialize for PkId {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where

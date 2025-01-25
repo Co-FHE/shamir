@@ -1,0 +1,9 @@
+[package]
+name = "veritss_sdk"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+common = { path = "../common" }
+coordinator-signer = { path = "../coordinator-signer" }
+tracing = "0.1.39"

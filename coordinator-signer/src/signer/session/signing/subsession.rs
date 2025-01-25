@@ -74,7 +74,6 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SignerSubsession<VII, C> {
             }
             SigningRequestStage::Round2 {
                 signing_package,
-                message,
                 tweak_data,
                 ..
             } => {

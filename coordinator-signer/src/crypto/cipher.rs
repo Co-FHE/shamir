@@ -8,8 +8,6 @@ use super::{CryptoType, PkId};
 mod ed25519;
 mod secp256k1;
 mod secp256k1_tr;
-mod tweak;
-pub use tweak::*;
 
 pub use ed25519::*;
 pub use secp256k1::*;
@@ -106,14 +104,6 @@ pub trait Cipher: Clone + std::fmt::Debug + Send + Sync + 'static + PartialEq + 
     }
 }
 
-pub trait RngType: CryptoRng + RngCore + Clone {
-    fn new() -> Self;
-}
-impl RngType for rand::rngs::ThreadRng {
-    fn new() -> Self {
-        Self::default()
-    }
-}
 pub trait KeyPackage:
     Serialize + for<'de> Deserialize<'de> + fmt::Debug + Clone + Send + Sync + Tweak
 {
@@ -200,4 +190,7 @@ pub trait VerifyingKey: Serialize + for<'de> Deserialize<'de> + fmt::Debug + Clo
     fn verify(&self, message: &[u8], signature: &Self::Signature) -> Result<(), Self::CryptoError>;
     fn serialize_frost(&self) -> Result<Vec<u8>, Self::CryptoError>;
     fn deserialize_frost(bytes: &[u8]) -> Result<Self, Self::CryptoError>;
+}
+pub trait Tweak {
+    fn tweak<T: AsRef<[u8]>>(self, data: Option<T>) -> Self;
 }

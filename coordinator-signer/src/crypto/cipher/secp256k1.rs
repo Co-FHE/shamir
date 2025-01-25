@@ -1,20 +1,11 @@
-use crate::utils;
-
 use super::{
     Cipher, CryptoType, Identifier, KeyPackage, PublicKeyPackage, Signature, SigningPackage, Tweak,
-    TweakCipher, VerifyingKey,
+    VerifyingKey,
 };
 use k256::elliptic_curve::ops::Reduce;
 use k256::{
-    elliptic_curve::{
-        bigint::U256,
-        group::prime::PrimeCurveAffine,
-        hash2curve::{hash_to_field, ExpandMsgXmd},
-        point::AffineCoordinates,
-        sec1::{FromEncodedPoint, ToEncodedPoint},
-        Field as FFField, PrimeField,
-    },
-    AffinePoint, ProjectivePoint, Scalar,
+    elliptic_curve::{bigint::U256, point::AffineCoordinates},
+    ProjectivePoint, Scalar,
 };
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
@@ -250,4 +241,3 @@ impl Tweak for frost_secp256k1::keys::PublicKeyPackage {
         frost_secp256k1::keys::PublicKeyPackage::new(verifying_shares, verifying_key)
     }
 }
-impl TweakCipher for Secp256K1Sha256 {}

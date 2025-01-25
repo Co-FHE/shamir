@@ -130,7 +130,7 @@ impl<VI: ValidatorIdentity> Signer<VI> {
             channel_mapping: HashMap::new(),
         })
     }
-    pub(crate) async fn start_listening(mut self) -> Result<(), anyhow::Error> {
+    pub async fn start_listening(mut self) -> Result<(), anyhow::Error> {
         self.swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
 
         let listener = self.start_ipc_listening().await?;
@@ -289,7 +289,7 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                             request,
                             channel,
                         },
-                    connection_id,
+                    ..
                 },
             )) => {
                 if peer != self.coordinator_peer_id {

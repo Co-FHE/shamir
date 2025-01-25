@@ -1,31 +1,20 @@
 mod cipher;
 mod pkid;
-mod validator_identity;
+pub mod validator_identity;
 
-pub(crate) use cipher::*;
+pub use cipher::*;
 use serde::{Deserialize, Serialize};
 
-pub(crate) use pkid::*;
-use strum::{Display, EnumCount, EnumIter, EnumString};
-pub(crate) use validator_identity::*;
+pub use pkid::*;
+use strum::{Display, EnumCount, EnumString};
+pub use validator_identity::*;
 
 //todo pk.hash()->pkid
 
 #[derive(
-    Debug,
-    Clone,
-    Copy,
-    Serialize,
-    Deserialize,
-    PartialEq,
-    EnumString,
-    Display,
-    EnumCount,
-    EnumIter,
-    Eq,
-    Hash,
+    Debug, Clone, Copy, Serialize, Deserialize, PartialEq, EnumString, Display, EnumCount, Eq, Hash,
 )]
-pub(crate) enum CryptoType {
+pub enum CryptoType {
     #[strum(serialize = "ed25519")]
     Ed25519,
     #[strum(serialize = "secp256k1")]
@@ -34,7 +23,7 @@ pub(crate) enum CryptoType {
     Secp256k1Tr,
 }
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub(crate) enum CryptoTypeError {
+pub enum CryptoTypeError {
     #[error("Invalid crypto type: {0}")]
     InvalidCryptoType(u8),
     #[error("PkId length is 0")]

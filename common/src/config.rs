@@ -12,6 +12,7 @@ pub struct Settings {
     pub logging: LoggingSettings,
     pub coordinator: CoordinatorSettings,
     pub signer: SignerSettings,
+    pub node: NodeSettings,
     pub connection: ConnectionSettings,
     pub session: SessionSettings,
 }
@@ -48,6 +49,12 @@ pub struct SignerSettings {
     pub keypair_path_mapping: BTreeMap<u16, String>,
     pub ipc_socket_path: String,
     pub allow_external_address: bool,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct NodeSettings {
+    pub keypair_path: String,
+    pub ipc_socket_path: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]

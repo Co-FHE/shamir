@@ -1,0 +1,29 @@
+[package]
+name = "veritss"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+coordinator-signer = { path = "../coordinator-signer" }
+common = { path = "../common" }
+
+tokio = { version = "1.37.0", features = ["full"] }
+
+clap = { version = "4.5.4", features = ["derive"] }
+
+futures = "0.3.31"
+libp2p = { version = "0.55", features = [
+    "identify",
+    "noise",
+    "tcp",
+    "tokio",
+    "yamux",
+    "ping",
+    "request-response",
+    "macros",
+    "cbor",
+    "serde",
+    "rendezvous",
+] }
+tracing = "0.1.39"
+hex = "0.4.3"

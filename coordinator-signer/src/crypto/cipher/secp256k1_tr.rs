@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     Cipher, CryptoType, Identifier, KeyPackage, PublicKeyPackage, Signature, SigningPackage, Tweak,
-    TweakCipher, VerifyingKey,
+    VerifyingKey,
 };
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct Secp256K1Sha256TR;
@@ -174,4 +174,3 @@ impl Tweak for frost_secp256k1_tr::keys::KeyPackage {
         frost_secp256k1_tr::keys::Tweak::tweak(self, data)
     }
 }
-impl TweakCipher for Secp256K1Sha256TR {}

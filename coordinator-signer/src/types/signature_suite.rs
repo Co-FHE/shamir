@@ -103,13 +103,13 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SignatureSuite<VII, C> {
             pkid: self.pkid.to_string(),
             message: String::from_utf8_lossy(&self.message).to_string(),
             crypto_type: C::crypto_type(),
-            _original_serialized: self.pretty_print(),
+            original_serialized: self.pretty_print(),
         })
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
-pub(crate) struct SignatureSuiteInfo<VII: ValidatorIdentityIdentity> {
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SignatureSuiteInfo<VII: ValidatorIdentityIdentity> {
     pub(crate) signature: String,
     pub(crate) pk: String,
     pub(crate) pk_tweak: String,
@@ -122,16 +122,15 @@ pub(crate) struct SignatureSuiteInfo<VII: ValidatorIdentityIdentity> {
     pub(crate) pkid: String,
     pub(crate) message: String,
     pub(crate) crypto_type: CryptoType,
-    #[serde(skip_serializing)]
-    pub(crate) _original_serialized: String,
+    pub(crate) original_serialized: String,
 }
 impl<VII: ValidatorIdentityIdentity + Serialize + for<'de> Deserialize<'de>>
     SignatureSuiteInfo<VII>
 {
-    fn pretty_print(&self) -> String {
+    pub fn pretty_print(&self) -> String {
         serde_json::to_string_pretty(&self).unwrap()
     }
-    fn verify<C: Cipher>(&self) -> Result<(), String> {
+    pub fn verify<C: Cipher>(&self) -> Result<(), String> {
         let pk = <<C as Cipher>::PublicKeyPackage as PublicKeyPackage>::deserialize(
             &hex::decode(&self.pk).map_err(|e| e.to_string())?.as_slice(),
         )

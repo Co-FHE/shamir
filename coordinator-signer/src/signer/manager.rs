@@ -5,7 +5,7 @@ use crate::types::message::{
     DKGRequestWrap, DKGResponseWrap, SigningRequestWrap, SigningResponseWrap,
 };
 use libp2p::request_response::InboundRequestId;
-use strum::IntoEnumIterator;
+use strum::EnumCount;
 use tokio::sync::{
     mpsc::{UnboundedReceiver, UnboundedSender},
     oneshot,
@@ -56,7 +56,7 @@ impl<VII: ValidatorIdentityIdentity> SignerSessionManager<VII> {
         new_session_wrap!(session_inst_channels, Ed25519Sha512, Ed25519);
         new_session_wrap!(session_inst_channels, Secp256K1Sha256, Secp256k1);
         new_session_wrap!(session_inst_channels, Secp256K1Sha256TR, Secp256k1Tr);
-        assert!(session_inst_channels.len() == CryptoType::iter().len());
+        assert!(session_inst_channels.len() == CryptoType::COUNT);
 
         Self {
             request_receiver,

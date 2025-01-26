@@ -607,7 +607,7 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                 validator_peer.to_fmt_string()
             ));
         }
-        let hash = concat_string_hash(&[
+        let hash = list_hash(&[
             "register".as_bytes(),
             validator_peer.to_bytes().as_slice(),
             peer.to_bytes().as_slice(),

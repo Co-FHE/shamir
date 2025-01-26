@@ -26,7 +26,7 @@ use crate::types::message::{
     ValidatorIdentityRequest,
 };
 use crate::types::{ConnectionState, SignatureSuiteInfo};
-use crate::utils::concat_string_hash;
+use crate::utils::list_hash;
 
 pub(crate) struct NodeSwarm<VI: ValidatorIdentity> {
     swarm: libp2p::Swarm<NodeBehaviour<VI::Identity>>,
@@ -392,7 +392,7 @@ impl<VI: ValidatorIdentity> Node<VI> {
     }
 
     pub(crate) fn generate_validator_identity(&self) -> ValidatorIdentityRequest {
-        let hash = concat_string_hash(&[
+        let hash = list_hash(&[
             "register".as_bytes(),
             self.node_keypair
                 .to_public_key()

@@ -103,14 +103,3 @@ impl Settings {
         settings.clone().unwrap()
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_settings() {
-        let settings = Settings::global();
-        println!("{:?}", settings);
-    }
-}

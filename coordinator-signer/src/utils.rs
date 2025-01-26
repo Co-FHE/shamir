@@ -7,7 +7,7 @@ use sha2::{Digest, Sha256};
 ///
 /// # Returns
 /// * `Vec<u8>` - Raw SHA256 hash bytes
-pub(crate) fn concat_string_hash<T>(data: &[T]) -> Vec<u8>
+pub(crate) fn list_hash<T>(data: &[T]) -> Vec<u8>
 where
     T: AsRef<[u8]>,
 {
@@ -36,12 +36,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_concat_string_hash() {
-        let result = concat_string_hash(&["Hello", "World"]);
-        assert_eq!(result.len(), 64); // SHA256 hash is 64 characters long
+    fn test_list_hash() {
+        let result = list_hash(&["Hello", "World"]);
+        assert_eq!(result.len(), 32); // SHA256 hash is 64 characters long
 
         // Verify same input produces same hash
-        let result2 = concat_string_hash(&["Hello", "World"]);
+        let result2 = list_hash(&["Hello", "World"]);
         assert_eq!(result, result2);
     }
 }

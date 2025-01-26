@@ -31,4 +31,5 @@ session:
 node:
   keypair_path: "keys_for_test/node.key"
   ipc_socket_path: ".ipc_socket/"
+
   connection_timeout: 5

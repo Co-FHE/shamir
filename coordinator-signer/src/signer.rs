@@ -38,7 +38,7 @@ use crate::types::message::{
     SigToCoorRequest, SigToCoorResponse, SigningResponseWrap, ValidatorIdentityRequest,
 };
 use crate::types::ConnectionState;
-use crate::utils::concat_string_hash;
+use crate::utils::list_hash;
 use command::Command;
 
 pub struct Signer<VI: ValidatorIdentity> {
@@ -263,7 +263,7 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                     return Err(anyhow::anyhow!("Failed to register: {error}"));
                 }
                 tracing::info!("Connection established with coordinator {}", peer_id);
-                let hash = concat_string_hash(&[
+                let hash = list_hash(&[
                     "register".as_bytes(),
                     self.validator_keypair
                         .to_public_key()

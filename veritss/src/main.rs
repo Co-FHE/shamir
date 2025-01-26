@@ -33,10 +33,12 @@ pub(crate) fn random_readable_string(length: usize) -> String {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let _guard = common::init_logging(None);
-    if Settings::global().logging.file.enable {
-        drop(_guard);
-    }
+    let _guard = if Settings::global().logging.file.enable {
+        Some(common::init_logging(None))
+    } else {
+        let _ = common::init_logging(None);
+        None
+    };
     let cmd = commands::parse_args();
     match cmd {
         commands::Commands::Coordinator => {

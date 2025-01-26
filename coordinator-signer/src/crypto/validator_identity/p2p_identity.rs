@@ -22,6 +22,11 @@ impl ValidatorIdentityKeypair for libp2p::identity::Keypair {
     fn sign<T: AsRef<[u8]>>(&self, message: T) -> Result<Vec<u8>, Self::SignError> {
         self.sign(message.as_ref())
     }
+    fn derive_key(&self, salt: &[u8]) -> Vec<u8> {
+        libp2p::identity::Keypair::derive_secret(&self, salt)
+            .unwrap()
+            .to_vec()
+    }
 
     type SignError = libp2p::identity::SigningError;
 }

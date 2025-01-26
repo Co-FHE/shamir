@@ -108,6 +108,12 @@ pub trait KeyPackage:
     Serialize + for<'de> Deserialize<'de> + fmt::Debug + Clone + Send + Sync + Tweak
 {
     type CryptoError: std::error::Error + std::marker::Send + std::marker::Sync + 'static;
+    fn to_bytes(&self) -> Result<Vec<u8>, String> {
+        Ok(bincode::serialize(&self).map_err(|e| e.to_string())?)
+    }
+    fn from_bytes<T: AsRef<[u8]>>(bytes: T) -> Result<Self, String> {
+        Ok(bincode::deserialize(bytes.as_ref()).map_err(|e| e.to_string())?)
+    }
 }
 pub trait Signature:
     Serialize + for<'de> Deserialize<'de> + fmt::Debug + Clone + Send + Sync
@@ -147,14 +153,14 @@ pub trait PublicKeyPackage:
     type VerifyingShare;
     type Identifier;
     fn verifying_key(&self) -> &Self::VerifyingKey;
-    fn serialize(&self) -> Result<Vec<u8>, Self::CryptoError>;
-    fn deserialize(bytes: &[u8]) -> Result<Self, Self::CryptoError>;
+    fn serialize_binary(&self) -> Result<Vec<u8>, Self::CryptoError>;
+    fn deserialize_binary(bytes: &[u8]) -> Result<Self, Self::CryptoError>;
     fn crypto_type() -> CryptoType;
     fn pkid(&self) -> Result<PkId, Self::CryptoError> {
         let mut bytes = vec![<Self as PublicKeyPackage>::crypto_type().into()];
-        bytes.extend(Sha256::digest(<Self as PublicKeyPackage>::serialize(
-            &self,
-        )?));
+        bytes.extend(Sha256::digest(
+            <Self as PublicKeyPackage>::serialize_binary(&self)?,
+        ));
         Ok(PkId::new(bytes))
     }
     fn verifying_shares(&self) -> &BTreeMap<Self::Identifier, Self::VerifyingShare>;

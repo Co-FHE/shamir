@@ -9,6 +9,7 @@ use session::SessionWrap;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::unix::SocketAddr;
@@ -31,6 +32,7 @@ use crate::crypto::{
     ValidatorIdentity, ValidatorIdentityIdentity, ValidatorIdentityKeypair,
     ValidatorIdentityPublicKey,
 };
+use crate::keystore;
 use crate::types::message::{
     CoorToSigRequest, CoorToSigResponse, DKGResponseWrap, SigBehaviour, SigBehaviourEvent,
     SigToCoorRequest, SigToCoorResponse, SigningResponseWrap, ValidatorIdentityRequest,
@@ -106,7 +108,14 @@ impl<VI: ValidatorIdentity> Signer<VI> {
             <PeerId as FromStr>::from_str(&Settings::global().coordinator.peer_id).unwrap();
         swarm.add_peer_address(coordinator_peer_id, coordinator_addr.clone());
         let (request_sender, request_receiver) = tokio::sync::mpsc::unbounded_channel();
-        manager::SignerSessionManager::new(request_receiver).listening();
+        manager::SignerSessionManager::new(
+            request_receiver,
+            Arc::new(keystore::Keystore::new(
+                validator_keypair.derive_key(b"keystore"),
+                None,
+            )?),
+        )?
+        .listening();
         Ok(Self {
             validator_keypair: validator_keypair.clone(),
             p2p_keypair: keypair,

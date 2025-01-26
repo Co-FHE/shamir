@@ -1,4 +1,4 @@
-use crate::crypto::Cipher;
+use crate::{crypto::Cipher, keystore::KeystoreError};
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum SessionError<C: Cipher> {
     #[error("Invalid participants: {0}")]
@@ -23,12 +23,15 @@ pub(crate) enum SessionError<C: Cipher> {
     SendOneshotError(String),
     #[error("Base info does not match: {0}")]
     BaseInfoNotMatch(String),
-    #[error("Session not found: {0}")]
-    SessionIdNotFound(String),
-    #[error("Subsession id not found: {0}")]
-    SubsessionIdNotFound(String),
     #[error("PkId not found: {0}")]
     PkIdNotFound(String),
+    #[error("Keystore error: {0}")]
+    KeystoreError(String),
+}
+impl<C: Cipher> From<KeystoreError> for SessionError<C> {
+    fn from(e: KeystoreError) -> Self {
+        SessionError::KeystoreError(e.to_string())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

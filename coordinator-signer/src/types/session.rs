@@ -54,6 +54,28 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> Participants<VII, C> {
 
         Ok(Self(participants_map))
     }
+    pub(crate) fn serialize(&self) -> Result<Vec<u8>, SessionError<C>> {
+        let mut vec = Vec::new();
+        for (id, identity) in self.0.iter() {
+            vec.push((id.to_bytes(), identity.to_bytes()));
+        }
+        Ok(bincode::serialize(&vec)
+            .map_err(|e| SessionError::InvalidParticipants(e.to_string()))?)
+    }
+    pub(crate) fn deserialize(bytes: &[u8]) -> Result<Self, SessionError<C>> {
+        let vec = bincode::deserialize::<Vec<(Vec<u8>, Vec<u8>)>>(bytes)
+            .map_err(|e| SessionError::InvalidParticipants(e.to_string()))?;
+        let mut participants_map = BTreeMap::new();
+        for (id, identity) in vec {
+            participants_map.insert(
+                C::Identifier::from_bytes(&id)
+                    .map_err(|e| SessionError::InvalidParticipants(e.to_string()))?,
+                VII::from_bytes(&identity)
+                    .map_err(|e| SessionError::InvalidParticipants(e.to_string()))?,
+            );
+        }
+        Ok(Self(participants_map))
+    }
     pub(crate) fn len(&self) -> usize {
         self.0.len()
     }

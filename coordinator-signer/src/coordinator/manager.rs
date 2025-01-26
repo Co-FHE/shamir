@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use strum::EnumCount;
 use tokio::sync::{
@@ -6,9 +6,13 @@ use tokio::sync::{
     oneshot,
 };
 
-use crate::types::{
-    message::{DKGRequestWrap, DKGResponseWrap, SigningRequestWrap, SigningResponseWrap},
-    SignatureSuiteInfo,
+use crate::{
+    keystore::Keystore,
+    types::{
+        error::SessionError,
+        message::{DKGRequestWrap, DKGResponseWrap, SigningRequestWrap, SigningResponseWrap},
+        SignatureSuiteInfo,
+    },
 };
 
 use crate::crypto::*;
@@ -23,6 +27,11 @@ pub(crate) enum SessionManagerError {
     InstructionResponseError(String),
     #[error("crypto type Error: {0}")]
     CryptoTypeError(#[from] CryptoTypeError),
+}
+impl<C: Cipher> From<SessionError<C>> for SessionManagerError {
+    fn from(e: SessionError<C>) -> Self {
+        SessionManagerError::SessionError(e.to_string())
+    }
 }
 pub(crate) enum Instruction<VII: ValidatorIdentityIdentity> {
     NewKey {
@@ -43,7 +52,7 @@ pub(crate) enum Instruction<VII: ValidatorIdentityIdentity> {
     },
 }
 macro_rules! new_session_wrap {
-    ($generic_type:ty, $crypto_variant:ident, $dkg_session_sender:expr, $signing_session_sender:expr, $session_inst_channels:expr) => {{
+    ($generic_type:ty, $crypto_variant:ident, $dkg_session_sender:expr, $signing_session_sender:expr, $session_inst_channels:expr, $keystore:expr) => {{
         let (instruction_sender_cipher, instruction_receiver_cipher) =
             tokio::sync::mpsc::unbounded_channel();
 
@@ -51,10 +60,11 @@ macro_rules! new_session_wrap {
             $dkg_session_sender.clone(),
             $signing_session_sender.clone(),
             instruction_receiver_cipher,
-        );
+            $keystore.clone(),
+        )?;
+        assert!(session_wrap.check_serialize_deserialize().is_ok());
 
         $session_inst_channels.insert(CryptoType::$crypto_variant, instruction_sender_cipher);
-
         session_wrap.listening();
     }};
 }
@@ -73,35 +83,39 @@ impl<VII: ValidatorIdentityIdentity> CoordiantorSessionManager<VII> {
             SigningRequestWrap<VII>,
             oneshot::Sender<SigningResponseWrap<VII>>,
         )>,
-    ) -> Self {
+        keystore: Arc<Keystore>,
+    ) -> Result<Self, SessionManagerError> {
         let mut session_inst_channels = HashMap::new();
         new_session_wrap!(
             Ed25519Sha512,
             Ed25519,
             dkg_session_sender,
             signing_session_sender,
-            session_inst_channels
+            session_inst_channels,
+            keystore
         );
         new_session_wrap!(
             Secp256K1Sha256,
             Secp256k1,
             dkg_session_sender,
             signing_session_sender,
-            session_inst_channels
+            session_inst_channels,
+            keystore
         );
         new_session_wrap!(
             Secp256K1Sha256TR,
             Secp256k1Tr,
             dkg_session_sender,
             signing_session_sender,
-            session_inst_channels
+            session_inst_channels,
+            keystore
         );
 
         assert!(session_inst_channels.len() == CryptoType::COUNT);
-        Self {
+        Ok(Self {
             session_inst_channels,
             instructions_receiver,
-        }
+        })
     }
     pub(crate) fn listening(mut self) {
         tokio::spawn(async move {

@@ -3,17 +3,20 @@ mod signing;
 use super::manager::SessionManagerError;
 use super::{Cipher, PkId, PublicKeyPackage, ValidatorIdentityIdentity};
 use crate::crypto::Identifier;
+use crate::keystore::KeystoreManagement;
 use crate::types::{
     error::SessionError,
     message::{DKGRequestWrap, DKGResponseWrap, SigningRequestWrap, SigningResponseWrap},
     Participants, SessionId, SignatureSuite,
 };
 use crate::types::{SignatureSuiteInfo, SubsessionId};
+use common::Settings;
 use dkg::{CoordinatorDKGSession as DkgSession, DKGInfo};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use signing::CoordinatorSigningSession as SigningSession;
 use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::sync::{
     mpsc::{UnboundedReceiver, UnboundedSender},
     oneshot,
@@ -58,6 +61,7 @@ pub(crate) struct SessionWrap<VII: ValidatorIdentityIdentity, C: Cipher> {
     >,
 
     instruction_receiver: UnboundedReceiver<InstructionCipher<VII>>,
+    keystore_management: KeystoreManagement,
 }
 impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
     pub(crate) fn new(
@@ -70,9 +74,25 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
             oneshot::Sender<SigningResponseWrap<VII>>,
         )>,
         instruction_receiver: UnboundedReceiver<InstructionCipher<VII>>,
-    ) -> Self {
-        Self {
-            signing_sessions: HashMap::new(),
+        keystore: Arc<crate::keystore::Keystore>,
+    ) -> Result<Self, SessionError<C>> {
+        let path = Settings::global()
+            .coordinator
+            .keystore_path
+            .join(C::crypto_type().to_string());
+        let (keystore_management, data) =
+            crate::keystore::KeystoreManagement::new(keystore, path).unwrap();
+        let signing_sessions = match data {
+            Some(data) => {
+                Self::deserialize_sessions(data.as_slice(), signing_session_sender.clone())?
+            }
+            None => HashMap::new(),
+        };
+        for (pkid, session) in signing_sessions.iter() {
+            tracing::info!("{}", pkid);
+        }
+        Ok(Self {
+            signing_sessions,
             dkg_session_sender,
             signing_session_sender,
             session_id_key_map: HashMap::new(),
@@ -80,7 +100,58 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
             instruction_receiver,
             signing_futures: FuturesUnordered::new(),
             subsession_id_signaturesuite_map: HashMap::new(),
+            keystore_management,
+        })
+    }
+    pub(crate) fn check_serialize_deserialize(&self) -> Result<(), SessionError<C>> {
+        let serialized = self.serialize_sessions()?;
+        let deserialized =
+            Self::deserialize_sessions(serialized.as_slice(), self.signing_session_sender.clone())?;
+        assert_eq!(self.signing_sessions.len(), deserialized.len());
+        for (pkid, session) in self.signing_sessions.iter() {
+            assert_eq!(session.pkid, deserialized.get(&pkid).unwrap().pkid);
+            assert_eq!(
+                session.min_signers,
+                deserialized.get(&pkid).unwrap().min_signers
+            );
+            assert_eq!(
+                session.participants,
+                deserialized.get(&pkid).unwrap().participants
+            );
+            assert_eq!(
+                session.public_key_package,
+                deserialized.get(&pkid).unwrap().public_key_package
+            );
+            assert_eq!(pkid, &deserialized.get(&pkid).unwrap().pkid);
         }
+        Ok(())
+    }
+    fn deserialize_sessions(
+        bytes: &[u8],
+        signing_session_sender: UnboundedSender<(
+            SigningRequestWrap<VII>,
+            oneshot::Sender<SigningResponseWrap<VII>>,
+        )>,
+    ) -> Result<HashMap<PkId, SigningSession<VII, C>>, SessionError<C>> {
+        let sessions: HashMap<PkId, Vec<u8>> = bincode::deserialize(bytes)
+            .map_err(|e| SessionError::CoordinatorSessionError(e.to_string()))?;
+        let mut signing_sessions = HashMap::new();
+        for (pkid, data) in sessions {
+            let session = SigningSession::deserialize(&data, signing_session_sender.clone())?;
+            signing_sessions.insert(pkid, session);
+        }
+        Ok(signing_sessions)
+    }
+    fn serialize_sessions(&self) -> Result<Vec<u8>, SessionError<C>> {
+        let sessions = self
+            .signing_sessions
+            .iter()
+            .map(|(pkid, session)| match session.serialize() {
+                Ok(data) => Ok((pkid.clone(), data)),
+                Err(e) => Err(e),
+            })
+            .collect::<Result<HashMap<PkId, Vec<u8>>, SessionError<C>>>()?;
+        Ok(bincode::serialize(&sessions).unwrap())
     }
     async fn new_key<IT>(
         &mut self,
@@ -229,6 +300,8 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
                         self.signing_session_sender.clone(),
                     )?,
                 );
+                let sessions = self.serialize_sessions()?;
+                self.keystore_management.write(sessions.as_slice())?;
                 let oneshot = self.session_id_key_map.remove(&dkg_info.session_id);
                 if let Some(oneshot) = oneshot {
                     if let Err(e) = oneshot.send(

@@ -41,3 +41,6 @@ Cargo.lock
 .ipc_socket/
 
 .VSCodeCounter/
+
+.keystore/
+**/.test/

@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use subsession::CoordinatorSubsession;
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
@@ -9,6 +10,13 @@ use crate::{
         Participants, SignatureSuite, SubsessionId,
     },
 };
+#[derive(Serialize, Deserialize)]
+struct CoordinatorSigningSessionInfo {
+    pub(crate) pkid: PkId,
+    pub(crate) public_key_package: Vec<u8>,
+    pub(crate) min_signers: u16,
+    pub(crate) participants: Vec<u8>,
+}
 
 use super::{Cipher, SigningRequestWrap, SigningResponseWrap};
 
@@ -40,6 +48,42 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSigningSession<VII, C
             public_key_package,
             min_signers,
             participants,
+            signing_sender,
+        })
+    }
+    fn info(&self) -> Result<CoordinatorSigningSessionInfo, SessionError<C>> {
+        Ok(CoordinatorSigningSessionInfo {
+            pkid: self.pkid.clone(),
+            public_key_package: self
+                .public_key_package
+                .serialize_binary()
+                .map_err(|e| SessionError::CryptoError(e))?,
+            min_signers: self.min_signers,
+            participants: self
+                .participants
+                .serialize()
+                .map_err(|e| SessionError::InvalidParticipants(e.to_string()))?,
+        })
+    }
+    pub(crate) fn serialize(&self) -> Result<Vec<u8>, SessionError<C>> {
+        Ok(bincode::serialize(&self.info()?).unwrap())
+    }
+    pub(crate) fn deserialize(
+        bytes: &[u8],
+        signing_sender: UnboundedSender<(
+            SigningRequestWrap<VII>,
+            oneshot::Sender<SigningResponseWrap<VII>>,
+        )>,
+    ) -> Result<Self, SessionError<C>> {
+        let info: CoordinatorSigningSessionInfo = bincode::deserialize(bytes)
+            .map_err(|e| SessionError::CoordinatorSessionError(e.to_string()))?;
+        Ok(Self {
+            pkid: info.pkid,
+            public_key_package: C::PublicKeyPackage::deserialize_binary(&info.public_key_package)
+                .map_err(|e| SessionError::CryptoError(e))?,
+            min_signers: info.min_signers,
+            participants: Participants::deserialize(&info.participants)
+                .map_err(|e| SessionError::InvalidParticipants(e.to_string()))?,
             signing_sender,
         })
     }

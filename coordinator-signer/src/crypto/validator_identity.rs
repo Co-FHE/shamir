@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::hash::Hash;
-pub mod ed25519;
+// pub mod ed25519;
 pub mod p2p_identity;
 use std::{cmp, fmt};
 pub trait ValidatorIdentity: fmt::Debug + Clone + 'static {
@@ -31,6 +31,7 @@ where
     type PublicKey: ValidatorIdentityPublicKey;
     type SignError: std::error::Error + std::marker::Send + std::marker::Sync + 'static;
     fn to_public_key(&self) -> Self::PublicKey;
+    fn derive_key(&self, salt: &[u8]) -> Vec<u8>;
     fn sign<T: AsRef<[u8]>>(&self, message: T) -> Result<Vec<u8>, Self::SignError>;
 }
 pub trait ValidatorIdentityIdentity

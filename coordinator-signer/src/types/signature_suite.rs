@@ -66,10 +66,11 @@ impl<VII: ValidatorIdentityIdentity + Serialize + for<'de> Deserialize<'de>> Dis
 }
 impl<VII: ValidatorIdentityIdentity, C: Cipher> SignatureSuite<VII, C> {
     pub(crate) fn to_signature_info(&self) -> Result<SignatureSuiteInfo<VII>, String> {
-        let pk = hex::encode(PublicKeyPackage::serialize(&self.pk).map_err(|e| e.to_string())?);
+        let pk =
+            hex::encode(PublicKeyPackage::serialize_binary(&self.pk).map_err(|e| e.to_string())?);
         let pk_tweak = self.pk.clone().tweak(self.tweak_data.clone());
         let pk_tweak =
-            hex::encode(PublicKeyPackage::serialize(&pk_tweak).map_err(|e| e.to_string())?);
+            hex::encode(PublicKeyPackage::serialize_binary(&pk_tweak).map_err(|e| e.to_string())?);
         Ok(SignatureSuiteInfo {
             signature: hex::encode(self.signature.to_bytes().map_err(|e| e.to_string())?),
             pk: pk,
@@ -131,11 +132,11 @@ impl<VII: ValidatorIdentityIdentity + Serialize + for<'de> Deserialize<'de>>
         serde_json::to_string_pretty(&self).unwrap()
     }
     pub fn verify<C: Cipher>(&self) -> Result<(), String> {
-        let pk = <<C as Cipher>::PublicKeyPackage as PublicKeyPackage>::deserialize(
+        let pk = <<C as Cipher>::PublicKeyPackage as PublicKeyPackage>::deserialize_binary(
             &hex::decode(&self.pk).map_err(|e| e.to_string())?.as_slice(),
         )
         .map_err(|e| e.to_string())?;
-        let pk_tweak = <<C as Cipher>::PublicKeyPackage as PublicKeyPackage>::deserialize(
+        let pk_tweak = <<C as Cipher>::PublicKeyPackage as PublicKeyPackage>::deserialize_binary(
             &hex::decode(&self.pk_tweak)
                 .map_err(|e| e.to_string())?
                 .as_slice(),

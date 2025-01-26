@@ -2,6 +2,7 @@ mod command;
 mod manager;
 mod session;
 use crate::crypto::*;
+use crate::keystore::Keystore;
 use crate::types::message::{
     CoorBehaviour, CoorBehaviourEvent, CoorToSigRequest, CoorToSigResponse, DKGRequestWrap,
     DKGResponseWrap, NodeToCoorRequest, NodeToCoorResponse, SigToCoorRequest, SigToCoorResponse,
@@ -29,6 +30,7 @@ use session::SessionWrap;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -113,11 +115,14 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
         let (signing_session_sender, signing_session_receiver) =
             tokio::sync::mpsc::unbounded_channel();
         let (instruction_sender, instruction_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let keystore =
+            Arc::new(Keystore::new(p2p_keypair.derive_secret(b"keystore").unwrap(), None).unwrap());
         manager::CoordiantorSessionManager::new(
             instruction_receiver,
             dkg_session_sender,
             signing_session_sender,
-        )
+            keystore,
+        )?
         .listening();
         Ok(Self {
             p2p_keypair,

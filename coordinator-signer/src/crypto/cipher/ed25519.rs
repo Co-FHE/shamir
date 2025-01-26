@@ -133,11 +133,11 @@ impl PublicKeyPackage for frost_ed25519::keys::PublicKeyPackage {
         self.verifying_key()
     }
 
-    fn serialize(&self) -> Result<Vec<u8>, Self::CryptoError> {
+    fn serialize_binary(&self) -> Result<Vec<u8>, Self::CryptoError> {
         Ok(self.serialize()?)
     }
 
-    fn deserialize(bytes: &[u8]) -> Result<Self, Self::CryptoError> {
+    fn deserialize_binary(bytes: &[u8]) -> Result<Self, Self::CryptoError> {
         Ok(Self::deserialize(bytes)?)
     }
 

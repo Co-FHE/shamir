@@ -50,6 +50,7 @@ proptest = "1.0.100"
 thiserror = "2.0"
 rand = "0.8.5"
 serde_with = "3"
+ring = "0.17.3"
 
 strum_macros = "0.26"
 
@@ -58,3 +59,7 @@ k256 = "0.13.4"
 crypto-bigint = "0.6"
 curve25519-dalek = "4.1.3"
 dashmap = "6.1.0"
+zeroize = "1.6.0"
+
+file-lock = "2.1"
+bincode = "1.3.3"

@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use subsession::SignerSubsession;
 
 use crate::{
-    crypto::{Cipher, PublicKeyPackage},
+    crypto::{Cipher, KeyPackage, PublicKeyPackage},
     signer::{PkId, ValidatorIdentityIdentity},
     types::{
         error::SessionError,
@@ -40,6 +40,34 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SigningSession<VII, C> {
             )?,
             subsessions: BTreeMap::new(),
         })
+    }
+    pub(crate) fn deserialize(bytes: &[u8]) -> Result<Self, SessionError<C>> {
+        let base = SigningSignerBase::deserialize(bytes)?;
+        Ok(Self {
+            base,
+            subsessions: BTreeMap::new(),
+        })
+    }
+    pub(crate) fn serialize(&self) -> Result<Vec<u8>, SessionError<C>> {
+        self.base.serialize()
+    }
+    pub(crate) fn check_serialize_deserialize(&self) -> Result<(), SessionError<C>> {
+        let serialized = self.serialize()?;
+        let deserialized = Self::deserialize(&serialized)?;
+        assert_eq!(self.base.pkid, deserialized.base.pkid);
+        assert_eq!(
+            self.base.key_package.to_bytes(),
+            deserialized.base.key_package.to_bytes()
+        );
+        assert_eq!(self.base.participants, deserialized.base.participants);
+        assert_eq!(self.base.identifier, deserialized.base.identifier);
+        assert_eq!(self.base.identity, deserialized.base.identity);
+        assert_eq!(self.base._min_signers, deserialized.base._min_signers);
+        assert_eq!(
+            self.base._public_key_package,
+            deserialized.base._public_key_package
+        );
+        Ok(())
     }
     pub(crate) fn apply_request<R: RngCore + CryptoRng>(
         &mut self,

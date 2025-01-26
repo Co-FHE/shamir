@@ -93,12 +93,6 @@ impl<VI: ValidatorIdentity> NodeSwarm<VI> {
             signing_request_receiver: signing_request_receiver,
         });
     }
-    async fn wait_for_coordinator_connection(&mut self) -> Result<(), anyhow::Error> {
-        while !self.swarm.is_connected(&self.coordinator_peer_id) {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-        Ok(())
-    }
     async fn start_listening(mut self) {
         tokio::spawn(async move {
             loop {

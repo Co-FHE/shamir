@@ -1,6 +1,9 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::crypto::CryptoTypeError;
+use crate::keystore::{Keystore, KeystoreError};
+use crate::types::error::SessionError;
 use crate::types::message::{
     DKGRequestWrap, DKGResponseWrap, SigningRequestWrap, SigningResponseWrap,
 };
@@ -22,6 +25,16 @@ pub(crate) enum SessionManagerError {
     #[error("crypto type not supported: {0}")]
     CryptoTypeError(#[from] CryptoTypeError),
 }
+impl<C: Cipher> From<SessionError<C>> for SessionManagerError {
+    fn from(e: SessionError<C>) -> Self {
+        SessionManagerError::SessionError(e.to_string())
+    }
+}
+impl From<KeystoreError> for SessionManagerError {
+    fn from(e: KeystoreError) -> Self {
+        SessionManagerError::SessionError(e.to_string())
+    }
+}
 #[derive(Debug)]
 pub(crate) enum Request<VII: ValidatorIdentityIdentity> {
     DKG(
@@ -40,10 +53,10 @@ pub(crate) enum Request<VII: ValidatorIdentityIdentity> {
     ),
 }
 macro_rules! new_session_wrap {
-    ($session_inst_channels:expr, $generic_type:ty, $crypto_variant:ident) => {{
+    ($session_inst_channels:expr, $generic_type:ty, $crypto_variant:ident, $keystore:expr) => {{
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         $session_inst_channels.insert(CryptoType::$crypto_variant, tx);
-        SessionWrap::<VII, $generic_type>::new(rx).listening();
+        SessionWrap::<VII, $generic_type>::new(rx, $keystore)?.listening();
     }};
 }
 pub(crate) struct SignerSessionManager<VII: ValidatorIdentityIdentity + Sized> {
@@ -51,17 +64,35 @@ pub(crate) struct SignerSessionManager<VII: ValidatorIdentityIdentity + Sized> {
     request_receiver: UnboundedReceiver<Request<VII>>,
 }
 impl<VII: ValidatorIdentityIdentity> SignerSessionManager<VII> {
-    pub(crate) fn new(request_receiver: UnboundedReceiver<Request<VII>>) -> Self {
+    pub(crate) fn new(
+        request_receiver: UnboundedReceiver<Request<VII>>,
+        keystore: Arc<Keystore>,
+    ) -> Result<Self, SessionManagerError> {
         let mut session_inst_channels = HashMap::new();
-        new_session_wrap!(session_inst_channels, Ed25519Sha512, Ed25519);
-        new_session_wrap!(session_inst_channels, Secp256K1Sha256, Secp256k1);
-        new_session_wrap!(session_inst_channels, Secp256K1Sha256TR, Secp256k1Tr);
+        new_session_wrap!(
+            session_inst_channels,
+            Ed25519Sha512,
+            Ed25519,
+            keystore.clone()
+        );
+        new_session_wrap!(
+            session_inst_channels,
+            Secp256K1Sha256,
+            Secp256k1,
+            keystore.clone()
+        );
+        new_session_wrap!(
+            session_inst_channels,
+            Secp256K1Sha256TR,
+            Secp256k1Tr,
+            keystore
+        );
         assert!(session_inst_channels.len() == CryptoType::COUNT);
 
-        Self {
+        Ok(Self {
             request_receiver,
             session_inst_channels,
-        }
+        })
     }
     pub(crate) fn listening(mut self) {
         tokio::spawn(async move {

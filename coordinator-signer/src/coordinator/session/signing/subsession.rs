@@ -292,7 +292,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
                 if !error_ids.is_empty() {
                     tracing::warn!("Found {} error IDs to remove", error_ids.len());
                     for id in error_ids {
-                        round2_responses.remove(&id);
+                        round1_responses_pool.remove(&id);
                     }
                     continue 'out;
                 }
@@ -327,7 +327,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
                                 e,
                                 id.to_string()
                             );
-                            round2_responses.remove(&id);
+                            round1_responses_pool.remove(&id);
                             continue 'out;
                         }
                         None => {

@@ -37,6 +37,7 @@ use crate::types::message::{
     CoorToSigRequest, CoorToSigResponse, DKGResponseWrap, SigBehaviour, SigBehaviourEvent,
     SigToCoorRequest, SigToCoorResponse, SigningResponseWrap, ValidatorIdentityRequest,
 };
+use crate::types::ConnectionState;
 use crate::utils::concat_string_hash;
 use command::Command;
 
@@ -62,6 +63,7 @@ pub struct Signer<VI: ValidatorIdentity> {
         )>,
     >,
     channel_mapping: HashMap<InboundRequestId, ResponseChannel<CoorToSigResponse<VI::Identity>>>,
+    connection_state: ConnectionState,
 }
 
 impl<VI: ValidatorIdentity> Signer<VI> {
@@ -137,35 +139,80 @@ impl<VI: ValidatorIdentity> Signer<VI> {
             dkg_response_futures: FuturesUnordered::new(),
             signing_response_futures: FuturesUnordered::new(),
             channel_mapping: HashMap::new(),
+            connection_state: ConnectionState::Disconnected(None),
         })
     }
     pub async fn start_listening(mut self) -> Result<(), anyhow::Error> {
         self.swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
 
         let listener = self.start_ipc_listening().await?;
-        self.dial_coordinator()?;
         loop {
-            tokio::select! {
-                event = self.swarm.select_next_some()=> {
-                    // tracing::info!("{:?}",event);
-                    if let Err(e) = self.handle_swarm_event(event).await {
-                        tracing::error!("Error handling behaviour event: {}", e);
-                    }
-                },
-                event = listener.accept()=> {
-                    if let Err(e) = self.handle_command(event).await {
-                        tracing::error!("Error handling command: {}", e);
+            match self.connection_state {
+                ConnectionState::Disconnected(None) => {
+                    self.dial_coordinator()?;
+                    self.connection_state =
+                        ConnectionState::Connecting(tokio::time::Instant::now());
+                }
+                ConnectionState::Disconnected(Some(last_connecting_time)) => {
+                    let elapsed = last_connecting_time.elapsed();
+                    if elapsed
+                        > Duration::from_secs(common::Settings::global().signer.connection_timeout)
+                    {
+                        self.dial_coordinator()?;
+                        self.connection_state =
+                            ConnectionState::Connecting(tokio::time::Instant::now());
+                    } else {
+                        tokio::time::sleep(
+                            Duration::from_secs(
+                                common::Settings::global().signer.connection_timeout,
+                            ) - elapsed,
+                        )
+                        .await;
+                        self.dial_coordinator()?;
+                        self.connection_state =
+                            ConnectionState::Connecting(tokio::time::Instant::now());
                     }
                 }
-                Some(Result::Ok(dkg_request)) = self.dkg_response_futures.next() => {
-                    if let Err(e) = self.dkg_handle_response(dkg_request).await {
-                        tracing::error!("Error handling dkg response: {}", e);
+                ConnectionState::Connecting(start_time) => {
+                    if start_time.elapsed()
+                        > Duration::from_secs(common::Settings::global().signer.connection_timeout)
+                    {
+                        self.dial_coordinator()?;
+                        self.connection_state =
+                            ConnectionState::Connecting(tokio::time::Instant::now());
                     }
                 }
-                Some(Result::Ok(signing_request)) = self.signing_response_futures.next() => {
-                    if let Err(e) = self.signing_handle_response(signing_request).await {
-                        tracing::error!("Error handling signing response: {}", e);
+                ConnectionState::Connected => {}
+            }
+            if self.connection_state == ConnectionState::Connected {
+                tokio::select! {
+                    event = self.swarm.select_next_some()=> {
+                        // tracing::info!("{:?}",event);
+                        if let Err(e) = self.handle_swarm_event(event).await {
+                            tracing::error!("Error handling behaviour event: {}", e);
+                        }
+                    },
+                    event = listener.accept()=> {
+                        if let Err(e) = self.handle_command(event).await {
+                            tracing::error!("Error handling command: {}", e);
+                        }
                     }
+                    Some(Result::Ok(dkg_request)) = self.dkg_response_futures.next() => {
+                        if let Err(e) = self.dkg_handle_response(dkg_request).await {
+                            tracing::error!("Error handling dkg response: {}", e);
+                        }
+                    }
+                    Some(Result::Ok(signing_request)) = self.signing_response_futures.next() => {
+                        if let Err(e) = self.signing_handle_response(signing_request).await {
+                            tracing::error!("Error handling signing response: {}", e);
+                        }
+                    }
+                }
+            } else {
+                let event = self.swarm.select_next_some().await;
+                tracing::info!("{:?}", event);
+                if let Err(e) = self.handle_swarm_event(event).await {
+                    tracing::error!("Error handling behaviour event: {}", e);
                 }
             }
         }
@@ -191,15 +238,22 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                 ..
             } if peer_id == self.coordinator_peer_id => {
                 tracing::warn!("Lost connection to rendezvous point {}", error);
-                self.dial_coordinator()?;
+                self.connection_state = ConnectionState::Disconnected(None);
             }
             SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
-                tracing::error!("Outgoing connection to {:?} error: {:?}", peer_id, error);
-                // self.dial_coordinator()?;
+                if peer_id == Some(self.coordinator_peer_id) {
+                    tracing::error!("Outgoing connection to {:?} error: {:?}", peer_id, error);
+                    if let ConnectionState::Connecting(last_connecting_time) = self.connection_state
+                    {
+                        self.connection_state =
+                            ConnectionState::Disconnected(Some(last_connecting_time));
+                    }
+                }
             }
             SwarmEvent::ConnectionEstablished { peer_id, .. }
                 if peer_id == self.coordinator_peer_id =>
             {
+                self.connection_state = ConnectionState::Connected;
                 if let Err(error) = self.swarm.behaviour_mut().rendezvous.register(
                     rendezvous::Namespace::from_static("rendezvous_coorsig"),
                     self.coordinator_peer_id,

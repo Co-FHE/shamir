@@ -88,8 +88,8 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
             }
             None => HashMap::new(),
         };
-        for (pkid, session) in signing_sessions.iter() {
-            tracing::info!("{}", pkid);
+        for (pkid, _) in signing_sessions.iter() {
+            tracing::info!("{} restored from keystore", pkid);
         }
         Ok(Self {
             signing_sessions,

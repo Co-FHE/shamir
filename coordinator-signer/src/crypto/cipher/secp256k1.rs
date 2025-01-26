@@ -172,14 +172,14 @@ impl VerifyingKey for frost_secp256k1::VerifyingKey {
 }
 
 /// Digest the hasher to a Scalar
-pub fn hasher_to_scalar(hasher: Sha256) -> Scalar {
+fn hasher_to_scalar(hasher: Sha256) -> Scalar {
     // This is acceptable because secp256k1 curve order is close to 2^256,
     // and the input is uniformly random since it is a hash output, therefore
     // the bias is negligibly small.
     Scalar::reduce(U256::from_be_slice(&hasher.finalize()))
 }
 
-pub fn tagged_hash(tag: &str) -> Sha256 {
+fn tagged_hash(tag: &str) -> Sha256 {
     let mut hasher = Sha256::new();
     let mut tag_hasher = Sha256::new();
     tag_hasher.update(tag.as_bytes());

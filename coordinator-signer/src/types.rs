@@ -10,3 +10,10 @@ pub use signature_suite::SignatureSuiteInfo;
 pub(crate) use validator::Validator;
 
 use crate::crypto::{Cipher, ValidatorIdentityIdentity};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ConnectionState {
+    Connected,
+    Disconnected(Option<tokio::time::Instant>),
+    Connecting(tokio::time::Instant),
+}

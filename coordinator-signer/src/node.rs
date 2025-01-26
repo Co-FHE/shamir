@@ -3,7 +3,7 @@ use libp2p::request_response::{OutboundRequestId, ProtocolSupport};
 use libp2p::{request_response, PeerId, StreamProtocol};
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::time::{self, Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::sync::oneshot;
 
@@ -25,7 +25,7 @@ use crate::types::message::{
     NodeBehaviour, NodeBehaviourEvent, NodeToCoorRequest, NodeToCoorResponse,
     ValidatorIdentityRequest,
 };
-use crate::types::SignatureSuiteInfo;
+use crate::types::{ConnectionState, SignatureSuiteInfo};
 use crate::utils::concat_string_hash;
 
 pub(crate) struct NodeSwarm<VI: ValidatorIdentity> {
@@ -45,6 +45,7 @@ pub(crate) struct NodeSwarm<VI: ValidatorIdentity> {
         NodeToCoorRequest<VI::Identity>,
         oneshot::Sender<Result<SignatureSuiteInfo<VI::Identity>, String>>,
     )>,
+    connection_state: ConnectionState,
 }
 impl<VI: ValidatorIdentity> NodeSwarm<VI> {
     pub async fn new(
@@ -91,32 +92,83 @@ impl<VI: ValidatorIdentity> NodeSwarm<VI> {
             signing_response_mapping: DashMap::new(),
             dkg_request_receiver: dkg_request_receiver,
             signing_request_receiver: signing_request_receiver,
+            connection_state: ConnectionState::Disconnected(None),
         });
     }
     async fn start_listening(mut self) {
         tokio::spawn(async move {
             loop {
-                tokio::select! {
-                    SwarmEvent::ConnectionEstablished { peer_id, .. }= self.swarm.select_next_some()=> {
-                        if peer_id == self.coordinator_peer_id {
-                            break;
+                match self.connection_state {
+                    ConnectionState::Disconnected(None) => {
+                        if let Err(e) = self.dial_coordinator() {
+                            tracing::error!("Failed to dial coordinator: {}", e);
+                        }
+                        self.connection_state =
+                            ConnectionState::Connecting(tokio::time::Instant::now());
+                    }
+                    ConnectionState::Disconnected(Some(last_connecting_time)) => {
+                        let elapsed = last_connecting_time.elapsed();
+                        if elapsed
+                            > Duration::from_secs(
+                                common::Settings::global().signer.connection_timeout,
+                            )
+                        {
+                            if let Err(e) = self.dial_coordinator() {
+                                tracing::error!("Failed to dial coordinator: {}", e);
+                            }
+                            self.connection_state =
+                                ConnectionState::Connecting(tokio::time::Instant::now());
+                        } else {
+                            tokio::time::sleep(
+                                Duration::from_secs(
+                                    common::Settings::global().signer.connection_timeout,
+                                ) - elapsed,
+                            )
+                            .await;
+                            if let Err(e) = self.dial_coordinator() {
+                                tracing::error!("Failed to dial coordinator: {}", e);
+                            }
+                            self.connection_state =
+                                ConnectionState::Connecting(tokio::time::Instant::now());
                         }
                     }
+                    ConnectionState::Connecting(start_time) => {
+                        if start_time.elapsed()
+                            > Duration::from_secs(
+                                common::Settings::global().signer.connection_timeout,
+                            )
+                        {
+                            if let Err(e) = self.dial_coordinator() {
+                                tracing::error!("Failed to dial coordinator: {}", e);
+                            }
+                            self.connection_state =
+                                ConnectionState::Connecting(tokio::time::Instant::now());
+                        }
+                    }
+                    ConnectionState::Connected => {}
                 }
-            }
-            loop {
-                tokio::select! {
-                    event = self.swarm.select_next_some()=> {
-                        tracing::info!("{:?}",event);
-                        if let Err(e) = self.handle_swarm_event(event).await {
-                            tracing::error!("Error handling behaviour event: {}", e);
+                if self.connection_state == ConnectionState::Connected {
+                    tokio::select! {
+                            event = self.swarm.select_next_some()=> {
+                                tracing::info!("{:?}",event);
+                            if let Err(e) = self.handle_swarm_event(event).await {
+                                tracing::error!("Error handling behaviour event: {}", e);
+                            }
+                        },
+                        Some((request, sender)) = self.dkg_request_receiver.recv()=>{
+                            if self.connection_state != ConnectionState::Connected {
+                            }
+                            self.dkg_handle_request(request, sender);
                         }
-                    },
-                    Some((request, sender)) = self.dkg_request_receiver.recv()=>{
-                        self.dkg_handle_request(request, sender);
+                        Some((request, sender)) = self.signing_request_receiver.recv()=>{
+                            self.signing_handle_request(request, sender);
+                        }
                     }
-                    Some((request, sender)) = self.signing_request_receiver.recv()=>{
-                        self.signing_handle_request(request, sender);
+                } else {
+                    let event = self.swarm.select_next_some().await;
+                    tracing::info!("{:?}", event);
+                    if let Err(e) = self.handle_swarm_event(event).await {
+                        tracing::error!("Error handling behaviour event: {}", e);
                     }
                 }
             }
@@ -165,15 +217,18 @@ impl<VI: ValidatorIdentity> NodeSwarm<VI> {
                 ..
             } if peer_id == self.coordinator_peer_id => {
                 tracing::warn!("Lost connection to rendezvous point {}", error);
-                self.swarm.dial(self.coordinator_addr.clone())?;
+                self.connection_state = ConnectionState::Disconnected(None);
             }
             SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
                 tracing::error!("Outgoing connection to {:?} error: {:?}", peer_id, error);
-                self.dial_coordinator()?;
+                if let ConnectionState::Connecting(start_time) = self.connection_state {
+                    self.connection_state = ConnectionState::Disconnected(Some(start_time));
+                }
             }
             SwarmEvent::ConnectionEstablished { peer_id, .. }
                 if peer_id == self.coordinator_peer_id =>
             {
+                self.connection_state = ConnectionState::Connected;
                 // if let Err(error) = self.swarm.behaviour_mut().rendezvous.register(
                 //     rendezvous::Namespace::from_static("rendezvous_coorsig"),
                 //     self.coordinator_peer_id,

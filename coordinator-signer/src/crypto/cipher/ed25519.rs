@@ -167,7 +167,7 @@ impl VerifyingKey for frost_ed25519::VerifyingKey {
     }
 }
 
-pub fn tagged_hash(tag: &str) -> Sha512 {
+fn tagged_hash(tag: &str) -> Sha512 {
     let mut hasher = Sha512::new();
     let mut tag_hasher = Sha512::new();
     tag_hasher.update(tag.as_bytes());

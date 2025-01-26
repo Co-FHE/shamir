@@ -52,12 +52,14 @@ pub struct SignerSettings {
     pub ipc_socket_path: String,
     pub allow_external_address: bool,
     pub keystore_path: PathBuf,
+    pub connection_timeout: u64,
 }
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct NodeSettings {
     pub keypair_path: String,
     pub ipc_socket_path: String,
+    pub connection_timeout: u64,
 }
 
 #[derive(Debug, Deserialize, Clone)]

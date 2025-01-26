@@ -18,7 +18,6 @@ where
     type Keypair: ValidatorIdentityKeypair;
     type DecodeError: std::error::Error + std::marker::Send + std::marker::Sync + 'static;
     fn to_identity(&self) -> Self::Identity;
-    #[allow(unused)]
     fn from_keypair(keypair: Self::Keypair) -> Self;
     fn from_bytes<T: AsRef<[u8]>>(bytes: T) -> Result<Self, Self::DecodeError>;
     fn to_bytes(&self) -> Vec<u8>;
@@ -40,13 +39,10 @@ where
 {
     type PublicKey: ValidatorIdentityPublicKey;
     type DecodeError: std::error::Error + std::marker::Send + std::marker::Sync + 'static;
-    #[allow(unused)]
     fn from_public_key(public_key: Self::PublicKey) -> Self;
     // to_bytes is not same as to_string.to_bytes(), this is for the purpose of serialization
     fn to_fmt_string(&self) -> String;
     fn to_bytes(&self) -> Vec<u8>;
-    #[allow(unused)]
     fn from_fmt_str(s: &str) -> Result<Self, Self::DecodeError>;
-    #[allow(unused)]
     fn from_bytes<T: AsRef<[u8]>>(bytes: T) -> Result<Self, Self::DecodeError>;
 }

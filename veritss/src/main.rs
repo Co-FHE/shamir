@@ -117,7 +117,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 time::sleep(Duration::from_millis(1)).await;
             }
             for resp in queue {
-                let r = resp.await.unwrap().unwrap();
+                let _ = resp.await.unwrap().unwrap();
             }
             let end = Instant::now();
             println!("time: {:?}", end - start);

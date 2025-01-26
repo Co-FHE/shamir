@@ -72,7 +72,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
                 .apply_request(request, &mut rng)
                 .map_err(|e| SessionManagerError::SessionError(e.to_string()))?),
             None => Err(SessionManagerError::SessionError(
-                SessionError::<C>::SessionNotFound(pkid.to_string()).to_string(),
+                SessionError::<C>::PkIdNotFound(pkid.to_string()).to_string(),
             )),
         }?;
         Ok(SigningResponseWrap::from(response)

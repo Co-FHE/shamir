@@ -3,7 +3,7 @@ use libp2p::request_response::{OutboundRequestId, ProtocolSupport};
 use libp2p::{request_response, PeerId, StreamProtocol};
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{self, Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::sync::oneshot;
 
@@ -30,6 +30,7 @@ use crate::utils::concat_string_hash;
 
 pub(crate) struct NodeSwarm<VI: ValidatorIdentity> {
     swarm: libp2p::Swarm<NodeBehaviour<VI::Identity>>,
+    coordinator_addr: Multiaddr,
     dkg_response_mapping: DashMap<OutboundRequestId, oneshot::Sender<Result<PkId, String>>>,
     signing_response_mapping: DashMap<
         OutboundRequestId,
@@ -46,7 +47,7 @@ pub(crate) struct NodeSwarm<VI: ValidatorIdentity> {
     )>,
 }
 impl<VI: ValidatorIdentity> NodeSwarm<VI> {
-    pub fn new(
+    pub async fn new(
         p2p_keypair: libp2p::identity::Keypair,
         coordinator_addr: Multiaddr,
         coordinator_peer_id: PeerId,
@@ -77,11 +78,14 @@ impl<VI: ValidatorIdentity> NodeSwarm<VI> {
                     request_response::Config::default(),
                 ),
             })?
-            .with_swarm_config(|cfg| cfg.with_idle_connection_timeout(Duration::from_secs(0)))
+            .with_swarm_config(|cfg| cfg.with_idle_connection_timeout(Duration::from_secs(1000)))
             .build();
         swarm.add_peer_address(coordinator_peer_id, coordinator_addr.clone());
+        swarm.dial(coordinator_addr.clone())?;
+
         return Ok(Self {
             swarm,
+            coordinator_addr,
             coordinator_peer_id,
             dkg_response_mapping: DashMap::new(),
             signing_response_mapping: DashMap::new(),
@@ -89,8 +93,23 @@ impl<VI: ValidatorIdentity> NodeSwarm<VI> {
             signing_request_receiver: signing_request_receiver,
         });
     }
-    fn start_listening(mut self) {
+    async fn wait_for_coordinator_connection(&mut self) -> Result<(), anyhow::Error> {
+        while !self.swarm.is_connected(&self.coordinator_peer_id) {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        Ok(())
+    }
+    async fn start_listening(mut self) {
         tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    SwarmEvent::ConnectionEstablished { peer_id, .. }= self.swarm.select_next_some()=> {
+                        if peer_id == self.coordinator_peer_id {
+                            break;
+                        }
+                    }
+                }
+            }
             loop {
                 tokio::select! {
                     event = self.swarm.select_next_some()=> {
@@ -108,6 +127,10 @@ impl<VI: ValidatorIdentity> NodeSwarm<VI> {
                 }
             }
         });
+    }
+    pub(crate) fn dial_coordinator(&mut self) -> Result<(), anyhow::Error> {
+        self.swarm.dial(self.coordinator_addr.clone())?;
+        Ok(())
     }
     pub(crate) fn dkg_handle_request(
         &mut self,
@@ -142,17 +165,17 @@ impl<VI: ValidatorIdentity> NodeSwarm<VI> {
             SwarmEvent::NewListenAddr { address, .. } => {
                 tracing::info!("Listening on {address:?}")
             }
-            // SwarmEvent::ConnectionClosed {
-            //     peer_id,
-            //     cause: Some(error),
-            //     ..
-            // } if peer_id == self.coordinator_peer_id => {
-            //     // tracing::warn!("Lost connection to rendezvous point {}", error);
-            //     // self.swarm.dial(self.coordinator_addr.clone())?;
-            // }
+            SwarmEvent::ConnectionClosed {
+                peer_id,
+                cause: Some(error),
+                ..
+            } if peer_id == self.coordinator_peer_id => {
+                tracing::warn!("Lost connection to rendezvous point {}", error);
+                self.swarm.dial(self.coordinator_addr.clone())?;
+            }
             SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
                 tracing::error!("Outgoing connection to {:?} error: {:?}", peer_id, error);
-                // self.dial_coordinator()?;
+                self.dial_coordinator()?;
             }
             SwarmEvent::ConnectionEstablished { peer_id, .. }
                 if peer_id == self.coordinator_peer_id =>
@@ -277,7 +300,7 @@ pub struct Node<VI: ValidatorIdentity> {
 }
 
 impl<VI: ValidatorIdentity> Node<VI> {
-    pub fn new(node_keypair: VI::Keypair) -> Result<Self, anyhow::Error> {
+    pub async fn new(node_keypair: VI::Keypair) -> Result<Self, anyhow::Error> {
         let p2p_keypair = libp2p::identity::Keypair::generate_ed25519();
         let coordinator_addr: Multiaddr = format!(
             "/ip4/{}/tcp/{}/p2p/{}",
@@ -306,8 +329,9 @@ impl<VI: ValidatorIdentity> Node<VI> {
             coordinator_peer_id,
             dkg_request_receiver,
             signing_request_receiver,
-        )?;
-        swarm_node.start_listening();
+        )
+        .await?;
+        swarm_node.start_listening().await;
         Ok(Self {
             node_keypair: node_keypair,
             p2p_keypair: p2p_keypair,

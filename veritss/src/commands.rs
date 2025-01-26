@@ -23,6 +23,10 @@ pub enum Commands {
         #[arg(value_parser = parse_crypto_type)]
         crypto_type: CryptoType,
     },
+    LoopSign {
+        pkid: String,
+        times: usize,
+    },
     ///
     Sign {
         pkid: String,

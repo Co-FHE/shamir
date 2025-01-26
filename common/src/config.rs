@@ -42,6 +42,7 @@ pub struct CoordinatorSettings {
     pub peer_id: String,
     pub ipc_socket_path: String,
     pub peer_id_whitelist: HashSet<String>,
+    pub keystore_path: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -49,6 +50,7 @@ pub struct SignerSettings {
     pub keypair_path_mapping: BTreeMap<u16, String>,
     pub ipc_socket_path: String,
     pub allow_external_address: bool,
+    pub keystore_path: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]

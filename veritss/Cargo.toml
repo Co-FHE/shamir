@@ -27,3 +27,4 @@ libp2p = { version = "0.55", features = [
 ] }
 tracing = "0.1.39"
 hex = "0.4.3"
+rand = "0.8.5"

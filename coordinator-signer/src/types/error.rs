@@ -24,7 +24,11 @@ pub(crate) enum SessionError<C: Cipher> {
     #[error("Base info does not match: {0}")]
     BaseInfoNotMatch(String),
     #[error("Session not found: {0}")]
-    SessionNotFound(String),
+    SessionIdNotFound(String),
+    #[error("Subsession id not found: {0}")]
+    SubsessionIdNotFound(String),
+    #[error("PkId not found: {0}")]
+    PkIdNotFound(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

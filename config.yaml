@@ -1,6 +1,6 @@
 logging:
   console:
-    level: "info"
+    level: "warn"
   file:
     level: "info"
     dir_path: "logs"
@@ -10,6 +10,7 @@ coordinator:
   remote_addr: "127.0.0.1"
   peer_id: "12D3KooWB3LpKiErRF3byUAsCvY6JL8TtQeSCrF5Hw23UoKJ7F88"
   ipc_socket_path: ".ipc_socket/coordinator.sock"
+  keystore_path: ".keystore/coordinator"
   peer_id_whitelist:
     - "12D3KooWQdd3vZB7PQtcGBGxpP52oCXX4X4xCVrqi8r8Ejs6nTg3"
     - "12D3KooWRL6gitv6stQxyERJuraGNVZGQThWXGo9TC2Njf6XFB1X"
@@ -18,6 +19,7 @@ signer:
   allow_external_address: true
   keypair_path_mapping: { 1: "keys_for_test/signer1.key", 2: "keys_for_test/signer2.key", 3: "keys_for_test/signer3.key" }
   ipc_socket_path: ".ipc_socket/"
+  keystore_path: ".keystore/signer"
 connection:
   ping_interval: 1
 session:

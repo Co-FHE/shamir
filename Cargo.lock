@@ -4340,6 +4340,7 @@ dependencies = [
  "futures",
  "hex",
  "libp2p",
+ "rand",
  "tokio",
  "tracing",
 ]

@@ -8,8 +8,11 @@ use coordinator_signer::signer::Signer;
 use coordinator_signer::{
     coordinator::Coordinator, crypto::validator_identity::ValidatorIdentityIdentity,
 };
+use rand::Rng;
+use std::time::Duration;
 use std::{error::Error, fs::File, io::Read};
-use tokio;
+use tokio::time::Instant;
+use tokio::{self, time};
 use tracing;
 
 pub fn load_keypair(path: &str) -> libp2p::identity::Keypair {
@@ -19,6 +22,15 @@ pub fn load_keypair(path: &str) -> libp2p::identity::Keypair {
     f.read_to_end(&mut buffer).unwrap();
     libp2p::identity::Keypair::from_protobuf_encoding(buffer.as_slice()).unwrap()
 }
+pub(crate) fn random_readable_string(length: usize) -> String {
+    let mut rng = rand::thread_rng();
+    let mut bytes = Vec::with_capacity(length);
+    for _ in 0..length {
+        bytes.push(rng.gen::<u8>());
+    }
+    hex::encode(bytes)
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let _ = common::init_logging(None);
@@ -50,7 +62,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             crypto_type,
         } => {
             let keypair = load_keypair(Settings::global().node.keypair_path.as_str());
-            let mut node = Node::<P2pIdentity>::new(keypair)?;
+            let mut node = Node::<P2pIdentity>::new(keypair).await?;
             let participants = Settings::global()
                 .coordinator
                 .peer_id_whitelist
@@ -62,6 +74,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 .unwrap();
             let r = resp.await.unwrap().unwrap();
             tracing::info!("{:?}", r.to_string());
+            println!("{:?}", r.to_string());
         }
         commands::Commands::Sign {
             pkid,
@@ -72,7 +85,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             println!("message: {}", message);
             println!("tweak: {:?}", tweak);
             let keypair = load_keypair(Settings::global().node.keypair_path.as_str());
-            let mut node = Node::<P2pIdentity>::new(keypair)?;
+            let mut node = Node::<P2pIdentity>::new(keypair).await?;
             let resp = node
                 .sign(
                     PkId::new(hex::decode(&pkid).unwrap()),
@@ -83,6 +96,31 @@ async fn main() -> Result<(), Box<dyn Error>> {
             let r = resp.await.unwrap().unwrap();
             println!("{}", r.pretty_print());
             println!("{:?}", r.verify::<crypto::Secp256K1Sha256TR>());
+        }
+        commands::Commands::LoopSign { pkid, times } => {
+            let pkid = PkId::new(hex::decode(&pkid).unwrap());
+            let message = random_readable_string(100);
+            let tweak = random_readable_string(100);
+            let keypair = load_keypair(Settings::global().node.keypair_path.as_str());
+            let mut node = Node::<P2pIdentity>::new(keypair).await?;
+            let mut queue = Vec::new();
+            let start = Instant::now();
+            for _ in 0..times {
+                let resp = node
+                    .sign(
+                        pkid.clone(),
+                        message.as_bytes().to_vec(),
+                        Some(tweak.as_bytes().to_vec()),
+                    )
+                    .unwrap();
+                queue.push(resp);
+                time::sleep(Duration::from_millis(1)).await;
+            }
+            for resp in queue {
+                let r = resp.await.unwrap().unwrap();
+            }
+            let end = Instant::now();
+            println!("time: {:?}", end - start);
         }
     }
     Ok(())

@@ -1,10 +1,12 @@
+use serde::{Deserialize, Serialize};
+
 use super::{
     Cipher, Participants, PkId, PublicKeyPackage, SessionError, ValidatorIdentityIdentity,
 };
 use crate::crypto::*;
 use crate::types::message::SigningRequest;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct SigningSignerBase<VII: ValidatorIdentityIdentity, C: Cipher> {
     pub(crate) pkid: PkId,
     pub(crate) key_package: C::KeyPackage,

@@ -31,6 +31,7 @@ pub struct LoggingLevelSettings {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct LoggingFileSettings {
+    pub enable: bool,
     pub level: String,
     pub dir_path: String,
 }

@@ -2,6 +2,7 @@ logging:
   console:
     level: "debug"
   file:
+    enable: true
     level: "info"
     dir_path: "logs"
 coordinator:

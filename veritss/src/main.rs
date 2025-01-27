@@ -1,6 +1,5 @@
 mod commands;
 use common::Settings;
-use coordinator_signer::crypto;
 use coordinator_signer::crypto::validator_identity::p2p_identity::P2pIdentity;
 use coordinator_signer::crypto::PkId;
 use coordinator_signer::node::Node;
@@ -95,7 +94,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 .unwrap();
             let r = resp.await.unwrap().unwrap();
             println!("{}", r.pretty_print());
-            println!("{:?}", r.verify::<crypto::Secp256K1Sha256TR>());
+            println!("{:?}", r._verify());
         }
         commands::Commands::LoopSign { pkid, times } => {
             let pkid = PkId::new(hex::decode(&pkid).unwrap());
@@ -130,6 +129,31 @@ async fn main() -> Result<(), Box<dyn Error>> {
             }
             let end = Instant::now();
             println!("time: {:?}", end - start);
+        }
+        commands::Commands::Lspk => {
+            let keypair = load_keypair(Settings::global().node.keypair_path.as_str());
+            let node = Node::<P2pIdentity>::new(keypair).await?;
+            let r = node.lspk_async().await.unwrap();
+            for (k, v) in r {
+                let v = v.iter().map(|pkid| pkid.to_string()).collect::<Vec<_>>();
+                println!("{}: {:?}", k, v);
+            }
+        }
+        commands::Commands::Pk { pkid, tweak } => {
+            let keypair = load_keypair(Settings::global().node.keypair_path.as_str());
+            let node = Node::<P2pIdentity>::new(keypair).await?;
+            let r = node
+                .pk_async(
+                    PkId::new(hex::decode(&pkid).unwrap()),
+                    tweak.map(|t| t.as_bytes().to_vec()),
+                )
+                .await
+                .unwrap();
+            println!(
+                "tweak: {:?},group_public_key_tweak: {:?}",
+                r.tweak_data.map(hex::encode),
+                hex::encode(r.group_public_key_tweak)
+            );
         }
     }
     Ok(())

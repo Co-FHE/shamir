@@ -49,7 +49,6 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SigningSession<VII, C> {
         })
     }
     pub(crate) fn serialize(&self) -> Result<Vec<u8>, SessionError<C>> {
-        self.check_serialize_deserialize()?;
         self.base.serialize()
     }
     pub(crate) fn check_serialize_deserialize(&self) -> Result<(), SessionError<C>> {

@@ -150,7 +150,7 @@ impl PublicKeyPackage for frost_p256::keys::PublicKeyPackage {
     }
 
     fn crypto_type() -> CryptoType {
-        CryptoType::Ed25519
+        CryptoType::P256
     }
 }
 impl KeyPackage for frost_p256::keys::KeyPackage {
@@ -195,7 +195,7 @@ fn tweak<T: AsRef<[u8]>>(
     if let Some(data) = data {
         hasher.update(data.as_ref());
     }
-    let mut output = [0u8; 64];
+    let mut output = [0u8; 32];
     output.copy_from_slice(hasher.finalize().as_slice());
     hash_to_scalar(
         &[b"veritss", b"p256", b"tweak"],

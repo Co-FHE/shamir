@@ -78,8 +78,6 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SignerSubsession<VII, C> {
                 ..
             } => {
                 if let SignerSigningState::Round1 { nonces, .. } = &self.signing_state {
-                    tracing::info!("round2 {:?}", signing_package);
-                    tracing::info!("round2 {:?}", nonces);
                     let signature_share = C::sign_with_tweak(
                         &signing_package,
                         &nonces,

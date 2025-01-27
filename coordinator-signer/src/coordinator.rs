@@ -8,7 +8,7 @@ use crate::types::message::{
     DKGResponseWrap, NodeToCoorRequest, NodeToCoorResponse, SigToCoorRequest, SigToCoorResponse,
     SigningRequestWrap, SigningResponseWrap, ValidatorIdentityRequest,
 };
-use crate::types::{SignatureSuiteInfo, Validator};
+use crate::types::{GroupPublicKeyInfo, SignatureSuiteInfo, Validator};
 use crate::utils::*;
 use command::Command;
 use common::Settings;
@@ -72,6 +72,18 @@ pub struct Coordinator<VI: ValidatorIdentity> {
             ResponseChannel<NodeToCoorResponse<VI::Identity>>,
         )>,
     >,
+    lspk_response_futures_for_node: FuturesUnordered<
+        oneshot::Receiver<(
+            Result<HashMap<CryptoType, Vec<PkId>>, SessionManagerError>,
+            ResponseChannel<NodeToCoorResponse<VI::Identity>>,
+        )>,
+    >,
+    pk_response_futures_for_node: FuturesUnordered<
+        oneshot::Receiver<(
+            Result<GroupPublicKeyInfo, SessionManagerError>,
+            ResponseChannel<NodeToCoorResponse<VI::Identity>>,
+        )>,
+    >,
 }
 impl<VI: ValidatorIdentity> Coordinator<VI> {
     pub fn new(p2p_keypair: libp2p::identity::Keypair) -> anyhow::Result<Self> {
@@ -115,6 +127,7 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
         let (signing_session_sender, signing_session_receiver) =
             tokio::sync::mpsc::unbounded_channel();
         let (instruction_sender, instruction_receiver) = tokio::sync::mpsc::unbounded_channel();
+
         let keystore =
             Arc::new(Keystore::new(p2p_keypair.derive_secret(b"keystore").unwrap(), None).unwrap());
         manager::CoordiantorSessionManager::new(
@@ -137,6 +150,8 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
             instruction_sender,
             dkg_response_futures_for_node: FuturesUnordered::new(),
             signing_response_futures_for_node: FuturesUnordered::new(),
+            lspk_response_futures_for_node: FuturesUnordered::new(),
+            pk_response_futures_for_node: FuturesUnordered::new(),
         })
     }
 
@@ -200,6 +215,34 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                         Err(e) => {
                             if let Err(e) = self.swarm.behaviour_mut().node2coor.send_response(channel, NodeToCoorResponse::Failure(e.to_string())) {
                                 tracing::error!("Error sending signing failure response to node: {:?}", e);
+                            }
+                        }
+                    }
+                }
+                Some(Ok((result, channel))) = self.lspk_response_futures_for_node.next()=> {
+                    match result {
+                        Ok(pkids) => {
+                            if let Err(e) = self.swarm.behaviour_mut().node2coor.send_response(channel, NodeToCoorResponse::LsPkResponse { pkids }) {
+                                tracing::error!("Error sending LsPk response to node: {:?}", e);
+                            }
+                        }
+                        Err(e) => {
+                            if let Err(e) = self.swarm.behaviour_mut().node2coor.send_response(channel, NodeToCoorResponse::Failure(e.to_string())) {
+                                tracing::error!("Error sending LsPk failure response to node: {:?}", e);
+                            }
+                        }
+                    }
+                }
+                Some(Ok((result, channel))) = self.pk_response_futures_for_node.next()=> {
+                    match result {
+                        Ok(group_public_key_info) => {
+                            if let Err(e) = self.swarm.behaviour_mut().node2coor.send_response(channel, NodeToCoorResponse::PkTweakResponse { group_public_key_info }) {
+                                tracing::error!("Error sending PK response to node: {:?}", e);
+                            }
+                        }
+                        Err(e) => {
+                            if let Err(e) = self.swarm.behaviour_mut().node2coor.send_response(channel, NodeToCoorResponse::Failure(e.to_string())) {
+                                tracing::error!("Error sending PK failure response to node: {:?}", e);
                             }
                         }
                     }
@@ -398,14 +441,7 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                 },
             )) => {
                 let request_instruction = request.clone();
-                let request = match request {
-                    NodeToCoorRequest::DKGRequest {
-                        validator_identity, ..
-                    } => validator_identity,
-                    NodeToCoorRequest::SigningRequest {
-                        validator_identity, ..
-                    } => validator_identity,
-                };
+                let request = request.get_validator_identity();
                 if let Err(e) = self
                     .handle_vi_request(peer, request_id, request, false)
                     .await
@@ -506,6 +542,80 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                                     if let Err(e) =
                                         node_response_sender.send((signature_suite_info, channel))
                                     {
+                                        tracing::error!("Error sending response to node: {:?}", e);
+                                    }
+                                }
+                                Err(e) => {
+                                    if let Err(e) = node_response_sender.send((
+                                        Err(SessionManagerError::InstructionResponseError(
+                                            e.to_string(),
+                                        )),
+                                        channel,
+                                    )) {
+                                        tracing::error!(
+                                            "Error sending failure response to node: {:?}",
+                                            e
+                                        );
+                                    }
+                                }
+                            }
+                        });
+                        return Ok(());
+                    }
+                    NodeToCoorRequest::LsPkRequest { .. } => {
+                        let (session_response_sender, session_response_receiver) =
+                            oneshot::channel();
+                        let (node_response_sender, node_response_receiver) = oneshot::channel();
+                        self.lspk_response_futures_for_node
+                            .push(node_response_receiver);
+                        let instruction = Instruction::ListPkIds {
+                            list_pkids_response_oneshot: session_response_sender,
+                        };
+                        self.instruction_sender.send(instruction).unwrap();
+                        tokio::spawn(async move {
+                            let result = session_response_receiver.await;
+                            match result {
+                                Ok(pkids) => {
+                                    if let Err(e) = node_response_sender.send((Ok(pkids), channel))
+                                    {
+                                        tracing::error!("Error sending response to node: {:?}", e);
+                                    }
+                                }
+                                Err(e) => {
+                                    if let Err(e) = node_response_sender.send((
+                                        Err(SessionManagerError::InstructionResponseError(
+                                            e.to_string(),
+                                        )),
+                                        channel,
+                                    )) {
+                                        tracing::error!(
+                                            "Error sending failure response to node: {:?}",
+                                            e
+                                        );
+                                    }
+                                }
+                            }
+                        });
+                    }
+                    NodeToCoorRequest::PkTweakRequest {
+                        pkid, tweak_data, ..
+                    } => {
+                        let (session_response_sender, session_response_receiver) =
+                            oneshot::channel();
+                        let (node_response_sender, node_response_receiver) = oneshot::channel();
+                        self.pk_response_futures_for_node
+                            .push(node_response_receiver);
+                        let instruction = Instruction::PkTweakRequest {
+                            pkid,
+                            tweak_data,
+                            pk_response_oneshot: session_response_sender,
+                        };
+                        self.instruction_sender.send(instruction).unwrap();
+                        tokio::spawn(async move {
+                            let result = session_response_receiver.await;
+                            match result {
+                                Ok(pk_info) => {
+                                    if let Err(e) = node_response_sender.send((pk_info, channel)) {
                                         tracing::error!("Error sending response to node: {:?}", e);
                                     }
                                 }

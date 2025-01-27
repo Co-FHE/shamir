@@ -61,3 +61,12 @@ impl From<CryptoType> for u8 {
         }
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn test_crypto_type() {
+        let a: u8 = CryptoType::P256.into();
+        println!("{:?}", a);
+    }
+}

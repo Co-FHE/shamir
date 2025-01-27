@@ -1,6 +1,7 @@
 use dashmap::DashMap;
 use libp2p::request_response::{OutboundRequestId, ProtocolSupport};
 use libp2p::{request_response, PeerId, StreamProtocol};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -25,7 +26,7 @@ use crate::types::message::{
     NodeBehaviour, NodeBehaviourEvent, NodeToCoorRequest, NodeToCoorResponse,
     ValidatorIdentityRequest,
 };
-use crate::types::{ConnectionState, SignatureSuiteInfo};
+use crate::types::{ConnectionState, GroupPublicKeyInfo, SignatureSuiteInfo};
 use crate::utils::list_hash;
 
 pub(crate) struct NodeSwarm<VI: ValidatorIdentity> {
@@ -41,9 +42,21 @@ pub(crate) struct NodeSwarm<VI: ValidatorIdentity> {
         NodeToCoorRequest<VI::Identity>,
         oneshot::Sender<Result<PkId, String>>,
     )>,
+    lspk_response_mapping:
+        DashMap<OutboundRequestId, oneshot::Sender<Result<HashMap<CryptoType, Vec<PkId>>, String>>>,
+    pk_response_mapping:
+        DashMap<OutboundRequestId, oneshot::Sender<Result<GroupPublicKeyInfo, String>>>,
     signing_request_receiver: tokio::sync::mpsc::UnboundedReceiver<(
         NodeToCoorRequest<VI::Identity>,
         oneshot::Sender<Result<SignatureSuiteInfo<VI::Identity>, String>>,
+    )>,
+    lspk_request_receiver: tokio::sync::mpsc::UnboundedReceiver<(
+        NodeToCoorRequest<VI::Identity>,
+        oneshot::Sender<Result<HashMap<CryptoType, Vec<PkId>>, String>>,
+    )>,
+    pk_request_receiver: tokio::sync::mpsc::UnboundedReceiver<(
+        NodeToCoorRequest<VI::Identity>,
+        oneshot::Sender<Result<GroupPublicKeyInfo, String>>,
     )>,
     connection_state: ConnectionState,
 }
@@ -59,6 +72,14 @@ impl<VI: ValidatorIdentity> NodeSwarm<VI> {
         signing_request_receiver: tokio::sync::mpsc::UnboundedReceiver<(
             NodeToCoorRequest<VI::Identity>,
             oneshot::Sender<Result<SignatureSuiteInfo<VI::Identity>, String>>,
+        )>,
+        lspk_request_receiver: tokio::sync::mpsc::UnboundedReceiver<(
+            NodeToCoorRequest<VI::Identity>,
+            oneshot::Sender<Result<HashMap<CryptoType, Vec<PkId>>, String>>,
+        )>,
+        pk_request_receiver: tokio::sync::mpsc::UnboundedReceiver<(
+            NodeToCoorRequest<VI::Identity>,
+            oneshot::Sender<Result<GroupPublicKeyInfo, String>>,
         )>,
     ) -> Result<Self, anyhow::Error> {
         let mut swarm = libp2p::SwarmBuilder::with_existing_identity(p2p_keypair.clone())
@@ -90,8 +111,12 @@ impl<VI: ValidatorIdentity> NodeSwarm<VI> {
             coordinator_peer_id,
             dkg_response_mapping: DashMap::new(),
             signing_response_mapping: DashMap::new(),
+            lspk_response_mapping: DashMap::new(),
+            pk_response_mapping: DashMap::new(),
             dkg_request_receiver: dkg_request_receiver,
             signing_request_receiver: signing_request_receiver,
+            lspk_request_receiver: lspk_request_receiver,
+            pk_request_receiver: pk_request_receiver,
             connection_state: ConnectionState::Disconnected(None),
         });
     }
@@ -163,6 +188,12 @@ impl<VI: ValidatorIdentity> NodeSwarm<VI> {
                         Some((request, sender)) = self.signing_request_receiver.recv()=>{
                             self.signing_handle_request(request, sender);
                         }
+                        Some((request, sender)) = self.lspk_request_receiver.recv()=>{
+                            self.handle_lspk_request(request, sender);
+                        }
+                        Some((request, sender)) = self.pk_request_receiver.recv()=>{
+                            self.handle_pk_request(request, sender);
+                        }
                     }
                 } else {
                     let event = self.swarm.select_next_some().await;
@@ -202,7 +233,30 @@ impl<VI: ValidatorIdentity> NodeSwarm<VI> {
             .send_request(&self.coordinator_peer_id, request);
         self.signing_response_mapping.insert(request_id, sender);
     }
-
+    pub(crate) fn handle_lspk_request(
+        &mut self,
+        request: NodeToCoorRequest<VI::Identity>,
+        sender: oneshot::Sender<Result<HashMap<CryptoType, Vec<PkId>>, String>>,
+    ) {
+        let request_id = self
+            .swarm
+            .behaviour_mut()
+            .node2coor
+            .send_request(&self.coordinator_peer_id, request);
+        self.lspk_response_mapping.insert(request_id, sender);
+    }
+    pub(crate) fn handle_pk_request(
+        &mut self,
+        request: NodeToCoorRequest<VI::Identity>,
+        sender: oneshot::Sender<Result<GroupPublicKeyInfo, String>>,
+    ) {
+        let request_id = self
+            .swarm
+            .behaviour_mut()
+            .node2coor
+            .send_request(&self.coordinator_peer_id, request);
+        self.pk_response_mapping.insert(request_id, sender);
+    }
     pub(crate) async fn handle_swarm_event(
         &mut self,
         event: SwarmEvent<NodeBehaviourEvent<VI::Identity>>,
@@ -304,6 +358,26 @@ impl<VI: ValidatorIdentity> NodeSwarm<VI> {
                             );
                         }
                     }
+                    NodeToCoorResponse::LsPkResponse { pkids } => {
+                        if let Some((_, response_oneshot)) =
+                            self.lspk_response_mapping.remove(&request_id)
+                        {
+                            if let Err(e) = response_oneshot.send(Ok(pkids)) {
+                                tracing::error!("Failed to send response: {:?}", e);
+                            }
+                        }
+                    }
+                    NodeToCoorResponse::PkTweakResponse {
+                        group_public_key_info,
+                    } => {
+                        if let Some((_, response_oneshot)) =
+                            self.pk_response_mapping.remove(&request_id)
+                        {
+                            if let Err(e) = response_oneshot.send(Ok(group_public_key_info)) {
+                                tracing::error!("Failed to send response: {:?}", e);
+                            }
+                        }
+                    }
                     NodeToCoorResponse::Failure(error) => {
                         if let Some((_, response_oneshot)) =
                             self.dkg_response_mapping.remove(&request_id)
@@ -346,6 +420,14 @@ pub struct Node<VI: ValidatorIdentity> {
         NodeToCoorRequest<VI::Identity>,
         oneshot::Sender<Result<SignatureSuiteInfo<VI::Identity>, String>>,
     )>,
+    lspk_request_sender: UnboundedSender<(
+        NodeToCoorRequest<VI::Identity>,
+        oneshot::Sender<Result<HashMap<CryptoType, Vec<PkId>>, String>>,
+    )>,
+    pk_request_sender: UnboundedSender<(
+        NodeToCoorRequest<VI::Identity>,
+        oneshot::Sender<Result<GroupPublicKeyInfo, String>>,
+    )>,
 }
 
 impl<VI: ValidatorIdentity> Node<VI> {
@@ -372,12 +454,16 @@ impl<VI: ValidatorIdentity> Node<VI> {
         tracing::info!("IPC Listening on {:?}", ipc_path);
         let (dkg_request_sender, dkg_request_receiver) = unbounded_channel();
         let (signing_request_sender, signing_request_receiver) = unbounded_channel();
+        let (lspk_request_sender, lspk_request_receiver) = unbounded_channel();
+        let (pk_request_sender, pk_request_receiver) = unbounded_channel();
         let swarm_node = NodeSwarm::<VI>::new(
             p2p_keypair.clone(),
             coordinator_addr.clone(),
             coordinator_peer_id,
             dkg_request_receiver,
             signing_request_receiver,
+            lspk_request_receiver,
+            pk_request_receiver,
         )
         .await?;
         swarm_node.start_listening().await;
@@ -388,6 +474,8 @@ impl<VI: ValidatorIdentity> Node<VI> {
             coordinator_peer_id: coordinator_peer_id,
             dkg_request_sender: dkg_request_sender,
             signing_request_sender: signing_request_sender,
+            lspk_request_sender: lspk_request_sender,
+            pk_request_sender: pk_request_sender,
         })
     }
 
@@ -432,6 +520,77 @@ impl<VI: ValidatorIdentity> Node<VI> {
         ))?;
         return Ok(receiver);
     }
+    pub async fn key_generate_async(
+        &mut self,
+        crypto_type: CryptoType,
+        participants: Vec<VI::Identity>,
+        min_signers: u16,
+    ) -> Result<PkId, anyhow::Error> {
+        let r = self.key_generate(crypto_type, participants, min_signers)?;
+        let timeout = tokio::time::timeout(
+            Duration::from_secs(Settings::global().node.connection_timeout),
+            r,
+        )
+        .await?;
+        let timeout = timeout.map_err(|e| anyhow::anyhow!("Timeout: {:?}", e))?;
+        return timeout.map_err(|e| anyhow::anyhow!("kdg error: {:?}", e));
+    }
+
+    pub fn lspk(
+        &self,
+    ) -> Result<oneshot::Receiver<Result<HashMap<CryptoType, Vec<PkId>>, String>>, anyhow::Error>
+    {
+        let request = self.generate_validator_identity();
+        let (sender, receiver) = oneshot::channel();
+        self.lspk_request_sender.send((
+            NodeToCoorRequest::LsPkRequest {
+                validator_identity: request,
+            },
+            sender,
+        ))?;
+        return Ok(receiver);
+    }
+    pub async fn lspk_async(&self) -> Result<HashMap<CryptoType, Vec<PkId>>, anyhow::Error> {
+        let r = self.lspk()?;
+        let timeout = tokio::time::timeout(
+            Duration::from_secs(Settings::global().node.connection_timeout),
+            r,
+        )
+        .await?;
+        let timeout = timeout.map_err(|e| anyhow::anyhow!("Timeout: {:?}", e))?;
+        return timeout.map_err(|e| anyhow::anyhow!("lspk error: {:?}", e));
+    }
+    pub fn pk(
+        &self,
+        pkid: PkId,
+        tweak_data: Option<Vec<u8>>,
+    ) -> Result<oneshot::Receiver<Result<GroupPublicKeyInfo, String>>, anyhow::Error> {
+        let request = self.generate_validator_identity();
+        let (sender, receiver) = oneshot::channel();
+        self.pk_request_sender.send((
+            NodeToCoorRequest::PkTweakRequest {
+                pkid,
+                tweak_data,
+                validator_identity: request,
+            },
+            sender,
+        ))?;
+        return Ok(receiver);
+    }
+    pub async fn pk_async(
+        &self,
+        pkid: PkId,
+        tweak_data: Option<Vec<u8>>,
+    ) -> Result<GroupPublicKeyInfo, anyhow::Error> {
+        let r = self.pk(pkid, tweak_data)?;
+        let timeout = tokio::time::timeout(
+            Duration::from_secs(Settings::global().node.connection_timeout),
+            r,
+        )
+        .await?;
+        let timeout = timeout.map_err(|e| anyhow::anyhow!("Timeout: {:?}", e))?;
+        return timeout.map_err(|e| anyhow::anyhow!("pk error: {:?}", e));
+    }
     pub fn sign(
         &mut self,
         pkid: PkId,
@@ -451,6 +610,21 @@ impl<VI: ValidatorIdentity> Node<VI> {
             sender,
         ))?;
         return Ok(receiver);
+    }
+    pub async fn sign_async(
+        &mut self,
+        pkid: PkId,
+        msg: Vec<u8>,
+        tweak_data: Option<Vec<u8>>,
+    ) -> Result<SignatureSuiteInfo<VI::Identity>, anyhow::Error> {
+        let r = self.sign(pkid, msg, tweak_data)?;
+        let timeout = tokio::time::timeout(
+            Duration::from_secs(Settings::global().node.connection_timeout),
+            r,
+        )
+        .await?;
+        let timeout = timeout.map_err(|e| anyhow::anyhow!("sign error: {:?}", e))?;
+        return timeout.map_err(|e| anyhow::anyhow!("sign error: {:?}", e));
     }
     pub fn print_info(&self) -> Result<(), anyhow::Error> {
         tracing::info!(

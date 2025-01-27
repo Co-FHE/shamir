@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use libp2p::{
     identify, ping, rendezvous,
     request_response::{self},
@@ -7,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     crypto::{CryptoType, PkId, ValidatorIdentityIdentity},
-    types::SignatureSuiteInfo,
+    types::{GroupPublicKeyInfo, SignatureSuiteInfo},
 };
 
 use super::{DKGRequestWrap, DKGResponseWrap, SigningRequestWrap, SigningResponseWrap};
@@ -54,6 +56,14 @@ pub(crate) enum SigToCoorRequest {
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum NodeToCoorRequest<VII: ValidatorIdentityIdentity> {
+    LsPkRequest {
+        validator_identity: ValidatorIdentityRequest,
+    },
+    PkTweakRequest {
+        pkid: PkId,
+        tweak_data: Option<Vec<u8>>,
+        validator_identity: ValidatorIdentityRequest,
+    },
     DKGRequest {
         crypto_type: CryptoType,
         participants: Vec<VII>,
@@ -67,6 +77,22 @@ pub(crate) enum NodeToCoorRequest<VII: ValidatorIdentityIdentity> {
         validator_identity: ValidatorIdentityRequest,
     },
 }
+impl<VII: ValidatorIdentityIdentity> NodeToCoorRequest<VII> {
+    pub(crate) fn get_validator_identity(&self) -> ValidatorIdentityRequest {
+        match self {
+            NodeToCoorRequest::LsPkRequest { validator_identity } => validator_identity.clone(),
+            NodeToCoorRequest::PkTweakRequest {
+                validator_identity, ..
+            } => validator_identity.clone(),
+            NodeToCoorRequest::DKGRequest {
+                validator_identity, ..
+            } => validator_identity.clone(),
+            NodeToCoorRequest::SigningRequest {
+                validator_identity, ..
+            } => validator_identity.clone(),
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum NodeToCoorResponse<VII: ValidatorIdentityIdentity> {
@@ -75,6 +101,12 @@ pub(crate) enum NodeToCoorResponse<VII: ValidatorIdentityIdentity> {
     },
     SigningResponse {
         signature_suite_info: SignatureSuiteInfo<VII>,
+    },
+    LsPkResponse {
+        pkids: HashMap<CryptoType, Vec<PkId>>,
+    },
+    PkTweakResponse {
+        group_public_key_info: GroupPublicKeyInfo,
     },
     Failure(String),
 }

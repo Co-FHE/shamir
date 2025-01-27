@@ -54,6 +54,7 @@ impl KeystoreManagement {
         ))
     }
     pub(crate) fn write(&mut self, data: &[u8]) -> Result<(), KeystoreError> {
+        tracing::debug!("write data");
         if self.tmp_path.exists() {
             return Err(KeystoreError::BackupFileExists(
                 self.tmp_path.display().to_string(),
@@ -71,6 +72,7 @@ impl KeystoreManagement {
         if self.tmp_path.exists() {
             std::fs::remove_file(self.tmp_path.clone())?;
         }
+        tracing::debug!("write data complete");
         Ok(())
     }
 }

@@ -39,12 +39,21 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
         let session_id = request.session_id();
         match self.dkg_sessions.get_mut(&session_id) {
             Some(session) => {
+                tracing::debug!(
+                    "dkg_apply_request in {:?} session {:?}",
+                    C::crypto_type(),
+                    session_id
+                );
                 let response = session.update_from_request(request)?;
+                tracing::debug!("1");
                 if let Some(session) = session.is_completed()? {
+                    tracing::debug!("2");
                     self.dkg_sessions.remove(&session_id);
                     self.signing_sessions.insert(session.pkid(), session);
+                    tracing::debug!("3");
                     self.keystore_management
                         .write(self.serialize_sessions()?.as_slice())?;
+                    tracing::debug!("4");
                 }
                 Ok(DKGResponseWrap::from(response)?)
             }
@@ -106,28 +115,53 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
         Ok(signing_sessions)
     }
     fn serialize_sessions(&self) -> Result<Vec<u8>, SessionError<C>> {
+        tracing::debug!("serialize_sessions");
         let sessions = self
             .signing_sessions
             .iter()
-            .map(|(pkid, session)| match session.serialize() {
-                Ok(data) => Ok((pkid.clone(), data)),
-                Err(e) => Err(e),
+            .map(|(pkid, session)| {
+                session.check_serialize_deserialize()?;
+                match session.serialize() {
+                    Ok(data) => Ok((pkid.clone(), data)),
+                    Err(e) => Err(e),
+                }
             })
             .collect::<Result<HashMap<PkId, Vec<u8>>, SessionError<C>>>()?;
+        tracing::debug!("serialize_sessions complete");
         Ok(bincode::serialize(&sessions).unwrap())
     }
     pub(crate) fn listening(mut self) {
         tokio::spawn(async move {
             loop {
                 let request = self.request_receiver.recv().await;
+                tracing::debug!(
+                    "Received request in {:?} session {:?}",
+                    C::crypto_type(),
+                    request
+                );
                 if let Some(request) = request {
                     match request {
                         Request::DKG((request_id, request), response_oneshot) => {
+                            tracing::debug!(
+                                "process DKG response in {:?} session {:?}",
+                                C::crypto_type(),
+                                request_id
+                            );
                             let result = self.dkg_apply_request(request);
+                            tracing::debug!(
+                                "Sent DKG response in {:?} session {:?}",
+                                C::crypto_type(),
+                                result
+                            );
                             response_oneshot.send((request_id, result)).unwrap();
                         }
                         Request::Signing((request_id, request), response_oneshot) => {
                             let result = self.signing_apply_request(request);
+                            tracing::debug!(
+                                "Sent Signing response in {:?} session {:?}",
+                                C::crypto_type(),
+                                result
+                            );
 
                             response_oneshot.send((request_id, result)).unwrap();
                         }

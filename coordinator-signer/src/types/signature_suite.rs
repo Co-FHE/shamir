@@ -66,62 +66,71 @@ impl<VII: ValidatorIdentityIdentity + Serialize + for<'de> Deserialize<'de>> Dis
 }
 impl<VII: ValidatorIdentityIdentity, C: Cipher> SignatureSuite<VII, C> {
     pub(crate) fn to_signature_info(&self) -> Result<SignatureSuiteInfo<VII>, String> {
-        let pk =
-            hex::encode(PublicKeyPackage::serialize_binary(&self.pk).map_err(|e| e.to_string())?);
+        let pk = PublicKeyPackage::serialize_binary(&self.pk).map_err(|e| e.to_string())?;
         let pk_tweak = self.pk.clone().tweak(self.tweak_data.clone());
-        let pk_tweak =
-            hex::encode(PublicKeyPackage::serialize_binary(&pk_tweak).map_err(|e| e.to_string())?);
+        let pk_tweak = PublicKeyPackage::serialize_binary(&pk_tweak).map_err(|e| e.to_string())?;
         Ok(SignatureSuiteInfo {
-            signature: hex::encode(self.signature.to_bytes().map_err(|e| e.to_string())?),
+            signature: self.signature.to_bytes().map_err(|e| e.to_string())?,
             pk: pk,
             pk_tweak: pk_tweak,
-            pk_verifying_key: hex::encode(
-                self.pk
-                    .verifying_key()
-                    .serialize_frost()
-                    .map_err(|e| e.to_string())?,
-            ),
-            pk_verifying_key_tweak: hex::encode(
-                self.pk
-                    .clone()
-                    .tweak(self.tweak_data.clone())
-                    .verifying_key()
-                    .serialize_frost()
-                    .map_err(|e| e.to_string())?,
-            ),
-            tweak_data: self.tweak_data.clone().map(|s| hex::encode(s)),
+            pk_verifying_key: self
+                .pk
+                .verifying_key()
+                .serialize_frost()
+                .map_err(|e| e.to_string())?,
+            pk_verifying_key_tweak: self
+                .pk
+                .clone()
+                .tweak(self.tweak_data.clone())
+                .verifying_key()
+                .serialize_frost()
+                .map_err(|e| e.to_string())?,
+            tweak_data: self.tweak_data.clone(),
             subsession_id: self.subsession_id,
             participants: self
                 .participants
                 .iter()
-                .map(|(k, v)| (k.to_string(), v.clone()))
+                .map(|(k, v)| (k.to_bytes(), v.clone()))
                 .collect(),
             joined_participants: self
                 .joined_participants
                 .iter()
-                .map(|(k, v)| (k.to_string(), v.clone()))
+                .map(|(k, v)| (k.to_bytes(), v.clone()))
                 .collect(),
-            pkid: self.pkid.to_string(),
-            message: String::from_utf8_lossy(&self.message).to_string(),
+            pkid: self.pkid.clone(),
+            message: self.message.clone(),
             crypto_type: C::crypto_type(),
             original_serialized: self.pretty_print(),
         })
     }
 }
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GroupPublicKeyInfo {
+    pub group_public_key_tweak: Vec<u8>,
+    pub tweak_data: Option<Vec<u8>>,
+}
+impl GroupPublicKeyInfo {
+    pub(crate) fn new(group_public_key_tweak: Vec<u8>, tweak_data: Option<Vec<u8>>) -> Self {
+        Self {
+            group_public_key_tweak,
+            tweak_data,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SignatureSuiteInfo<VII: ValidatorIdentityIdentity> {
-    pub(crate) signature: String,
-    pub(crate) pk: String,
-    pub(crate) pk_tweak: String,
-    pub(crate) pk_verifying_key: String,
-    pub(crate) pk_verifying_key_tweak: String,
-    pub(crate) tweak_data: Option<String>,
+    pub(crate) signature: Vec<u8>,
+    pub(crate) pk: Vec<u8>,
+    pub(crate) pk_tweak: Vec<u8>,
+    pub(crate) pk_verifying_key: Vec<u8>,
+    pub(crate) pk_verifying_key_tweak: Vec<u8>,
+    pub(crate) tweak_data: Option<Vec<u8>>,
     pub(crate) subsession_id: SubsessionId,
-    pub(crate) participants: BTreeMap<String, VII>,
-    pub(crate) joined_participants: BTreeMap<String, VII>,
-    pub(crate) pkid: String,
-    pub(crate) message: String,
+    pub(crate) participants: BTreeMap<Vec<u8>, VII>,
+    pub(crate) joined_participants: BTreeMap<Vec<u8>, VII>,
+    pub(crate) pkid: PkId,
+    pub(crate) message: Vec<u8>,
     pub(crate) crypto_type: CryptoType,
     pub(crate) original_serialized: String,
 }
@@ -129,40 +138,109 @@ impl<VII: ValidatorIdentityIdentity + Serialize + for<'de> Deserialize<'de>>
     SignatureSuiteInfo<VII>
 {
     pub fn pretty_print(&self) -> String {
-        serde_json::to_string_pretty(&self).unwrap()
+        let mut pretty_map = serde_json::Map::new();
+        pretty_map.insert(
+            "signature".to_string(),
+            serde_json::Value::String(hex::encode(&self.signature)),
+        );
+        pretty_map.insert(
+            "pk".to_string(),
+            serde_json::Value::String(hex::encode(&self.pk)),
+        );
+        pretty_map.insert(
+            "pk_tweak".to_string(),
+            serde_json::Value::String(hex::encode(&self.pk_tweak)),
+        );
+        pretty_map.insert(
+            "pk_verifying_key".to_string(),
+            serde_json::Value::String(hex::encode(&self.pk_verifying_key)),
+        );
+        pretty_map.insert(
+            "pk_verifying_key_tweak".to_string(),
+            serde_json::Value::String(hex::encode(&self.pk_verifying_key_tweak)),
+        );
+        if let Some(tweak_data) = &self.tweak_data {
+            pretty_map.insert(
+                "tweak_data".to_string(),
+                serde_json::Value::String(hex::encode(tweak_data)),
+            );
+        } else {
+            pretty_map.insert(
+                "tweak_data".to_string(),
+                serde_json::Value::String("None".to_string()),
+            );
+        }
+        pretty_map.insert(
+            "subsession_id".to_string(),
+            serde_json::Value::String(self.subsession_id.to_string()),
+        );
+
+        let mut participants_map = serde_json::Map::new();
+        for (k, v) in &self.participants {
+            participants_map.insert(hex::encode(k), serde_json::Value::String(v.to_fmt_string()));
+        }
+        pretty_map.insert(
+            "participants".to_string(),
+            serde_json::Value::Object(participants_map),
+        );
+
+        let mut joined_participants_map = serde_json::Map::new();
+        for (k, v) in &self.joined_participants {
+            joined_participants_map
+                .insert(hex::encode(k), serde_json::Value::String(v.to_fmt_string()));
+        }
+        pretty_map.insert(
+            "joined_participants".to_string(),
+            serde_json::Value::Object(joined_participants_map),
+        );
+
+        pretty_map.insert(
+            "pkid".to_string(),
+            serde_json::Value::String(self.pkid.to_string()),
+        );
+        pretty_map.insert(
+            "message".to_string(),
+            serde_json::Value::String(hex::encode(&self.message)),
+        );
+        pretty_map.insert(
+            "crypto_type".to_string(),
+            serde_json::Value::String(format!("{:?}", self.crypto_type)),
+        );
+
+        serde_json::to_string_pretty(&serde_json::Value::Object(pretty_map)).unwrap()
+    }
+    pub fn _verify(&self) -> Result<(), String> {
+        match self.crypto_type {
+            CryptoType::P256 => self.verify::<crate::crypto::P256Sha256>(),
+            CryptoType::Ed25519 => self.verify::<crate::crypto::Ed25519Sha512>(),
+            CryptoType::Ed448 => self.verify::<crate::crypto::Ed448Shake256>(),
+            CryptoType::Ristretto255 => self.verify::<crate::crypto::Ristretto255Sha512>(),
+            CryptoType::Secp256k1 => self.verify::<crate::crypto::Secp256K1Sha256>(),
+            CryptoType::Secp256k1Tr => self.verify::<crate::crypto::Secp256K1Sha256TR>(),
+        }
     }
     pub fn verify<C: Cipher>(&self) -> Result<(), String> {
-        let pk = <<C as Cipher>::PublicKeyPackage as PublicKeyPackage>::deserialize_binary(
-            &hex::decode(&self.pk).map_err(|e| e.to_string())?.as_slice(),
-        )
-        .map_err(|e| e.to_string())?;
+        let pk =
+            <<C as Cipher>::PublicKeyPackage as PublicKeyPackage>::deserialize_binary(&self.pk)
+                .map_err(|e| e.to_string())?;
         let pk_tweak = <<C as Cipher>::PublicKeyPackage as PublicKeyPackage>::deserialize_binary(
-            &hex::decode(&self.pk_tweak)
-                .map_err(|e| e.to_string())?
-                .as_slice(),
+            &self.pk_tweak,
         )
         .map_err(|e| e.to_string())?;
-        let signature = C::Signature::from_bytes(
-            hex::decode(&self.signature)
-                .map_err(|e| e.to_string())?
-                .as_slice(),
-        )
-        .map_err(|e| e.to_string())?;
-        let message = self.message.as_bytes();
+        let signature = C::Signature::from_bytes(&self.signature).map_err(|e| e.to_string())?;
+        let message = self.message.clone();
         let tweak_data = match self.tweak_data.clone() {
-            Some(data) => Some(hex::decode(&data).map_err(|e| e.to_string())?),
+            Some(data) => Some(data),
             None => None,
         };
         if pk_tweak.pkid().unwrap() != pk.clone().tweak(tweak_data).pkid().unwrap() {
             return Err(format!("pk_tweak != pk"));
         }
         if self.pk_verifying_key_tweak
-            != hex::encode(
-                pk_tweak
-                    .verifying_key()
-                    .serialize_frost()
-                    .map_err(|e| e.to_string())?,
-            )
+            != pk_tweak
+                .verifying_key()
+                .serialize_frost()
+                .map_err(|e| e.to_string())?
         {
             return Err(format!(
                 "pk_verifying_key_tweak != pk_tweak.verifying_key()"
@@ -170,13 +248,11 @@ impl<VII: ValidatorIdentityIdentity + Serialize + for<'de> Deserialize<'de>>
         }
         let pk_verifying_key_tweak =
             <<C as Cipher>::VerifyingKey as VerifyingKey>::deserialize_frost(
-                &hex::decode(&self.pk_verifying_key_tweak)
-                    .map_err(|e| e.to_string())?
-                    .as_slice(),
+                &self.pk_verifying_key_tweak,
             )
             .map_err(|e| e.to_string())?;
         pk_verifying_key_tweak
-            .verify(message, &signature)
+            .verify(&message, &signature)
             .map_err(|e| e.to_string())
     }
 }

@@ -185,24 +185,32 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                 ConnectionState::Connected => {}
             }
             if self.connection_state == ConnectionState::Connected {
+                println!("Connected");
                 tokio::select! {
                     event = self.swarm.select_next_some()=> {
-                        // tracing::info!("{:?}",event);
+                        tracing::debug!("Received swarm event");
+                        println!("Received swarm event");
                         if let Err(e) = self.handle_swarm_event(event).await {
                             tracing::error!("Error handling behaviour event: {}", e);
                         }
                     },
                     event = listener.accept()=> {
+                        tracing::debug!("Received command");
+                        println!("Received command");
                         if let Err(e) = self.handle_command(event).await {
                             tracing::error!("Error handling command: {}", e);
                         }
                     }
                     Some(Result::Ok(dkg_request)) = self.dkg_response_futures.next() => {
+                        tracing::debug!("Received dkg request");
+                        println!("Received dkg request");
                         if let Err(e) = self.dkg_handle_response(dkg_request).await {
                             tracing::error!("Error handling dkg response: {}", e);
                         }
                     }
                     Some(Result::Ok(signing_request)) = self.signing_response_futures.next() => {
+                        tracing::debug!("Received signing request");
+                        println!("Received signing request");
                         if let Err(e) = self.signing_handle_response(signing_request).await {
                             tracing::error!("Error handling signing response: {}", e);
                         }

@@ -11,7 +11,7 @@ use crate::{
     types::{
         error::SessionError,
         message::{DKGRequestWrap, DKGResponseWrap, SigningRequestWrap, SigningResponseWrap},
-        SignatureSuiteInfo,
+        GroupPublicKeyInfo, SignatureSuiteInfo,
     },
 };
 
@@ -33,6 +33,7 @@ impl<C: Cipher> From<SessionError<C>> for SessionManagerError {
         SessionManagerError::SessionError(e.to_string())
     }
 }
+#[derive(Debug)]
 pub(crate) enum Instruction<VII: ValidatorIdentityIdentity> {
     NewKey {
         crypto_type: CryptoType,
@@ -49,6 +50,11 @@ pub(crate) enum Instruction<VII: ValidatorIdentityIdentity> {
     },
     ListPkIds {
         list_pkids_response_oneshot: oneshot::Sender<HashMap<CryptoType, Vec<PkId>>>,
+    },
+    PkTweakRequest {
+        pkid: PkId,
+        tweak_data: Option<Vec<u8>>,
+        pk_response_oneshot: oneshot::Sender<Result<GroupPublicKeyInfo, SessionManagerError>>,
     },
 }
 macro_rules! new_session_wrap {
@@ -219,6 +225,49 @@ impl<VII: ValidatorIdentityIdentity> CoordiantorSessionManager<VII> {
                             }
                             if let Err(e) = list_pkids_response_oneshot.send(pkids) {
                                 tracing::error!("Error sending pkids response: {:?}", e);
+                            }
+                        }
+                        Instruction::PkTweakRequest {
+                            pkid,
+                            tweak_data,
+                            pk_response_oneshot,
+                        } => {
+                            let crypto_type = pkid.to_crypto_type();
+                            if let Err(e) = crypto_type {
+                                tracing::error!("Error getting crypto type: {:?}", e);
+                                if let Err(e) = pk_response_oneshot
+                                    .send(Err(SessionManagerError::CryptoTypeError(e)))
+                                {
+                                    tracing::error!("Error sending pk response: {:?}", e);
+                                }
+                                continue;
+                            }
+                            let crypto_type = crypto_type.unwrap();
+                            let session_inst_channel = self.session_inst_channels.get(&crypto_type);
+                            match session_inst_channel {
+                                Some(session_inst_channel) => {
+                                    session_inst_channel
+                                        .send(InstructionCipher::PkTweakRequest {
+                                            pkid: pkid.clone(),
+                                            tweak_data,
+                                            pk_response_oneshot,
+                                        })
+                                        .unwrap();
+                                }
+                                None => {
+                                    tracing::error!(
+                                        "Session not found for crypto type: {:?}",
+                                        crypto_type
+                                    );
+                                    if let Err(e) = pk_response_oneshot.send(Err(
+                                        SessionManagerError::SessionError(format!(
+                                            "crypto type not found: {:?}",
+                                            crypto_type
+                                        )),
+                                    )) {
+                                        tracing::error!("Error sending pk response: {:?}", e);
+                                    }
+                                }
                             }
                         }
                     }

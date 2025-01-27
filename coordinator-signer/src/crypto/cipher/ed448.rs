@@ -149,7 +149,7 @@ impl PublicKeyPackage for frost_ed448::keys::PublicKeyPackage {
     }
 
     fn crypto_type() -> CryptoType {
-        CryptoType::Ed25519
+        CryptoType::Ed448
     }
 }
 impl KeyPackage for frost_ed448::keys::KeyPackage {

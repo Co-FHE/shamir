@@ -111,6 +111,7 @@ impl<VII: ValidatorIdentityIdentity> SignerSessionManager<VII> {
         tokio::spawn(async move {
             loop {
                 let request = self.request_receiver.recv().await;
+                tracing::debug!("Received request in manager {:?}", request);
                 if let Some(request) = request {
                     match request {
                         Request::DKG((request_id, dkg_request_wrap), sender) => {

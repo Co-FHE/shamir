@@ -2,14 +2,14 @@ mod dkg;
 mod signing;
 use super::manager::SessionManagerError;
 use super::{Cipher, PkId, PublicKeyPackage, ValidatorIdentityIdentity};
-use crate::crypto::Identifier;
+use crate::crypto::{Identifier, Tweak, VerifyingKey};
 use crate::keystore::KeystoreManagement;
 use crate::types::{
     error::SessionError,
     message::{DKGRequestWrap, DKGResponseWrap, SigningRequestWrap, SigningResponseWrap},
     Participants, SessionId, SignatureSuite,
 };
-use crate::types::{SignatureSuiteInfo, SubsessionId};
+use crate::types::{GroupPublicKeyInfo, SignatureSuiteInfo, SubsessionId};
 use common::Settings;
 use dkg::{CoordinatorDKGSession as DkgSession, DKGInfo};
 use futures::stream::FuturesUnordered;
@@ -21,6 +21,7 @@ use tokio::sync::{
     mpsc::{UnboundedReceiver, UnboundedSender},
     oneshot,
 };
+#[derive(Debug)]
 pub(crate) enum InstructionCipher<VII: ValidatorIdentityIdentity> {
     NewKey {
         participants: Vec<(u16, VII)>,
@@ -36,6 +37,11 @@ pub(crate) enum InstructionCipher<VII: ValidatorIdentityIdentity> {
     },
     ListPkIds {
         list_pkids_response_oneshot: oneshot::Sender<Vec<PkId>>,
+    },
+    PkTweakRequest {
+        pkid: PkId,
+        tweak_data: Option<Vec<u8>>,
+        pk_response_oneshot: oneshot::Sender<Result<GroupPublicKeyInfo, SessionManagerError>>,
     },
 }
 pub(crate) struct SessionWrap<VII: ValidatorIdentityIdentity, C: Cipher> {
@@ -241,6 +247,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
         });
     }
     async fn handle_instruction(&mut self, instruction: InstructionCipher<VII>) {
+        tracing::info!("Received instruction: {:?}", instruction);
         match instruction {
             InstructionCipher::NewKey {
                 participants,
@@ -278,6 +285,33 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
                 let pkids = self.signing_sessions.keys().cloned().collect::<Vec<_>>();
                 if let Err(e) = list_pkids_response_oneshot.send(pkids) {
                     tracing::error!("Error sending pkids response: {:?}", e);
+                }
+            }
+            InstructionCipher::PkTweakRequest {
+                pkid,
+                tweak_data,
+                pk_response_oneshot,
+            } => {
+                let r = self
+                    .signing_sessions
+                    .get(&pkid)
+                    .ok_or(SessionError::<C>::SignerSessionError(
+                        "Signing session not found".to_string(),
+                    ))
+                    .and_then(|session| {
+                        let group_public_key_tweak = session
+                            .public_key_package
+                            .clone()
+                            .tweak(tweak_data.clone())
+                            .verifying_key()
+                            .serialize_frost()
+                            .map_err(|e| SessionError::<C>::CryptoError(e))?;
+                        Ok(GroupPublicKeyInfo::new(group_public_key_tweak, tweak_data))
+                    })
+                    .map_err(|e| SessionManagerError::SessionError(e.to_string()));
+                tracing::info!("Sending pk response: {:?}", r);
+                if let Err(e) = pk_response_oneshot.send(r) {
+                    tracing::error!("Error sending pk response: {:?}", e);
                 }
             }
         }

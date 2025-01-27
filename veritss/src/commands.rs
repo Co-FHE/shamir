@@ -27,6 +27,11 @@ pub enum Commands {
         pkid: String,
         times: usize,
     },
+    Lspk,
+    Pk {
+        pkid: String,
+        tweak: Option<String>,
+    },
     ///
     Sign {
         pkid: String,

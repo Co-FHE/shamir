@@ -146,7 +146,7 @@ impl PublicKeyPackage for frost_ristretto255::keys::PublicKeyPackage {
     }
 
     fn crypto_type() -> CryptoType {
-        CryptoType::Ed25519
+        CryptoType::Ristretto255
     }
 }
 impl KeyPackage for frost_ristretto255::keys::KeyPackage {

@@ -6,10 +6,16 @@ use sha2::{Digest, Sha256};
 
 use super::{CryptoType, PkId};
 mod ed25519;
+mod ed448;
+mod p256;
+mod ristretto255;
 mod secp256k1;
 mod secp256k1_tr;
 
 pub use ed25519::*;
+pub use ed448::*;
+pub use p256::*;
+pub use ristretto255::*;
 pub use secp256k1::*;
 pub use secp256k1_tr::*;
 

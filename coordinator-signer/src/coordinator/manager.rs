@@ -110,7 +110,30 @@ impl<VII: ValidatorIdentityIdentity> CoordiantorSessionManager<VII> {
             session_inst_channels,
             keystore
         );
-
+        new_session_wrap!(
+            Ed448Shake256,
+            Ed448,
+            dkg_session_sender,
+            signing_session_sender,
+            session_inst_channels,
+            keystore
+        );
+        new_session_wrap!(
+            Ristretto255Sha512,
+            Ristretto255,
+            dkg_session_sender,
+            signing_session_sender,
+            session_inst_channels,
+            keystore
+        );
+        new_session_wrap!(
+            P256Sha256,
+            P256,
+            dkg_session_sender,
+            signing_session_sender,
+            session_inst_channels,
+            keystore
+        );
         assert!(session_inst_channels.len() == CryptoType::COUNT);
         Ok(Self {
             session_inst_channels,

@@ -32,6 +32,9 @@ frost-ed25519 = { git = "https://github.com/verisense-network/frost.git", branch
 ] }
 frost-secp256k1 = { git = "https://github.com/verisense-network/frost.git", branch = "main", package = "frost-secp256k1" }
 frost-secp256k1-tr = { git = "https://github.com/verisense-network/frost.git", branch = "main", package = "frost-secp256k1-tr" }
+frost-ed448 = { git = "https://github.com/verisense-network/frost.git", branch = "main", package = "frost-ed448" }
+frost-ristretto255 = { git = "https://github.com/verisense-network/frost.git", branch = "main", package = "frost-ristretto255" }
+frost-p256 = { git = "https://github.com/verisense-network/frost.git", branch = "main", package = "frost-p256" }
 
 clap = { version = "4.5.4", features = ["derive"] }
 tracing = "0.1.39"
@@ -58,8 +61,16 @@ strum = { version = "0.26", features = ["derive"] }
 k256 = "0.13.4"
 crypto-bigint = "0.6"
 curve25519-dalek = "4.1.3"
+p256 = { version = "0.13.0", features = [
+    "hash2curve",
+], default-features = false }
+ed448-goldilocks = { version = "0.9.0" }
+sha3 = { version = "0.10.6", default-features = false }
 dashmap = "6.1.0"
 zeroize = "1.6.0"
 
 file-lock = "2.1"
 bincode = "1.3.3"
+
+sp-core = "35.0.0"
+sp-runtime = "40.0.0"

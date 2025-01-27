@@ -27,6 +27,10 @@ impl ValidatorIdentityKeypair for libp2p::identity::Keypair {
             .unwrap()
             .to_vec()
     }
+    #[cfg(test)]
+    fn random_generate_keypair() -> Self {
+        libp2p::identity::Keypair::generate_ed25519()
+    }
 
     type SignError = libp2p::identity::SigningError;
 }
@@ -61,7 +65,7 @@ impl ValidatorIdentityPublicKey for libp2p::identity::PublicKey {
     fn to_identity(&self) -> libp2p::identity::PeerId {
         self.to_peer_id()
     }
-    fn from_keypair(keypair: libp2p::identity::Keypair) -> Self {
+    fn from_keypair(keypair: &libp2p::identity::Keypair) -> Self {
         keypair.public()
     }
 

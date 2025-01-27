@@ -487,6 +487,7 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                         tweak_data,
                         ..
                     } => {
+                        // tracing::warn!("{}", hex::encode(msg.clone()));
                         let (instruction_sender, instruction_receiver) = oneshot::channel();
                         let (node_response_sender, node_response_receiver) = oneshot::channel();
                         self.signing_response_futures_for_node

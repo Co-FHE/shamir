@@ -99,25 +99,34 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
         commands::Commands::LoopSign { pkid, times } => {
             let pkid = PkId::new(hex::decode(&pkid).unwrap());
-            let message = random_readable_string(100);
             let tweak = random_readable_string(100);
             let keypair = load_keypair(Settings::global().node.keypair_path.as_str());
             let mut node = Node::<P2pIdentity>::new(keypair).await?;
             let mut queue = Vec::new();
             let start = Instant::now();
             for _ in 0..times {
+                let message = random_readable_string(100);
                 let resp = node
                     .sign(
                         pkid.clone(),
-                        message.as_bytes().to_vec(),
+                        message.clone().as_bytes().to_vec(),
                         Some(tweak.as_bytes().to_vec()),
                     )
                     .unwrap();
-                queue.push(resp);
+                queue.push((resp, message));
                 time::sleep(Duration::from_millis(1)).await;
             }
-            for resp in queue {
-                let _ = resp.await.unwrap().unwrap();
+            let mut count = 0;
+            for (resp, message) in queue {
+                tokio::select! {
+                    _ = resp => {
+                        count += 1;
+                        println!("count: {}", count);
+                    }
+                    _ = time::sleep(Duration::from_millis(1000)) => {
+                        println!("timeout, message: {}", message);
+                    }
+                };
             }
             let end = Instant::now();
             println!("time: {:?}", end - start);

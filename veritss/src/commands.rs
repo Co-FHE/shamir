@@ -43,12 +43,7 @@ pub enum Commands {
 
 fn parse_crypto_type(s: &str) -> Result<CryptoType, String> {
     let value = s.parse::<u8>().map_err(|e| e.to_string())?;
-    match value {
-        0 => Ok(CryptoType::Ed25519),
-        1 => Ok(CryptoType::Secp256k1),
-        2 => Ok(CryptoType::Secp256k1Tr),
-        _ => Err("crypto_type must be 0 (Ed25519), 1 (Secp256k1), or 2 (Secp256k1Tr)".to_string()),
-    }
+    CryptoType::try_from(value).map_err(|e| e.to_string())
 }
 
 pub fn parse_args() -> Commands {

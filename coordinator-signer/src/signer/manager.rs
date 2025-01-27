@@ -85,8 +85,21 @@ impl<VII: ValidatorIdentityIdentity> SignerSessionManager<VII> {
             session_inst_channels,
             Secp256K1Sha256TR,
             Secp256k1Tr,
-            keystore
+            keystore.clone()
         );
+        new_session_wrap!(
+            session_inst_channels,
+            Ed448Shake256,
+            Ed448,
+            keystore.clone()
+        );
+        new_session_wrap!(
+            session_inst_channels,
+            Ristretto255Sha512,
+            Ristretto255,
+            keystore.clone()
+        );
+        new_session_wrap!(session_inst_channels, P256Sha256, P256, keystore);
         assert!(session_inst_channels.len() == CryptoType::COUNT);
 
         Ok(Self {

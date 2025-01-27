@@ -1,9 +1,9 @@
-use crate::crypto::Tweak;
 use crate::crypto::{
     Cipher, Ed25519Sha512, PkId, PublicKeyPackage, Secp256K1Sha256, Secp256K1Sha256TR, Signature,
     VerifyingKey,
 };
 use crate::crypto::{CryptoType, Identifier};
+use crate::crypto::{Ed448Shake256, P256Sha256, Ristretto255Sha512, Tweak};
 use serde::{Deserialize, Serialize};
 use serde_json;
 use std::{
@@ -197,6 +197,11 @@ impl<VII: ValidatorIdentityIdentity + Serialize + for<'de> Deserialize<'de>>
             CryptoType::Secp256k1 => self.verify::<Secp256K1Sha256>().map_err(|e| e.to_string()),
             CryptoType::Secp256k1Tr => self
                 .verify::<Secp256K1Sha256TR>()
+                .map_err(|e| e.to_string()),
+            CryptoType::P256 => self.verify::<P256Sha256>().map_err(|e| e.to_string()),
+            CryptoType::Ed448 => self.verify::<Ed448Shake256>().map_err(|e| e.to_string()),
+            CryptoType::Ristretto255 => self
+                .verify::<Ristretto255Sha512>()
                 .map_err(|e| e.to_string()),
         }
     }

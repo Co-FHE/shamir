@@ -1,8 +1,12 @@
 use ed25519_dalek::{Signature, SignatureError, SigningKey, VerifyingKey};
+#[cfg(test)]
+use rand_core::OsRng;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::error::Error as StdError;
 use std::fmt;
+
+use crate::utils;
 
 use super::{
     ValidatorIdentity, ValidatorIdentityIdentity, ValidatorIdentityKeypair,
@@ -39,6 +43,14 @@ impl ValidatorIdentityKeypair for SigningKey {
             .to_bytes()
             .to_vec(),
         )
+    }
+
+    fn derive_key(&self, salt: &[u8]) -> Vec<u8> {
+        utils::list_hash(&[self.to_bytes().as_slice(), salt])
+    }
+    #[cfg(test)]
+    fn random_generate_keypair() -> Self {
+        SigningKey::generate(&mut OsRng)
     }
 }
 
@@ -122,7 +134,7 @@ impl ValidatorIdentityPublicKey for VerifyingKey {
         Ed25519Id(hasher.finalize().into())
     }
 
-    fn from_keypair(keypair: SigningKey) -> Self {
+    fn from_keypair(keypair: &SigningKey) -> Self {
         keypair.verifying_key()
     }
 

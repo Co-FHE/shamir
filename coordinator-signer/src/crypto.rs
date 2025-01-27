@@ -15,12 +15,18 @@ pub use validator_identity::*;
     Debug, Clone, Copy, Serialize, Deserialize, PartialEq, EnumString, Display, EnumCount, Eq, Hash,
 )]
 pub enum CryptoType {
+    #[strum(serialize = "p256")]
+    P256,
     #[strum(serialize = "ed25519")]
     Ed25519,
     #[strum(serialize = "secp256k1")]
     Secp256k1,
     #[strum(serialize = "secp256k1-tr")]
     Secp256k1Tr,
+    #[strum(serialize = "ed448")]
+    Ed448,
+    #[strum(serialize = "ristretto255")]
+    Ristretto255,
 }
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum CryptoTypeError {
@@ -33,9 +39,12 @@ impl TryFrom<u8> for CryptoType {
     type Error = CryptoTypeError;
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
-            0 => Ok(Self::Ed25519),
-            1 => Ok(Self::Secp256k1),
-            2 => Ok(Self::Secp256k1Tr),
+            0 => Ok(Self::P256),
+            1 => Ok(Self::Ed25519),
+            2 => Ok(Self::Secp256k1),
+            3 => Ok(Self::Secp256k1Tr),
+            4 => Ok(Self::Ed448),
+            5 => Ok(Self::Ristretto255),
             _ => Err(CryptoTypeError::InvalidCryptoType(value)),
         }
     }
@@ -43,9 +52,12 @@ impl TryFrom<u8> for CryptoType {
 impl From<CryptoType> for u8 {
     fn from(value: CryptoType) -> Self {
         match value {
-            CryptoType::Ed25519 => 0,
-            CryptoType::Secp256k1 => 1,
-            CryptoType::Secp256k1Tr => 2,
+            CryptoType::P256 => 0,
+            CryptoType::Ed25519 => 1,
+            CryptoType::Secp256k1 => 2,
+            CryptoType::Secp256k1Tr => 3,
+            CryptoType::Ed448 => 4,
+            CryptoType::Ristretto255 => 5,
         }
     }
 }

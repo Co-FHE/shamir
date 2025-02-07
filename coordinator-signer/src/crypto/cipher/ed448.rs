@@ -188,7 +188,7 @@ fn tweak<T: AsRef<[u8]>>(
     match data {
         Some(data) => {
             let output = hash_to_array(&[
-                b"veritss",
+                b"tss",
                 b"ed448",
                 b"tweak",
                 public_key.compress().0.as_slice(),
@@ -198,7 +198,7 @@ fn tweak<T: AsRef<[u8]>>(
         }
         None => {
             let output = hash_to_array(&[
-                b"veritss",
+                b"tss",
                 b"ed448",
                 b"tweak",
                 public_key.compress().0.as_slice(),

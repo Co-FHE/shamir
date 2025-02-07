@@ -179,7 +179,7 @@ fn tweak<T: AsRef<[u8]>>(
     public_key: &RistrettoPoint,
     data: Option<T>,
 ) -> frost_core::Scalar<frost_ristretto255::Ristretto255Sha512> {
-    let mut hasher = tagged_hash("veritss/ristretto255/tweak");
+    let mut hasher = tagged_hash("tss/ristretto255/tweak");
     hasher.update(public_key.compress().to_bytes());
     if let Some(data) = data {
         hasher.update(data.as_ref());

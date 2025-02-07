@@ -5660,6 +5660,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
+name = "tss"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "common",
+ "coordinator-signer",
+ "futures",
+ "hex",
+ "libp2p",
+ "rand",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "tss_sdk"
+version = "0.1.0"
+dependencies = [
+ "common",
+ "coordinator-signer",
+ "tracing",
+]
+
+[[package]]
 name = "tuplex"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5818,30 +5842,6 @@ name = "valuable"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "830b7e5d4d90034032940e4ace0d9a9a057e7a45cd94e6c007832e39edb82f6d"
-
-[[package]]
-name = "veritss"
-version = "0.1.0"
-dependencies = [
- "clap",
- "common",
- "coordinator-signer",
- "futures",
- "hex",
- "libp2p",
- "rand",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "veritss_sdk"
-version = "0.1.0"
-dependencies = [
- "common",
- "coordinator-signer",
- "tracing",
-]
 
 [[package]]
 name = "version_check"

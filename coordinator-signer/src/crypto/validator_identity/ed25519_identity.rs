@@ -202,7 +202,7 @@ mod tests {
         // Test invalid signature
         let mut bad_sig = signature.clone();
         bad_sig[0] ^= 1;
-        assert!(verifying_key.verify(message, bad_sig,));
+        assert!(!verifying_key.verify(message, bad_sig,));
     }
 
     #[test]
@@ -212,5 +212,56 @@ mod tests {
 
         let id = verifying_key.to_identity();
         assert_eq!(id.0.len(), 32);
+    }
+
+    #[test]
+    fn test_signing_key() {
+        let signing_key = SigningKey::generate(&mut OsRng);
+
+        // Test to_public_key
+        let public_key = signing_key.to_public_key();
+        assert_eq!(
+            public_key.as_bytes(),
+            signing_key.verifying_key().as_bytes()
+        );
+
+        // Test sign
+        let message = b"test message";
+        let signature = signing_key.sign(message).unwrap();
+        assert_eq!(signature.len(), 64);
+
+        // Test derive_key
+        let salt = b"test salt";
+        let derived_key = signing_key.derive_key(salt);
+        assert!(!derived_key.is_empty());
+
+        // Test random_generate_keypair
+        #[cfg(test)]
+        let random_key = SigningKey::random_generate_keypair();
+        #[cfg(test)]
+        assert_ne!(random_key.to_bytes(), signing_key.to_bytes());
+    }
+
+    #[test]
+    fn test_identity_decode_error() {
+        // Test InvalidLength error
+        let bytes = vec![0u8; 16];
+        let result = Ed25519Id::from_bytes(bytes);
+        assert!(matches!(result, Err(IdentityDecodeError::InvalidLength)));
+
+        // Test HexError
+        let invalid_hex = "invalid hex string";
+        let result = Ed25519Id::from_fmt_str(invalid_hex);
+        assert!(matches!(result, Err(IdentityDecodeError::HexError(_))));
+
+        // Test error formatting
+        let invalid_length_error = IdentityDecodeError::InvalidLength;
+        assert_eq!(invalid_length_error.to_string(), "Invalid identity length");
+
+        let hex_error = IdentityDecodeError::HexError(hex::FromHexError::InvalidHexCharacter {
+            c: 'g',
+            index: 0,
+        });
+        assert!(hex_error.to_string().contains("Hex decode error"));
     }
 }

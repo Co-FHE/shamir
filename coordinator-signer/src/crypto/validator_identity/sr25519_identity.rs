@@ -143,3 +143,104 @@ impl ValidatorIdentityPublicKey for Public {
         }
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sp_core::sr25519::{Pair, Public};
+    use sp_core::Pair as CryptoPair;
+
+    #[test]
+    fn test_account_id32() {
+        let id = AccountId32::from([1u8; 32]);
+        let bytes = id.to_bytes();
+        assert_eq!(bytes.len(), 32);
+        let decoded = AccountId32::from_bytes(bytes).unwrap();
+        assert_eq!(id, decoded);
+
+        let str_repr = id.to_fmt_string();
+        let decoded = AccountId32::from_fmt_str(&str_repr).unwrap();
+        assert_eq!(id, decoded);
+    }
+
+    #[test]
+    fn test_public_key() {
+        let (pair, _) = Pair::generate();
+        let public = pair.public();
+
+        // Test to/from bytes
+        let bytes = public.to_bytes();
+        let decoded = Public::from_bytes(&bytes).unwrap();
+        assert_eq!(public, decoded);
+
+        // Test verify
+        let message = b"test message";
+        let signature = <Pair as CryptoPair>::sign(&pair, message.as_ref()).to_raw_vec();
+        assert!(<Public as ValidatorIdentityPublicKey>::verify(
+            &public,
+            message,
+            signature.clone()
+        ));
+
+        // Test invalid signature
+        let mut bad_sig = signature.to_vec();
+        bad_sig[0] ^= 1;
+        assert!(!public.verify(message, bad_sig));
+    }
+
+    #[test]
+    fn test_identity_from_public_key() {
+        let (pair, _) = Pair::generate();
+        let public = pair.public();
+
+        let id = public.to_identity();
+        assert_eq!(id.to_bytes().len(), 32);
+    }
+
+    #[test]
+    fn test_signing_key() {
+        let (pair, _) = Pair::generate();
+
+        // Test to_public_key
+        let public_key = pair.to_public_key();
+        assert_eq!(public_key, pair.public());
+
+        // Test sign
+        let message = b"test message";
+        let signature = <Pair as CryptoPair>::sign(&pair, message.as_ref()).to_raw_vec();
+        assert_eq!(signature.len(), 64);
+
+        // Test derive_key
+        let salt = b"test salt";
+        let derived_key = pair.derive_key(salt);
+        assert!(!derived_key.is_empty());
+
+        // Test random_generate_keypair
+        #[cfg(test)]
+        let random_key = Pair::random_generate_keypair();
+        #[cfg(test)]
+        assert_ne!(random_key.public(), pair.public());
+    }
+
+    #[test]
+    fn test_identity_decode_error() {
+        // Test InvalidLength error
+        let bytes = vec![0u8; 16];
+        let result = AccountId32::from_bytes(bytes);
+        assert!(matches!(result, Err(IdentityDecodeError::InvalidLength)));
+
+        // Test HexError
+        let invalid_hex = "invalid hex string";
+        let result = AccountId32::from_fmt_str(invalid_hex);
+        assert!(matches!(
+            result,
+            Err(IdentityDecodeError::InvalidAccountId32(_))
+        ));
+
+        // Test error formatting
+        let invalid_length_error = IdentityDecodeError::InvalidLength;
+        assert_eq!(invalid_length_error.to_string(), "Invalid identity length");
+
+        let hex_error = IdentityDecodeError::InvalidAccountId32(invalid_hex.to_string());
+        assert!(hex_error.to_string().contains("Invalid account id32"));
+    }
+}

@@ -30,7 +30,7 @@ impl Keystore {
         let salt = hkdf::Salt::new(hkdf::HKDF_SHA256, &salt_output);
         let prk = salt.extract(key.as_ref());
         let mut derived_key = [0u8; 32];
-        let info = b"veritss keystore";
+        let info = b"tss keystore";
         let binding = [info.as_ref()];
         let okm = prk
             .expand(&binding, HKDF_SHA256)
@@ -61,7 +61,7 @@ impl Keystore {
         let nonce = aead::Nonce::assume_unique_for_key(nonce_bytes);
         let mut in_out = plaintext.as_ref().to_vec();
         less_safe_key
-            .seal_in_place_append_tag(nonce, Aad::from(b"veritss keystore"), &mut in_out)
+            .seal_in_place_append_tag(nonce, Aad::from(b"tss keystore"), &mut in_out)
             .map_err(|e| KeystoreError::KeyError(format!("Failed to encrypt: {}", e)))?;
         let mut result = Vec::with_capacity(16 + 12 + in_out.len());
         result.extend_from_slice(&self.salt);
@@ -85,7 +85,7 @@ impl Keystore {
             .map_err(|e| KeystoreError::KeyError(format!("Failed to create unbound key: {}", e)))?;
         let less_safe_key = LessSafeKey::new(unbound_key);
         less_safe_key
-            .open_in_place(nonce, Aad::from(b"veritss keystore"), &mut in_out)
+            .open_in_place(nonce, Aad::from(b"tss keystore"), &mut in_out)
             .map_err(|e| KeystoreError::KeyError(format!("Failed to decrypt: {}", e)))?;
         if in_out.len() < 16 {
             return Err(KeystoreError::KeyError("Failed to decrypt".to_string()));

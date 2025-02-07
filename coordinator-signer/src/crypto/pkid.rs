@@ -30,7 +30,7 @@ impl PkId {
     pub fn to_bytes(&self) -> Vec<u8> {
         self.0.clone()
     }
-    pub fn to_crypto_type(&self) -> Result<CryptoType, CryptoTypeError> {
+    pub fn crypto_type(&self) -> Result<CryptoType, CryptoTypeError> {
         if self.0.len() == 0 {
             return Err(CryptoTypeError::PkIdLengthIs0);
         }

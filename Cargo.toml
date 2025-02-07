@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["common", "coordinator-signer", "veritss", "veritss_sdk"]
+members = ["common", "coordinator-signer", "tss", "tss_sdk"]
 
 [profile.test.package."*"]
 opt-level = 3

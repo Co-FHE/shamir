@@ -190,7 +190,7 @@ fn tweak<T: AsRef<[u8]>>(
     public_key: &p256::ProjectivePoint,
     data: Option<T>,
 ) -> frost_core::Scalar<frost_p256::P256Sha256> {
-    let mut hasher = tagged_hash("veritss/p256/tweak");
+    let mut hasher = tagged_hash("tss/p256/tweak");
     hasher.update(public_key.to_affine().x());
     if let Some(data) = data {
         hasher.update(data.as_ref());
@@ -198,7 +198,7 @@ fn tweak<T: AsRef<[u8]>>(
     let mut output = [0u8; 32];
     output.copy_from_slice(hasher.finalize().as_slice());
     hash_to_scalar(
-        &[b"veritss", b"p256", b"tweak"],
+        &[b"tss", b"p256", b"tweak"],
         &public_key.to_affine().x().as_slice(),
     )
 }

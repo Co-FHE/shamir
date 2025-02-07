@@ -174,7 +174,7 @@ impl<VII: ValidatorIdentityIdentity> CoordiantorSessionManager<VII> {
                             tweak_data,
                             signature_response_oneshot,
                         } => {
-                            let crypto_type = pkid.to_crypto_type();
+                            let crypto_type = pkid.crypto_type();
                             if let Err(e) = crypto_type {
                                 tracing::error!("Error getting crypto type: {:?}", e);
                                 signature_response_oneshot
@@ -232,7 +232,7 @@ impl<VII: ValidatorIdentityIdentity> CoordiantorSessionManager<VII> {
                             tweak_data,
                             pk_response_oneshot,
                         } => {
-                            let crypto_type = pkid.to_crypto_type();
+                            let crypto_type = pkid.crypto_type();
                             if let Err(e) = crypto_type {
                                 tracing::error!("Error getting crypto type: {:?}", e);
                                 if let Err(e) = pk_response_oneshot

@@ -192,7 +192,7 @@ fn tweak<T: AsRef<[u8]>>(
     public_key: &<<frost_secp256k1::Secp256K1Sha256 as frost_core::Ciphersuite>::Group as frost_core::Group>::Element,
     data: Option<T>,
 ) -> frost_core::Scalar<frost_secp256k1::Secp256K1Sha256> {
-    let mut hasher = tagged_hash("veritss/secp256k1/tweak");
+    let mut hasher = tagged_hash("tss/secp256k1/tweak");
     hasher.update(public_key.to_affine().x());
     if let Some(data) = data {
         hasher.update(data.as_ref());

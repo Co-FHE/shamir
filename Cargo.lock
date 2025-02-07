@@ -5675,7 +5675,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "tss_sdk"
+name = "tss-sdk"
 version = "0.1.0"
 dependencies = [
  "common",

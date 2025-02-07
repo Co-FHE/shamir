@@ -34,7 +34,6 @@ where
     // use for keystore, must be sure if salt is same, the derived key is same. else, it will be different.
     fn derive_key(&self, salt: &[u8]) -> Vec<u8>;
     fn sign<T: AsRef<[u8]>>(&self, message: T) -> Result<Vec<u8>, Self::SignError>;
-    #[cfg(test)]
     fn random_generate_keypair() -> Self;
 }
 pub trait ValidatorIdentityIdentity

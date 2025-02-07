@@ -10,6 +10,7 @@ use crate::types::message::{
 };
 use crate::types::{GroupPublicKeyInfo, SignatureSuiteInfo, Validator};
 use crate::utils::*;
+use anyhow::anyhow;
 use command::Command;
 use common::Settings;
 use futures::stream::FuturesUnordered;
@@ -27,7 +28,7 @@ use libp2p::{ping, rendezvous, request_response, PeerId, StreamProtocol};
 use manager::Instruction;
 pub(crate) use manager::SessionManagerError;
 use session::SessionWrap;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -41,6 +42,7 @@ use tokio::sync::oneshot;
 use tokio::time::Instant;
 pub struct Coordinator<VI: ValidatorIdentity> {
     p2p_keypair: libp2p::identity::Keypair,
+    signer_whitelist: Option<HashSet<VI::Identity>>,
     swarm: libp2p::Swarm<CoorBehaviour<VI::Identity>>,
     ipc_path: PathBuf,
     valid_validators: HashMap<VI::Identity, Validator<VI>>,
@@ -86,7 +88,11 @@ pub struct Coordinator<VI: ValidatorIdentity> {
     >,
 }
 impl<VI: ValidatorIdentity> Coordinator<VI> {
-    pub fn new(p2p_keypair: libp2p::identity::Keypair) -> anyhow::Result<Self> {
+    pub fn new(
+        p2p_keypair: libp2p::identity::Keypair,
+        base_path: PathBuf,
+        signer_whitelist: Option<HashSet<VI::Identity>>,
+    ) -> anyhow::Result<Self> {
         let swarm = libp2p::SwarmBuilder::with_existing_identity(p2p_keypair.clone())
             .with_tokio()
             .with_tcp(
@@ -135,12 +141,14 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
             dkg_session_sender,
             signing_session_sender,
             keystore,
+            &base_path,
         )?
         .listening();
         Ok(Self {
             p2p_keypair,
+            signer_whitelist,
             swarm,
-            ipc_path: Settings::global().coordinator.ipc_socket_path.into(),
+            ipc_path: base_path.join(Settings::global().coordinator.ipc_socket_path),
             valid_validators: HashMap::new(),
             p2ppeerid_2_endpoint: HashMap::new(),
             dkg_request_mapping: HashMap::new(),
@@ -703,20 +711,17 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
         let public_key = VI::PublicKey::from_bytes(public_key)
             .map_err(|e| format!("Invalid public key: {}", e))?;
         let validator_peer = public_key.to_identity();
-        if !Settings::global()
-            .coordinator
-            .peer_id_whitelist
-            .contains(&validator_peer.to_fmt_string())
-            && verify_whitelist
-        {
-            tracing::warn!(
-                "Validator peerid {} is not in whitelist",
-                validator_peer.to_fmt_string()
-            );
-            return Err(format!(
-                "Validator peerid {} is not in whitelist",
-                validator_peer.to_fmt_string()
-            ));
+        if let Some(whitelist) = &self.signer_whitelist {
+            if !whitelist.contains(&validator_peer) && verify_whitelist {
+                tracing::warn!(
+                    "Validator peerid {} is not in whitelist",
+                    validator_peer.to_fmt_string()
+                );
+                return Err(format!(
+                    "Validator peerid {} is not in whitelist",
+                    validator_peer.to_fmt_string()
+                ));
+            }
         }
         let hash = list_hash(&[
             "register".as_bytes(),
@@ -1008,6 +1013,12 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
         // Remove existing IPC socket file if it exists
         if self.ipc_path.exists() {
             std::fs::remove_file(&self.ipc_path)?;
+        } else {
+            std::fs::create_dir_all(
+                self.ipc_path
+                    .parent()
+                    .ok_or(anyhow!("Failed to get parent dir"))?,
+            )?;
         }
 
         let listener = UnixListener::bind(&self.ipc_path)?;

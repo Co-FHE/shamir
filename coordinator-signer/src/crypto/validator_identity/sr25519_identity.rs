@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use sp_core::crypto::AccountId32;
 use sp_core::crypto::Pair as CryptoPair;
 use sp_core::sr25519::{Pair, Public, Signature};
 use sp_core::{ByteArray, DeriveJunction};
-use sp_runtime::AccountId32;
 use std::error::Error as StdError;
 use std::fmt;
 use std::str::FromStr;
@@ -53,7 +53,6 @@ impl ValidatorIdentityKeypair for Pair {
             .unwrap();
         return utils::list_hash(&[p.public().to_bytes(), sha256.to_vec()]);
     }
-    #[cfg(test)]
     fn random_generate_keypair() -> Self {
         Pair::generate().0
     }

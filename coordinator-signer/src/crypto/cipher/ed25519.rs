@@ -180,7 +180,7 @@ fn tweak<T: AsRef<[u8]>>(
     public_key: &EdwardsPoint,
     data: Option<T>,
 ) -> frost_core::Scalar<frost_ed25519::Ed25519Sha512> {
-    let mut hasher = tagged_hash("veritss/ed25519/tweak");
+    let mut hasher = tagged_hash("tss/ed25519/tweak");
     hasher.update(public_key.compress().to_bytes());
     if let Some(data) = data {
         hasher.update(data.as_ref());

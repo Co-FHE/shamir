@@ -7,6 +7,7 @@ use libp2p::{ping, rendezvous, request_response, PeerId, StreamProtocol};
 use manager::{Request, SessionManagerError};
 use session::SessionWrap;
 use std::collections::HashMap;
+use std::net::IpAddr;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -67,7 +68,13 @@ pub struct Signer<VI: ValidatorIdentity> {
 }
 
 impl<VI: ValidatorIdentity> Signer<VI> {
-    pub fn new(validator_keypair: VI::Keypair) -> Result<Self, anyhow::Error> {
+    pub fn new(
+        validator_keypair: VI::Keypair,
+        base_path: PathBuf,
+        coordinator_ip_addr: IpAddr,
+        coordinator_port: u16,
+        coordinator_peer_id: String,
+    ) -> Result<Self, anyhow::Error> {
         let keypair = libp2p::identity::Keypair::generate_ed25519();
         let mut swarm = libp2p::SwarmBuilder::with_existing_identity(keypair.clone())
             .with_tokio()
@@ -101,13 +108,10 @@ impl<VI: ValidatorIdentity> Signer<VI> {
             .build();
         let coordinator_addr: Multiaddr = format!(
             "/ip4/{}/tcp/{}/p2p/{}",
-            Settings::global().coordinator.remote_addr,
-            Settings::global().coordinator.port,
-            Settings::global().coordinator.peer_id
+            coordinator_ip_addr, coordinator_port, coordinator_peer_id
         )
         .parse()?;
-        let coordinator_peer_id =
-            <PeerId as FromStr>::from_str(&Settings::global().coordinator.peer_id).unwrap();
+        let coordinator_peer_id = <PeerId as FromStr>::from_str(&coordinator_peer_id)?;
         swarm.add_peer_address(coordinator_peer_id, coordinator_addr.clone());
         let (request_sender, request_receiver) = tokio::sync::mpsc::unbounded_channel();
         manager::SignerSessionManager::new(
@@ -116,6 +120,7 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                 validator_keypair.derive_key(b"keystore"),
                 None,
             )?),
+            &base_path,
         )?
         .listening();
         Ok(Self {
@@ -123,13 +128,15 @@ impl<VI: ValidatorIdentity> Signer<VI> {
             p2p_keypair: keypair,
             swarm,
             coordinator_addr,
-            ipc_path: PathBuf::from(Settings::global().signer.ipc_socket_path).join(format!(
-                "signer_{}.sock",
-                validator_keypair
-                    .to_public_key()
-                    .to_identity()
-                    .to_fmt_string()
-            )),
+            ipc_path: base_path
+                .join(Settings::global().signer.ipc_socket_path)
+                .join(format!(
+                    "signer_{}.sock",
+                    validator_keypair
+                        .to_public_key()
+                        .to_identity()
+                        .to_fmt_string()
+                )),
             coordinator_peer_id: <PeerId as FromStr>::from_str(
                 &Settings::global().coordinator.peer_id,
             )

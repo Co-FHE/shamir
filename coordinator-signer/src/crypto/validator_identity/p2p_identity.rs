@@ -27,7 +27,6 @@ impl ValidatorIdentityKeypair for libp2p::identity::Keypair {
             .unwrap()
             .to_vec()
     }
-    #[cfg(test)]
     fn random_generate_keypair() -> Self {
         libp2p::identity::Keypair::generate_ed25519()
     }

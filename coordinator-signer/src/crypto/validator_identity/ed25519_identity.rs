@@ -48,9 +48,8 @@ impl ValidatorIdentityKeypair for SigningKey {
     fn derive_key(&self, salt: &[u8]) -> Vec<u8> {
         utils::list_hash(&[self.to_bytes().as_slice(), salt])
     }
-    #[cfg(test)]
     fn random_generate_keypair() -> Self {
-        SigningKey::generate(&mut OsRng)
+        SigningKey::generate(&mut rand_core::OsRng)
     }
 }
 
@@ -169,7 +168,6 @@ impl ValidatorIdentityPublicKey for VerifyingKey {
 mod tests {
     use super::*;
     use ed25519_dalek::SigningKey;
-    use rand_core::OsRng;
 
     #[test]
     fn test_ed25519_id() {

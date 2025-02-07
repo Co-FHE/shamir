@@ -1,6 +1,6 @@
 mod dkg;
 mod signing;
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use common::Settings;
 use dkg::DKGSession;
@@ -84,10 +84,10 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
     pub(crate) fn new(
         request_receiver: UnboundedReceiver<Request<VII>>,
         keystore: Arc<crate::keystore::Keystore>,
+        base_path: &PathBuf,
     ) -> Result<Self, SessionError<C>> {
-        let path = Settings::global()
-            .signer
-            .keystore_path
+        let path = base_path
+            .join(Settings::global().signer.keystore_path)
             .join(C::crypto_type().to_string());
         let (keystore_management, data) =
             crate::keystore::KeystoreManagement::new(keystore, path).unwrap();

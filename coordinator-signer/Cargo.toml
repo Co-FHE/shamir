@@ -72,5 +72,4 @@ zeroize = "1.6.0"
 file-lock = "2.1"
 bincode = "1.3.3"
 
-sp-core = "35.0.0"
-sp-runtime = "40.0.0"
+sp-core = "34.0.0"

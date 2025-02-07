@@ -1,5 +1,5 @@
 // Configuration settings for the application
-use config::{Config, Environment, File};
+use config::{Config, Environment, File, FileFormat};
 use lazy_static::lazy_static;
 use serde::Deserialize;
 use std::{
@@ -89,10 +89,11 @@ impl Settings {
 
         let mut settings = SETTINGS.write().unwrap();
         if settings.is_none() {
-            println!("Loading config.yaml");
+            let config_bytes = include_bytes!("../config.yaml");
+            let config_str = String::from_utf8_lossy(config_bytes);
             *settings = Some(
                 Config::builder()
-                    .add_source(File::with_name("config.yaml"))
+                    .add_source(File::from_str(&config_str, FileFormat::Yaml))
                     .add_source(Environment::with_prefix("TSS"))
                     .build()
                     .unwrap()
@@ -101,5 +102,16 @@ impl Settings {
             );
         }
         settings.clone().unwrap()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_settings() {
+        let settings = Settings::global();
+        println!("{:?}", settings);
     }
 }

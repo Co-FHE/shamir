@@ -2,6 +2,7 @@ use dashmap::DashMap;
 use libp2p::request_response::{OutboundRequestId, ProtocolSupport};
 use libp2p::{request_response, PeerId, StreamProtocol};
 use std::collections::HashMap;
+use std::net::IpAddr;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -431,22 +432,27 @@ pub struct Node<VI: ValidatorIdentity> {
 }
 
 impl<VI: ValidatorIdentity> Node<VI> {
-    pub async fn new(node_keypair: VI::Keypair) -> Result<Self, anyhow::Error> {
+    pub async fn new(
+        node_keypair: VI::Keypair,
+        base_path: PathBuf,
+        coordinator_ip_addr: IpAddr,
+        coordinator_port: u16,
+        coordinator_peer_id: String,
+    ) -> Result<Self, anyhow::Error> {
         let p2p_keypair = libp2p::identity::Keypair::generate_ed25519();
         let coordinator_addr: Multiaddr = format!(
             "/ip4/{}/tcp/{}/p2p/{}",
-            Settings::global().coordinator.remote_addr,
-            Settings::global().coordinator.port,
-            Settings::global().coordinator.peer_id
+            coordinator_ip_addr, coordinator_port, coordinator_peer_id
         )
         .parse()?;
-        let coordinator_peer_id =
-            <PeerId as FromStr>::from_str(&Settings::global().coordinator.peer_id)?;
+        let coordinator_peer_id = <PeerId as FromStr>::from_str(&coordinator_peer_id)?;
 
-        let ipc_path = PathBuf::from(Settings::global().node.ipc_socket_path).join(format!(
-            "node_{}.sock",
-            node_keypair.to_public_key().to_identity().to_fmt_string()
-        ));
+        let ipc_path = base_path
+            .join(Settings::global().node.ipc_socket_path)
+            .join(format!(
+                "node_{}.sock",
+                node_keypair.to_public_key().to_identity().to_fmt_string()
+            ));
         if ipc_path.exists() {
             std::fs::remove_file(&ipc_path)?;
         }

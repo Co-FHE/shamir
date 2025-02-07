@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::crypto::CryptoTypeError;
@@ -53,10 +54,10 @@ pub(crate) enum Request<VII: ValidatorIdentityIdentity> {
     ),
 }
 macro_rules! new_session_wrap {
-    ($session_inst_channels:expr, $generic_type:ty, $crypto_variant:ident, $keystore:expr) => {{
+    ($session_inst_channels:expr, $generic_type:ty, $crypto_variant:ident, $keystore:expr, $base_path:expr) => {{
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         $session_inst_channels.insert(CryptoType::$crypto_variant, tx);
-        SessionWrap::<VII, $generic_type>::new(rx, $keystore)?.listening();
+        SessionWrap::<VII, $generic_type>::new(rx, $keystore, $base_path)?.listening();
     }};
 }
 pub(crate) struct SignerSessionManager<VII: ValidatorIdentityIdentity + Sized> {
@@ -67,39 +68,51 @@ impl<VII: ValidatorIdentityIdentity> SignerSessionManager<VII> {
     pub(crate) fn new(
         request_receiver: UnboundedReceiver<Request<VII>>,
         keystore: Arc<Keystore>,
+        base_path: &PathBuf,
     ) -> Result<Self, SessionManagerError> {
         let mut session_inst_channels = HashMap::new();
         new_session_wrap!(
             session_inst_channels,
             Ed25519Sha512,
             Ed25519,
-            keystore.clone()
+            keystore.clone(),
+            base_path
         );
         new_session_wrap!(
             session_inst_channels,
             Secp256K1Sha256,
             Secp256k1,
-            keystore.clone()
+            keystore.clone(),
+            base_path
         );
         new_session_wrap!(
             session_inst_channels,
             Secp256K1Sha256TR,
             Secp256k1Tr,
-            keystore.clone()
+            keystore.clone(),
+            base_path
         );
         new_session_wrap!(
             session_inst_channels,
             Ed448Shake256,
             Ed448,
-            keystore.clone()
+            keystore.clone(),
+            base_path
         );
         new_session_wrap!(
             session_inst_channels,
             Ristretto255Sha512,
             Ristretto255,
-            keystore.clone()
+            keystore.clone(),
+            base_path
         );
-        new_session_wrap!(session_inst_channels, P256Sha256, P256, keystore);
+        new_session_wrap!(
+            session_inst_channels,
+            P256Sha256,
+            P256,
+            keystore.clone(),
+            base_path
+        );
         assert!(session_inst_channels.len() == CryptoType::COUNT);
 
         Ok(Self {

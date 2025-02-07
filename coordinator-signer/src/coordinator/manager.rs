@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use strum::EnumCount;
 use tokio::sync::{
@@ -58,7 +58,7 @@ pub(crate) enum Instruction<VII: ValidatorIdentityIdentity> {
     },
 }
 macro_rules! new_session_wrap {
-    ($generic_type:ty, $crypto_variant:ident, $dkg_session_sender:expr, $signing_session_sender:expr, $session_inst_channels:expr, $keystore:expr) => {{
+    ($generic_type:ty, $crypto_variant:ident, $dkg_session_sender:expr, $signing_session_sender:expr, $session_inst_channels:expr, $keystore:expr, $base_path:expr) => {{
         let (instruction_sender_cipher, instruction_receiver_cipher) =
             tokio::sync::mpsc::unbounded_channel();
 
@@ -67,6 +67,7 @@ macro_rules! new_session_wrap {
             $signing_session_sender.clone(),
             instruction_receiver_cipher,
             $keystore.clone(),
+            $base_path,
         )?;
         assert!(session_wrap.check_serialize_deserialize().is_ok());
 
@@ -90,6 +91,7 @@ impl<VII: ValidatorIdentityIdentity> CoordiantorSessionManager<VII> {
             oneshot::Sender<SigningResponseWrap<VII>>,
         )>,
         keystore: Arc<Keystore>,
+        base_path: &PathBuf,
     ) -> Result<Self, SessionManagerError> {
         let mut session_inst_channels = HashMap::new();
         new_session_wrap!(
@@ -98,7 +100,8 @@ impl<VII: ValidatorIdentityIdentity> CoordiantorSessionManager<VII> {
             dkg_session_sender,
             signing_session_sender,
             session_inst_channels,
-            keystore
+            keystore,
+            base_path
         );
         new_session_wrap!(
             Secp256K1Sha256,
@@ -106,7 +109,8 @@ impl<VII: ValidatorIdentityIdentity> CoordiantorSessionManager<VII> {
             dkg_session_sender,
             signing_session_sender,
             session_inst_channels,
-            keystore
+            keystore,
+            base_path
         );
         new_session_wrap!(
             Secp256K1Sha256TR,
@@ -114,7 +118,8 @@ impl<VII: ValidatorIdentityIdentity> CoordiantorSessionManager<VII> {
             dkg_session_sender,
             signing_session_sender,
             session_inst_channels,
-            keystore
+            keystore,
+            base_path
         );
         new_session_wrap!(
             Ed448Shake256,
@@ -122,7 +127,8 @@ impl<VII: ValidatorIdentityIdentity> CoordiantorSessionManager<VII> {
             dkg_session_sender,
             signing_session_sender,
             session_inst_channels,
-            keystore
+            keystore,
+            base_path
         );
         new_session_wrap!(
             Ristretto255Sha512,
@@ -130,7 +136,8 @@ impl<VII: ValidatorIdentityIdentity> CoordiantorSessionManager<VII> {
             dkg_session_sender,
             signing_session_sender,
             session_inst_channels,
-            keystore
+            keystore,
+            base_path
         );
         new_session_wrap!(
             P256Sha256,
@@ -138,7 +145,8 @@ impl<VII: ValidatorIdentityIdentity> CoordiantorSessionManager<VII> {
             dkg_session_sender,
             signing_session_sender,
             session_inst_channels,
-            keystore
+            keystore,
+            base_path
         );
         assert!(session_inst_channels.len() == CryptoType::COUNT);
         Ok(Self {

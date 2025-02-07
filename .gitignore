@@ -45,3 +45,4 @@ Cargo.lock
 .keystore/
 **/.test/
 **/proptest-regressions/
+.veritss/

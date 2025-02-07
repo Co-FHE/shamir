@@ -16,6 +16,7 @@ use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use signing::CoordinatorSigningSession as SigningSession;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{
     mpsc::{UnboundedReceiver, UnboundedSender},
@@ -81,10 +82,10 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
         )>,
         instruction_receiver: UnboundedReceiver<InstructionCipher<VII>>,
         keystore: Arc<crate::keystore::Keystore>,
+        base_path: &PathBuf,
     ) -> Result<Self, SessionError<C>> {
-        let path = Settings::global()
-            .coordinator
-            .keystore_path
+        let path = base_path
+            .join(Settings::global().coordinator.keystore_path)
             .join(C::crypto_type().to_string());
         let (keystore_management, data) =
             crate::keystore::KeystoreManagement::new(keystore, path).unwrap();

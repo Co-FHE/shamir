@@ -7,9 +7,10 @@ use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{fmt, EnvFilter, Layer}; // Import extension traits
 
+// if base_path is None, log to stdout
 pub fn init_logging(
     tag: Option<&str>,
-    use_file: bool,
+    base_path: Option<PathBuf>,
 ) -> Option<tracing_appender::non_blocking::WorkerGuard> {
     let settings = Settings::global();
     let console_level = &settings.logging.console.level;
@@ -26,7 +27,7 @@ pub fn init_logging(
     let datetime: chrono::DateTime<chrono::Local> = now.into();
     let date_str = datetime.format("%Y-%m-%d").to_string();
     let time_str = datetime.format("%H-%M-%S").to_string();
-    let file_guard = if use_file {
+    let file_guard = if let Some(base_path) = base_path {
         let console_layer = fmt::layer()
             .with_writer(std::io::stdout)
             .with_file(true)
@@ -37,7 +38,7 @@ pub fn init_logging(
             .pretty()
             .with_filter(console_filter);
         let file_level = &settings.logging.file.level;
-        let log_path = PathBuf::from(&settings.logging.file.dir_path);
+        let log_path = base_path.join(&settings.logging.file.dir_path);
         // Create two separate filters for file and console
         let file_filter = EnvFilter::try_new(file_level)
             .or_else(|_| EnvFilter::try_from_default_env())
@@ -101,7 +102,7 @@ mod tests {
 
     #[test]
     fn test_init_logging() {
-        let _guard = init_logging(Some("test_tag"), false);
+        let _guard = init_logging(Some("test_tag"), None);
         info!("test_init_logging - info");
         debug!("test_init_logging - debug");
         error!("test_init_logging - error");

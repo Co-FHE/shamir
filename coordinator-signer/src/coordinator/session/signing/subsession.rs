@@ -27,6 +27,7 @@ pub(crate) enum CoordinatorSigningState<VII: ValidatorIdentityIdentity, C: Ciphe
     Round2 {
         joined_participants: Participants<VII, C>,
         signing_package: C::SigningPackage,
+        signing_commitments_map: BTreeMap<C::Identifier, C::SigningCommitments>,
     },
     Completed {
         signature: C::Signature,
@@ -372,7 +373,8 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
                 .collect(),
             CoordinatorSigningState::Round2 {
                 joined_participants,
-                signing_package,
+                signing_commitments_map,
+                ..
             } => joined_participants
                 .iter()
                 .map(|(id, identity)| SigningRequest {
@@ -387,7 +389,8 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
                     stage: SigningRequestStage::Round2 {
                         tweak_data: self.tweak_data.clone(),
                         joined_participants: joined_participants.clone(),
-                        signing_package: signing_package.clone(),
+                        signing_commitments_map: signing_commitments_map.clone(),
+                        message: self.message.clone(),
                     },
                 })
                 .collect(),
@@ -460,16 +463,19 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
                         }
                     })
                     .collect::<Result<BTreeMap<C::Identifier, C::SigningCommitments>, _>>()?;
-                let signing_package = C::SigningPackage::new(commitments_map, &self.message)
-                    .map_err(|e| (SessionError::CryptoError(e), None))?;
+                let signing_package =
+                    C::SigningPackage::new(commitments_map.clone(), &self.message)
+                        .map_err(|e| (SessionError::CryptoError(e), None))?;
                 Ok(CoordinatorSigningState::Round2 {
                     signing_package,
                     joined_participants,
+                    signing_commitments_map: commitments_map,
                 })
             }
             CoordinatorSigningState::Round2 {
                 signing_package,
                 joined_participants,
+                ..
             } => {
                 let mut signature_shares = BTreeMap::new();
                 for (id, resp) in response.iter() {

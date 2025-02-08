@@ -9,7 +9,6 @@ use session::SessionWrap;
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::path::PathBuf;
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -65,16 +64,18 @@ pub struct Signer<VI: ValidatorIdentity> {
     >,
     channel_mapping: HashMap<InboundRequestId, ResponseChannel<CoorToSigResponse<VI::Identity>>>,
     connection_state: ConnectionState,
+    verify_message_fn: Box<dyn Fn(&VI::Identity, &[u8]) -> bool + Send + Sync>,
 }
 
 impl<VI: ValidatorIdentity> Signer<VI> {
-    pub fn new(
+    pub fn new<F: Fn(&VI::Identity, &[u8]) -> bool + Send + Sync + 'static>(
         validator_keypair: VI::Keypair,
         base_path: PathBuf,
         coordinator_ip_addr: IpAddr,
-        coordinator_port: u16,
-        coordinator_peer_id: String,
+        coordinator_peer_id: PeerId,
+        verify_message_fn: F,
     ) -> Result<Self, anyhow::Error> {
+        let coordinator_port = Settings::global().coordinator.port;
         let keypair = libp2p::identity::Keypair::generate_ed25519();
         let mut swarm = libp2p::SwarmBuilder::with_existing_identity(keypair.clone())
             .with_tokio()
@@ -111,7 +112,6 @@ impl<VI: ValidatorIdentity> Signer<VI> {
             coordinator_ip_addr, coordinator_port, coordinator_peer_id
         )
         .parse()?;
-        let coordinator_peer_id = <PeerId as FromStr>::from_str(&coordinator_peer_id)?;
         swarm.add_peer_address(coordinator_peer_id, coordinator_addr.clone());
         let (request_sender, request_receiver) = tokio::sync::mpsc::unbounded_channel();
         manager::SignerSessionManager::new(
@@ -123,6 +123,10 @@ impl<VI: ValidatorIdentity> Signer<VI> {
             &base_path,
         )?
         .listening();
+        let fmt_string = validator_keypair
+            .to_public_key()
+            .to_identity()
+            .to_fmt_string();
         Ok(Self {
             validator_keypair: validator_keypair.clone(),
             p2p_keypair: keypair,
@@ -132,35 +136,54 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                 .join(Settings::global().signer.ipc_socket_path)
                 .join(format!(
                     "signer_{}.sock",
-                    validator_keypair
-                        .to_public_key()
-                        .to_identity()
-                        .to_fmt_string()
+                    fmt_string.get(..10).unwrap_or(&fmt_string)
                 )),
-            coordinator_peer_id: <PeerId as FromStr>::from_str(
-                &Settings::global().coordinator.peer_id,
-            )
-            .unwrap(),
+            coordinator_peer_id,
             register_request_id: None,
             request_sender,
             dkg_response_futures: FuturesUnordered::new(),
             signing_response_futures: FuturesUnordered::new(),
             channel_mapping: HashMap::new(),
             connection_state: ConnectionState::Disconnected(None),
+            verify_message_fn: Box::new(verify_message_fn),
         })
     }
     pub async fn start_listening(mut self) -> Result<(), anyhow::Error> {
+        tracing::info!(
+            "signer {:?} start listening",
+            self.validator_keypair
+                .to_public_key()
+                .to_identity()
+                .to_fmt_string()
+        );
         self.swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
 
         let listener = self.start_ipc_listening().await?;
         loop {
             match self.connection_state {
                 ConnectionState::Disconnected(None) => {
+                    tracing::info!(
+                        "signer {:?}'s connection state is disconnected, start dialing coordinator {:?}",
+                        self.validator_keypair
+                            .to_public_key()
+                            .to_identity()
+                            .to_fmt_string(),
+                        self.coordinator_addr
+                    );
                     self.dial_coordinator()?;
                     self.connection_state =
                         ConnectionState::Connecting(tokio::time::Instant::now());
                 }
                 ConnectionState::Disconnected(Some(last_connecting_time)) => {
+                    tracing::info!(
+                        "signer {:?}'s connection state is disconnected, last connecting time: {:?} seconds ago, start dialing coordinator {:?}",
+                        self.validator_keypair
+                            .to_public_key()
+                            .to_identity()
+                            .to_fmt_string(),
+                        last_connecting_time.elapsed().as_secs_f64(),
+                        self.coordinator_addr
+                    );
                     let elapsed = last_connecting_time.elapsed();
                     if elapsed
                         > Duration::from_secs(common::Settings::global().signer.connection_timeout)
@@ -181,9 +204,21 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                     }
                 }
                 ConnectionState::Connecting(start_time) => {
+                    tracing::info!(
+                        "signer {:?}'s connection state is connecting, start connecting time: {:?} seconds ago",
+                        self.validator_keypair
+                            .to_public_key()
+                            .to_identity()
+                            .to_fmt_string(),
+                        start_time.elapsed().as_secs_f64(),
+                    );
                     if start_time.elapsed()
                         > Duration::from_secs(common::Settings::global().signer.connection_timeout)
                     {
+                        tracing::info!(
+                            "Connecting timeout, start dialing coordinator {:?}",
+                            self.coordinator_addr
+                        );
                         self.dial_coordinator()?;
                         self.connection_state =
                             ConnectionState::Connecting(tokio::time::Instant::now());
@@ -192,11 +227,9 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                 ConnectionState::Connected => {}
             }
             if self.connection_state == ConnectionState::Connected {
-                println!("Connected");
                 tokio::select! {
                     event = self.swarm.select_next_some()=> {
                         tracing::debug!("Received swarm event");
-                        println!("Received swarm event");
                         if let Err(e) = self.handle_swarm_event(event).await {
                             tracing::error!("Error handling behaviour event: {}", e);
                         }
@@ -225,7 +258,7 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                 }
             } else {
                 let event = self.swarm.select_next_some().await;
-                tracing::info!("{:?}", event);
+                tracing::info!("received swarm event: {:?}", event);
                 if let Err(e) = self.handle_swarm_event(event).await {
                     tracing::error!("Error handling behaviour event: {}", e);
                 }
@@ -256,10 +289,19 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                 self.connection_state = ConnectionState::Disconnected(None);
             }
             SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
+                tracing::info!(
+                    "peer_id:{:?}, coordinator_peer_id:{:?}",
+                    peer_id,
+                    self.coordinator_peer_id
+                );
                 if peer_id == Some(self.coordinator_peer_id) {
                     tracing::error!("Outgoing connection to {:?} error: {:?}", peer_id, error);
                     if let ConnectionState::Connecting(last_connecting_time) = self.connection_state
                     {
+                        tracing::info!(
+                            "Outgoing connection error, set connection state to disconnected with last connecting time: {:.3} seconds ago",
+                            last_connecting_time.elapsed().as_secs_f64()
+                        );
                         self.connection_state =
                             ConnectionState::Disconnected(Some(last_connecting_time));
                     }
@@ -391,9 +433,18 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                     }
                     CoorToSigRequest::SigningRequest(request) => {
                         tracing::info!("Received signing request: {:?}", request);
+                        if let Some(message) = request.message() {
+                            // TODO: verifying message may take a long time, we need to do it in a separate thread
+                            // TODO: should response rejecting the request if the message is invalid instead of discarding the request
+                            if !(*self.verify_message_fn)(request.identity(), message.as_ref()) {
+                                tracing::warn!("Invalid message for signing request, reject to sign the message");
+                                return Ok(());
+                            }
+                        }
                         let (tx, rx) = tokio::sync::oneshot::channel();
                         self.signing_response_futures.push(rx);
                         self.channel_mapping.insert(request_id, channel);
+                        // send request to manager
                         self.request_sender
                             .send(Request::Signing((request_id, request), tx))
                             .unwrap();
@@ -595,12 +646,18 @@ impl<VI: ValidatorIdentity> Signer<VI> {
     }
     pub async fn start_ipc_listening(&mut self) -> anyhow::Result<UnixListener> {
         // Remove existing IPC socket file if it exists
+        tracing::info!("IPC Listening on {:?}", self.ipc_path);
         if self.ipc_path.exists() {
             std::fs::remove_file(&self.ipc_path)?;
+        } else {
+            std::fs::create_dir_all(
+                self.ipc_path
+                    .parent()
+                    .ok_or(anyhow::anyhow!("Failed to get parent dir"))?,
+            )?;
         }
 
         let listener = UnixListener::bind(&self.ipc_path)?;
-        tracing::info!("IPC Listening on {:?}", self.ipc_path);
         return Ok(listener);
     }
 }

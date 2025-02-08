@@ -10,7 +10,7 @@ coordinator:
   port: 15926
   remote_addr: "127.0.0.1"
   peer_id: "12D3KooWB3LpKiErRF3byUAsCvY6JL8TtQeSCrF5Hw23UoKJ7F88"
-  ipc_socket_path: "ipc_socket/coordinator.sock"
+  ipc_socket_path: "ipc/coordinator.sock"
   keystore_path: "keystore/coordinator"
   peer_id_whitelist:
     - "12D3KooWQdd3vZB7PQtcGBGxpP52oCXX4X4xCVrqi8r8Ejs6nTg3"
@@ -19,7 +19,7 @@ coordinator:
 signer:
   allow_external_address: true
   keypair_path_mapping: { 1: "keys_for_test/signer1.key", 2: "keys_for_test/signer2.key", 3: "keys_for_test/signer3.key" }
-  ipc_socket_path: "ipc_socket/"
+  ipc_socket_path: "ipc/"
   keystore_path: "keystore/signer"
   connection_timeout: 5
 connection:
@@ -30,6 +30,6 @@ session:
   signing_round2_timeout: 10
 node:
   keypair_path: "keys_for_test/node.key"
-  ipc_socket_path: "ipc_socket/"
+  ipc_socket_path: "ipc/"
 
   connection_timeout: 5

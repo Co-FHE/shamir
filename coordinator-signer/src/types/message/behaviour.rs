@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     crypto::{CryptoType, PkId, ValidatorIdentityIdentity},
-    types::{GroupPublicKeyInfo, SignatureSuiteInfo},
+    types::{AutoDKG, GroupPublicKeyInfo, SignatureSuiteInfo},
 };
 
 use super::{DKGRequestWrap, DKGResponseWrap, SigningRequestWrap, SigningResponseWrap};
@@ -59,6 +59,9 @@ pub(crate) enum NodeToCoorRequest<VII: ValidatorIdentityIdentity> {
     LsPkRequest {
         validator_identity: ValidatorIdentityRequest,
     },
+    AutoDKGRequest {
+        validator_identity: ValidatorIdentityRequest,
+    },
     PkTweakRequest {
         pkid: PkId,
         tweak_data: Option<Vec<u8>>,
@@ -81,6 +84,7 @@ impl<VII: ValidatorIdentityIdentity> NodeToCoorRequest<VII> {
     pub(crate) fn get_validator_identity(&self) -> ValidatorIdentityRequest {
         match self {
             NodeToCoorRequest::LsPkRequest { validator_identity } => validator_identity.clone(),
+            NodeToCoorRequest::AutoDKGRequest { validator_identity } => validator_identity.clone(),
             NodeToCoorRequest::PkTweakRequest {
                 validator_identity, ..
             } => validator_identity.clone(),
@@ -98,6 +102,9 @@ impl<VII: ValidatorIdentityIdentity> NodeToCoorRequest<VII> {
 pub(crate) enum NodeToCoorResponse<VII: ValidatorIdentityIdentity> {
     DKGResponse {
         pkid: PkId,
+    },
+    AutoDKGResponse {
+        auto_dkg_result: AutoDKG<VII>,
     },
     SigningResponse {
         signature_suite_info: SignatureSuiteInfo<VII>,

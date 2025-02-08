@@ -8,7 +8,7 @@ use crate::types::message::{
     DKGResponseWrap, NodeToCoorRequest, NodeToCoorResponse, SigToCoorRequest, SigToCoorResponse,
     SigningRequestWrap, SigningResponseWrap, ValidatorIdentityRequest,
 };
-use crate::types::{GroupPublicKeyInfo, SignatureSuiteInfo, Validator};
+use crate::types::{AutoDKG, GroupPublicKeyInfo, SignatureSuiteInfo, Validator};
 use crate::utils::*;
 use anyhow::anyhow;
 use command::Command;
@@ -38,7 +38,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::unix::SocketAddr;
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, RwLock};
 use tokio::time::Instant;
 pub struct Coordinator<VI: ValidatorIdentity> {
     p2p_keypair: libp2p::identity::Keypair,
@@ -86,12 +86,17 @@ pub struct Coordinator<VI: ValidatorIdentity> {
             ResponseChannel<NodeToCoorResponse<VI::Identity>>,
         )>,
     >,
+    // !WARNING: auto_dkg should not be used in multi-application scenarios.
+    // !WARNING: It only generates one base key for each key type, and other keys are derived through tweaking.
+    // !WARNING: Note that these are tweaked keys, not derived keys - this is highly insecure for multi-application use cases since tweaking does not provide proper key isolation between applications.
+    auto_dkg: Option<Arc<RwLock<AutoDKG<VI::Identity>>>>,
 }
 impl<VI: ValidatorIdentity> Coordinator<VI> {
     pub fn new(
         p2p_keypair: libp2p::identity::Keypair,
         base_path: PathBuf,
         signer_whitelist: Option<HashSet<VI::Identity>>,
+        automatic_dkg: Option<u16>,
     ) -> anyhow::Result<Self> {
         let swarm = libp2p::SwarmBuilder::with_existing_identity(p2p_keypair.clone())
             .with_tokio()
@@ -144,6 +149,19 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
             &base_path,
         )?
         .listening();
+        let auto_dkg = if let Some(min_signers) = automatic_dkg {
+            if signer_whitelist.clone().is_none() {
+                return Err(anyhow::anyhow!(
+                    "signer_whitelist is required when automatic_dkg is enabled"
+                ));
+            }
+            if min_signers == 0 || signer_whitelist.clone().unwrap().len() < min_signers as usize {
+                return Err(anyhow::anyhow!("min_signers must be greater than 0 and less than or equal to the number of signers in the whitelist"));
+            }
+            Some(AutoDKG::new(min_signers, signer_whitelist.clone().unwrap()))
+        } else {
+            None
+        };
         Ok(Self {
             p2p_keypair,
             signer_whitelist,
@@ -160,9 +178,11 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
             signing_response_futures_for_node: FuturesUnordered::new(),
             lspk_response_futures_for_node: FuturesUnordered::new(),
             pk_response_futures_for_node: FuturesUnordered::new(),
+            auto_dkg: auto_dkg.map(|dkg| Arc::new(RwLock::new(dkg))),
         })
     }
-
+    // if automatic_dkg is Some(min_signers), the coordinator will do dkg for all ciphersuites,
+    // if automatic_dkg is None, the coordinator will do dkg manually,
     pub async fn start_listening(mut self) -> Result<(), anyhow::Error> {
         self.swarm.listen_on(
             format!("/ip4/0.0.0.0/tcp/{}", Settings::global().coordinator.port).parse()?,
@@ -472,6 +492,16 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                         min_signers,
                         ..
                     } => {
+                        if self.auto_dkg.is_some() {
+                            tracing::warn!("AutoDKG is enabled, ignoring DKG request");
+                            if let Err(e) = self.swarm.behaviour_mut().node2coor.send_response(
+                                channel,
+                                NodeToCoorResponse::Failure("AutoDKG is enabled".to_string()),
+                            ) {
+                                tracing::error!("Error sending failure response to node: {:?}", e);
+                            }
+                            return Ok(());
+                        }
                         if participants.len() > 255 {
                             tracing::error!("Invalid participants: {:?}", participants);
                             if let Err(e) = self.swarm.behaviour_mut().node2coor.send_response(
@@ -605,6 +635,16 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                             }
                         });
                     }
+                    NodeToCoorRequest::AutoDKGRequest { .. } => {
+                        let auto_dkg = self.auto_dkg.as_ref().unwrap();
+                        let auto_dkg_result = auto_dkg.read().await.clone();
+                        if let Err(e) = self.swarm.behaviour_mut().node2coor.send_response(
+                            channel,
+                            NodeToCoorResponse::AutoDKGResponse { auto_dkg_result },
+                        ) {
+                            tracing::error!("Error sending response to node: {:?}", e);
+                        }
+                    }
                     NodeToCoorRequest::PkTweakRequest {
                         pkid, tweak_data, ..
                     } => {
@@ -690,6 +730,7 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
         }
         Ok(())
     }
+    // handle validator identity request
     pub(crate) async fn handle_vi_request(
         &mut self,
         peer: PeerId,
@@ -731,6 +772,10 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
         ]);
         // Verify the signature
         if public_key.verify(&hash, &signature) {
+            if !verify_whitelist {
+                return Ok(());
+            }
+
             let address = self.p2ppeerid_2_endpoint.get(&peer).cloned();
             let new_validator = Validator {
                 p2p_peer_id: peer,
@@ -769,7 +814,53 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
             if let Some(addr) = self.p2ppeerid_2_endpoint.get(&peer) {
                 self.swarm.add_peer_address(peer, addr.clone());
             }
-
+            // update auto dkg
+            if let Some(auto_dkg) = &self.auto_dkg {
+                if let Some(participants) = auto_dkg
+                    .write()
+                    .await
+                    .register_signer(validator_peer.clone())
+                {
+                    tracing::info!("AutoDKG is started");
+                    for crypto_type in <CryptoType as strum::IntoEnumIterator>::iter() {
+                        let manger_instruction_sender = self.instruction_sender.clone();
+                        let participants = participants.clone();
+                        let auto_dkg = auto_dkg.clone();
+                        tokio::spawn(async move {
+                            loop {
+                                let (instruction_sender, instruction_receiver) = oneshot::channel();
+                                let instruction = Instruction::NewKey {
+                                    crypto_type,
+                                    participants: participants.clone(),
+                                    min_signers: auto_dkg.read().await.min_signers,
+                                    pkid_response_oneshot: instruction_sender,
+                                };
+                                manger_instruction_sender.send(instruction).unwrap();
+                                let result = instruction_receiver.await;
+                                match result {
+                                    Ok(Ok(pkid)) => {
+                                        auto_dkg
+                                            .write()
+                                            .await
+                                            .update_new_dkg_result(crypto_type, pkid);
+                                        break;
+                                    }
+                                    Ok(Err(e)) => {
+                                        tracing::error!("Error starting DKG: {}", e);
+                                    }
+                                    Err(e) => {
+                                        tracing::error!("Error starting DKG: {}", e);
+                                    }
+                                }
+                                tokio::time::sleep(Duration::from_secs(
+                                    Settings::global().session.state_channel_retry_interval,
+                                ))
+                                .await;
+                            }
+                        });
+                    }
+                }
+            }
             return Ok(());
         } else {
             tracing::error!(

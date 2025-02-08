@@ -1,3 +1,4 @@
+pub use common::init_logging_layer;
 pub use common::Settings;
 pub mod crypto {
     pub use coordinator_signer::crypto::validator_identity::p2p_identity::P2pIdentity;

@@ -1,4 +1,4 @@
-use std::any::Any;
+use std::{any::Any, collections::BTreeMap};
 
 use serde::{Deserialize, Serialize};
 
@@ -29,7 +29,8 @@ pub(crate) enum SigningRequestStage<VII: ValidatorIdentityIdentity, C: Cipher> {
     Round2 {
         tweak_data: Option<Vec<u8>>,
         joined_participants: Participants<VII, C>,
-        signing_package: C::SigningPackage,
+        signing_commitments_map: BTreeMap<C::Identifier, C::SigningCommitments>,
+        message: Vec<u8>,
     },
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -131,6 +132,16 @@ impl<VII: ValidatorIdentityIdentity> SigningRequestWrap<VII> {
             SigningRequestWrap::P256(r) => &r.base_info.identity,
             SigningRequestWrap::Ed448(r) => &r.base_info.identity,
             SigningRequestWrap::Ristretto255(r) => &r.base_info.identity,
+        }
+    }
+    pub(crate) fn message(&self) -> Option<Vec<u8>> {
+        match self {
+            SigningRequestWrap::Ed25519(r) => r.message(),
+            SigningRequestWrap::Secp256k1(r) => r.message(),
+            SigningRequestWrap::Secp256k1Tr(r) => r.message(),
+            SigningRequestWrap::P256(r) => r.message(),
+            SigningRequestWrap::Ed448(r) => r.message(),
+            SigningRequestWrap::Ristretto255(r) => r.message(),
         }
     }
     pub(crate) fn crypto_type(&self) -> CryptoType {
@@ -266,6 +277,12 @@ impl<VII: ValidatorIdentityIdentity> SigningRequestWrap<VII> {
     }
 }
 impl<VII: ValidatorIdentityIdentity, C: Cipher> SigningRequest<VII, C> {
+    pub(crate) fn message(&self) -> Option<Vec<u8>> {
+        if let SigningRequestStage::Round2 { message, .. } = &self.stage {
+            return Some(message.clone());
+        }
+        None
+    }
     pub(crate) fn from(
         r: SigningRequestWrap<VII>,
     ) -> Result<SigningRequest<VII, C>, SessionError<C>> {

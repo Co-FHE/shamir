@@ -27,6 +27,7 @@ pub enum Commands {
         pkid: String,
         times: usize,
     },
+    AutoDKG,
     Lspk,
     Pk {
         pkid: String,

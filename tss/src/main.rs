@@ -7,10 +7,12 @@ use coordinator_signer::signer::Signer;
 use coordinator_signer::{
     coordinator::Coordinator, crypto::validator_identity::ValidatorIdentityIdentity,
 };
+use libp2p::PeerId;
 use rand::Rng;
 use std::collections::HashSet;
 use std::net::IpAddr;
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::time::Duration;
 use std::{error::Error, fs::File, io::Read};
 use tokio::time::Instant;
@@ -54,8 +56,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .remote_addr
         .parse::<IpAddr>()
         .unwrap();
-    let coordinator_port = Settings::global().coordinator.port;
-    let coordinator_peer_id = Settings::global().coordinator.peer_id;
+    let coordinator_peer_id =
+        <PeerId as FromStr>::from_str(&Settings::global().coordinator.peer_id)?;
     let whitelist: HashSet<<P2pIdentity as ValidatorIdentity>::Identity> = Settings::global()
         .coordinator
         .peer_id_whitelist
@@ -67,7 +69,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         commands::Commands::Coordinator => {
             // default keypair = 12D3KooWB3LpKiErRF3byUAsCvY6JL8TtQeSCrF5Hw23UoKJ7F88
             let keypair = load_keypair(Settings::global().coordinator.keypair_path.as_str());
-            let coordinator = Coordinator::<P2pIdentity>::new(keypair, home_dir, Some(whitelist))?;
+            let coordinator =
+                Coordinator::<P2pIdentity>::new(keypair, home_dir, Some(whitelist), Some(2))?;
             // coordinator.start_listening().await?;
             coordinator.start_listening().await?;
         }
@@ -86,8 +89,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 keypair,
                 home_dir,
                 coordinator_ip_addr,
-                coordinator_port,
                 coordinator_peer_id,
+                |_, _| true,
             )?;
             signer.start_listening().await?;
         }
@@ -100,10 +103,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 keypair,
                 home_dir,
                 coordinator_ip_addr,
-                coordinator_port,
                 coordinator_peer_id,
-            )
-            .await?;
+            )?;
             let participants = Settings::global()
                 .coordinator
                 .peer_id_whitelist
@@ -130,10 +131,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 keypair,
                 home_dir,
                 coordinator_ip_addr,
-                coordinator_port,
                 coordinator_peer_id,
-            )
-            .await?;
+            )?;
             let resp = node
                 .sign(
                     PkId::new(hex::decode(&pkid).unwrap()),
@@ -153,10 +152,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 keypair,
                 home_dir,
                 coordinator_ip_addr,
-                coordinator_port,
                 coordinator_peer_id,
-            )
-            .await?;
+            )?;
             let mut queue = Vec::new();
             let start = Instant::now();
             for _ in 0..times {
@@ -192,15 +189,24 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 keypair,
                 home_dir,
                 coordinator_ip_addr,
-                coordinator_port,
                 coordinator_peer_id,
-            )
-            .await?;
+            )?;
             let r = node.lspk_async().await.unwrap();
             for (k, v) in r {
                 let v = v.iter().map(|pkid| pkid.to_string()).collect::<Vec<_>>();
                 println!("{}: {:?}", k, v);
             }
+        }
+        commands::Commands::AutoDKG => {
+            let keypair = load_keypair(Settings::global().node.keypair_path.as_str());
+            let node = Node::<P2pIdentity>::new(
+                keypair,
+                home_dir,
+                coordinator_ip_addr,
+                coordinator_peer_id,
+            )?;
+            let r = node.auto_dkg_async().await.unwrap();
+            println!("{}", r);
         }
         commands::Commands::Pk { pkid, tweak } => {
             let keypair = load_keypair(Settings::global().node.keypair_path.as_str());
@@ -208,10 +214,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 keypair,
                 home_dir,
                 coordinator_ip_addr,
-                coordinator_port,
                 coordinator_peer_id,
-            )
-            .await?;
+            )?;
             let r = node
                 .pk_async(
                     PkId::new(hex::decode(&pkid).unwrap()),

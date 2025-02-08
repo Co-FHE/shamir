@@ -1,3 +1,5 @@
+pub(crate) mod auto_dkg;
+pub use auto_dkg::*;
 pub(crate) mod error;
 pub(crate) mod message;
 mod session;

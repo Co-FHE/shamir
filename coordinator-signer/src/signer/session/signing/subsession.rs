@@ -1,10 +1,10 @@
 use rand::{CryptoRng, RngCore};
 
+use super::{Cipher, SessionError, SigningSignerBase, SubsessionId, ValidatorIdentityIdentity};
+use crate::crypto::SigningPackage;
 use crate::types::message::{
     SigningRequest, SigningRequestStage, SigningResponse, SigningResponseStage,
 };
-
-use super::{Cipher, SessionError, SigningSignerBase, SubsessionId, ValidatorIdentityIdentity};
 
 #[derive(Debug, Clone)]
 pub(crate) enum SignerSigningState<C: Cipher> {
@@ -73,11 +73,15 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SignerSubsession<VII, C> {
                 )));
             }
             SigningRequestStage::Round2 {
-                signing_package,
+                signing_commitments_map,
+                message,
                 tweak_data,
                 ..
             } => {
                 if let SignerSigningState::Round1 { nonces, .. } = &self.signing_state {
+                    let signing_package =
+                        C::SigningPackage::new(signing_commitments_map, message.as_ref())
+                            .map_err(|e| SessionError::CryptoError(e))?;
                     let signature_share = C::sign_with_tweak(
                         &signing_package,
                         &nonces,

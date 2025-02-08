@@ -5,8 +5,77 @@ use std::path::PathBuf;
 use std::time::SystemTime;
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::prelude::*;
+use tracing_subscriber::FmtSubscriber;
 use tracing_subscriber::{fmt, EnvFilter, Layer}; // Import extension traits
+pub fn init_logging_layer(
+    tag: Option<&str>,
+    base_path: Option<PathBuf>,
+) -> Option<Box<dyn Layer<FmtSubscriber> + Send + Sync>> {
+    let settings = Settings::global();
+    let console_level = &settings.logging.console.level;
 
+    let console_filter = EnvFilter::try_new(console_level)
+        .or_else(|_| EnvFilter::try_from_default_env())
+        .unwrap_or_else(|_| EnvFilter::new("info"));
+
+    let random_hex: String = (0..4)
+        .map(|_| format!("{:02x}", thread_rng().gen_range(0..=255)))
+        .collect();
+
+    let now = SystemTime::now();
+    let datetime: chrono::DateTime<chrono::Local> = now.into();
+    let date_str = datetime.format("%Y-%m-%d").to_string();
+    let time_str = datetime.format("%H-%M-%S").to_string();
+
+    let file_layer = if let Some(base_path) = base_path {
+        let log_path = base_path.join(&settings.logging.file.dir_path);
+        let filename = if let Some(tag) = tag {
+            let sanitized_tag = tag.replace(|c: char| !c.is_alphanumeric(), "_");
+            format!(
+                "log_{}_{}_{}.{}",
+                sanitized_tag, date_str, time_str, random_hex
+            )
+        } else {
+            format!("log_{}_{}.{}", date_str, time_str, random_hex)
+        };
+
+        let file_appender = RollingFileAppender::builder()
+            .filename_suffix("log")
+            .rotation(Rotation::DAILY)
+            .filename_prefix(&filename)
+            .build(log_path)
+            .unwrap();
+        let (file_writer, _file_guard) = tracing_appender::non_blocking(file_appender);
+        let file_filter = EnvFilter::try_new(&settings.logging.file.level)
+            .or_else(|_| EnvFilter::try_from_default_env())
+            .unwrap_or_else(|_| EnvFilter::new("info"));
+
+        let file_layer = fmt::layer()
+            .with_writer(file_writer)
+            .with_file(true)
+            .with_line_number(true)
+            .with_target(false)
+            .with_thread_ids(true)
+            .with_thread_names(true)
+            .with_ansi(false)
+            .with_filter(file_filter);
+
+        Some(Box::new(file_layer) as Box<dyn Layer<FmtSubscriber> + Send + Sync>)
+    } else {
+        let console_layer = fmt::layer()
+            .with_writer(std::io::stdout)
+            .with_file(true)
+            .with_line_number(true)
+            .with_target(false)
+            .with_thread_ids(true)
+            .with_thread_names(true)
+            .pretty()
+            .with_filter(console_filter);
+
+        Some(Box::new(console_layer) as Box<dyn Layer<FmtSubscriber> + Send + Sync>)
+    };
+    file_layer
+}
 // if base_path is None, log to stdout
 pub fn init_logging(
     tag: Option<&str>,

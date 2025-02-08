@@ -4,7 +4,6 @@ use libp2p::{request_response, PeerId, StreamProtocol};
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::path::PathBuf;
-use std::str::FromStr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::sync::oneshot;
@@ -27,7 +26,7 @@ use crate::types::message::{
     NodeBehaviour, NodeBehaviourEvent, NodeToCoorRequest, NodeToCoorResponse,
     ValidatorIdentityRequest,
 };
-use crate::types::{ConnectionState, GroupPublicKeyInfo, SignatureSuiteInfo};
+use crate::types::{AutoDKG, ConnectionState, GroupPublicKeyInfo, SignatureSuiteInfo};
 use crate::utils::list_hash;
 
 pub(crate) struct NodeSwarm<VI: ValidatorIdentity> {
@@ -43,6 +42,8 @@ pub(crate) struct NodeSwarm<VI: ValidatorIdentity> {
         NodeToCoorRequest<VI::Identity>,
         oneshot::Sender<Result<PkId, String>>,
     )>,
+    auto_dkg_response_mapping:
+        DashMap<OutboundRequestId, oneshot::Sender<Result<AutoDKG<VI::Identity>, String>>>,
     lspk_response_mapping:
         DashMap<OutboundRequestId, oneshot::Sender<Result<HashMap<CryptoType, Vec<PkId>>, String>>>,
     pk_response_mapping:
@@ -59,10 +60,14 @@ pub(crate) struct NodeSwarm<VI: ValidatorIdentity> {
         NodeToCoorRequest<VI::Identity>,
         oneshot::Sender<Result<GroupPublicKeyInfo, String>>,
     )>,
+    auto_dkg_request_receiver: tokio::sync::mpsc::UnboundedReceiver<(
+        NodeToCoorRequest<VI::Identity>,
+        oneshot::Sender<Result<AutoDKG<VI::Identity>, String>>,
+    )>,
     connection_state: ConnectionState,
 }
 impl<VI: ValidatorIdentity> NodeSwarm<VI> {
-    pub async fn new(
+    pub fn new(
         p2p_keypair: libp2p::identity::Keypair,
         coordinator_addr: Multiaddr,
         coordinator_peer_id: PeerId,
@@ -77,6 +82,10 @@ impl<VI: ValidatorIdentity> NodeSwarm<VI> {
         lspk_request_receiver: tokio::sync::mpsc::UnboundedReceiver<(
             NodeToCoorRequest<VI::Identity>,
             oneshot::Sender<Result<HashMap<CryptoType, Vec<PkId>>, String>>,
+        )>,
+        auto_dkg_request_receiver: tokio::sync::mpsc::UnboundedReceiver<(
+            NodeToCoorRequest<VI::Identity>,
+            oneshot::Sender<Result<AutoDKG<VI::Identity>, String>>,
         )>,
         pk_request_receiver: tokio::sync::mpsc::UnboundedReceiver<(
             NodeToCoorRequest<VI::Identity>,
@@ -111,10 +120,12 @@ impl<VI: ValidatorIdentity> NodeSwarm<VI> {
             coordinator_addr,
             coordinator_peer_id,
             dkg_response_mapping: DashMap::new(),
+            auto_dkg_response_mapping: DashMap::new(),
             signing_response_mapping: DashMap::new(),
             lspk_response_mapping: DashMap::new(),
             pk_response_mapping: DashMap::new(),
             dkg_request_receiver: dkg_request_receiver,
+            auto_dkg_request_receiver: auto_dkg_request_receiver,
             signing_request_receiver: signing_request_receiver,
             lspk_request_receiver: lspk_request_receiver,
             pk_request_receiver: pk_request_receiver,
@@ -176,7 +187,7 @@ impl<VI: ValidatorIdentity> NodeSwarm<VI> {
                 if self.connection_state == ConnectionState::Connected {
                     tokio::select! {
                             event = self.swarm.select_next_some()=> {
-                                tracing::info!("{:?}",event);
+                                tracing::debug!("{:?}",event);
                             if let Err(e) = self.handle_swarm_event(event).await {
                                 tracing::error!("Error handling behaviour event: {}", e);
                             }
@@ -194,6 +205,9 @@ impl<VI: ValidatorIdentity> NodeSwarm<VI> {
                         }
                         Some((request, sender)) = self.pk_request_receiver.recv()=>{
                             self.handle_pk_request(request, sender);
+                        }
+                        Some((request, sender)) = self.auto_dkg_request_receiver.recv()=>{
+                            self.handle_auto_dkg_request(request, sender);
                         }
                     }
                 } else {
@@ -245,6 +259,18 @@ impl<VI: ValidatorIdentity> NodeSwarm<VI> {
             .node2coor
             .send_request(&self.coordinator_peer_id, request);
         self.lspk_response_mapping.insert(request_id, sender);
+    }
+    pub(crate) fn handle_auto_dkg_request(
+        &mut self,
+        request: NodeToCoorRequest<VI::Identity>,
+        sender: oneshot::Sender<Result<AutoDKG<VI::Identity>, String>>,
+    ) {
+        let request_id = self
+            .swarm
+            .behaviour_mut()
+            .node2coor
+            .send_request(&self.coordinator_peer_id, request);
+        self.auto_dkg_response_mapping.insert(request_id, sender);
     }
     pub(crate) fn handle_pk_request(
         &mut self,
@@ -368,6 +394,15 @@ impl<VI: ValidatorIdentity> NodeSwarm<VI> {
                             }
                         }
                     }
+                    NodeToCoorResponse::AutoDKGResponse { auto_dkg_result } => {
+                        if let Some((_, response_oneshot)) =
+                            self.auto_dkg_response_mapping.remove(&request_id)
+                        {
+                            if let Err(e) = response_oneshot.send(Ok(auto_dkg_result)) {
+                                tracing::error!("Failed to send response: {:?}", e);
+                            }
+                        }
+                    }
                     NodeToCoorResponse::PkTweakResponse {
                         group_public_key_info,
                     } => {
@@ -425,6 +460,10 @@ pub struct Node<VI: ValidatorIdentity> {
         NodeToCoorRequest<VI::Identity>,
         oneshot::Sender<Result<HashMap<CryptoType, Vec<PkId>>, String>>,
     )>,
+    auto_dkg_request_sender: UnboundedSender<(
+        NodeToCoorRequest<VI::Identity>,
+        oneshot::Sender<Result<AutoDKG<VI::Identity>, String>>,
+    )>,
     pk_request_sender: UnboundedSender<(
         NodeToCoorRequest<VI::Identity>,
         oneshot::Sender<Result<GroupPublicKeyInfo, String>>,
@@ -432,26 +471,25 @@ pub struct Node<VI: ValidatorIdentity> {
 }
 
 impl<VI: ValidatorIdentity> Node<VI> {
-    pub async fn new(
+    pub fn new(
         node_keypair: VI::Keypair,
         base_path: PathBuf,
         coordinator_ip_addr: IpAddr,
-        coordinator_port: u16,
-        coordinator_peer_id: String,
+        coordinator_peer_id: PeerId,
     ) -> Result<Self, anyhow::Error> {
+        let coordinator_port = Settings::global().coordinator.port;
         let p2p_keypair = libp2p::identity::Keypair::generate_ed25519();
         let coordinator_addr: Multiaddr = format!(
             "/ip4/{}/tcp/{}/p2p/{}",
             coordinator_ip_addr, coordinator_port, coordinator_peer_id
         )
         .parse()?;
-        let coordinator_peer_id = <PeerId as FromStr>::from_str(&coordinator_peer_id)?;
-
+        let fmt_string = node_keypair.to_public_key().to_identity().to_fmt_string();
         let ipc_path = base_path
             .join(Settings::global().node.ipc_socket_path)
             .join(format!(
                 "node_{}.sock",
-                node_keypair.to_public_key().to_identity().to_fmt_string()
+                fmt_string.get(..10).unwrap_or(&fmt_string)
             ));
         if ipc_path.exists() {
             std::fs::remove_file(&ipc_path)?;
@@ -462,6 +500,7 @@ impl<VI: ValidatorIdentity> Node<VI> {
         let (signing_request_sender, signing_request_receiver) = unbounded_channel();
         let (lspk_request_sender, lspk_request_receiver) = unbounded_channel();
         let (pk_request_sender, pk_request_receiver) = unbounded_channel();
+        let (auto_dkg_request_sender, auto_dkg_request_receiver) = unbounded_channel();
         let swarm_node = NodeSwarm::<VI>::new(
             p2p_keypair.clone(),
             coordinator_addr.clone(),
@@ -469,10 +508,12 @@ impl<VI: ValidatorIdentity> Node<VI> {
             dkg_request_receiver,
             signing_request_receiver,
             lspk_request_receiver,
+            auto_dkg_request_receiver,
             pk_request_receiver,
-        )
-        .await?;
-        swarm_node.start_listening().await;
+        )?;
+        tokio::spawn(async move {
+            swarm_node.start_listening().await;
+        });
         Ok(Self {
             node_keypair: node_keypair,
             p2p_keypair: p2p_keypair,
@@ -481,6 +522,7 @@ impl<VI: ValidatorIdentity> Node<VI> {
             dkg_request_sender: dkg_request_sender,
             signing_request_sender: signing_request_sender,
             lspk_request_sender: lspk_request_sender,
+            auto_dkg_request_sender: auto_dkg_request_sender,
             pk_request_sender: pk_request_sender,
         })
     }
@@ -565,6 +607,29 @@ impl<VI: ValidatorIdentity> Node<VI> {
         .await?;
         let timeout = timeout.map_err(|e| anyhow::anyhow!("Timeout: {:?}", e))?;
         return timeout.map_err(|e| anyhow::anyhow!("lspk error: {:?}", e));
+    }
+    pub fn auto_dkg(
+        &self,
+    ) -> Result<oneshot::Receiver<Result<AutoDKG<VI::Identity>, String>>, anyhow::Error> {
+        let request = self.generate_validator_identity();
+        let (sender, receiver) = oneshot::channel();
+        self.auto_dkg_request_sender.send((
+            NodeToCoorRequest::AutoDKGRequest {
+                validator_identity: request,
+            },
+            sender,
+        ))?;
+        return Ok(receiver);
+    }
+    pub async fn auto_dkg_async(&self) -> Result<AutoDKG<VI::Identity>, anyhow::Error> {
+        let r = self.auto_dkg()?;
+        let timeout = tokio::time::timeout(
+            Duration::from_secs(Settings::global().node.connection_timeout),
+            r,
+        )
+        .await?;
+        let timeout = timeout.map_err(|e| anyhow::anyhow!("Timeout: {:?}", e))?;
+        return timeout.map_err(|e| anyhow::anyhow!("auto_dkg error: {:?}", e));
     }
     pub fn pk(
         &self,

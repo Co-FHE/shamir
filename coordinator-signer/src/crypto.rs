@@ -6,13 +6,24 @@ pub use cipher::*;
 use serde::{Deserialize, Serialize};
 
 pub use pkid::*;
-use strum::{Display, EnumCount, EnumString};
+use strum::{Display, EnumCount, EnumIter, EnumString};
 pub use validator_identity::*;
 
 //todo pk.hash()->pkid
 
 #[derive(
-    Debug, Clone, Copy, Serialize, Deserialize, PartialEq, EnumString, Display, EnumCount, Eq, Hash,
+    Debug,
+    Clone,
+    Copy,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    EnumString,
+    Display,
+    EnumCount,
+    Eq,
+    Hash,
+    EnumIter,
 )]
 pub enum CryptoType {
     #[strum(serialize = "p256")]

@@ -93,4 +93,13 @@ impl<VII: ValidatorIdentityIdentity> AutoDKG<VII> {
             }
         }
     }
+    pub fn get_pkid_by_crypto_type(&self, crypto_type: CryptoType) -> Result<PkId, String> {
+        if let AutoDKGState::Done(state) = &self.state {
+            return state
+                .get(&crypto_type)
+                .cloned()
+                .ok_or(format!("crypto_type {} not found", crypto_type));
+        }
+        Err(format!("auto dkg not done"))
+    }
 }

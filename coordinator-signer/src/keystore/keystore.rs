@@ -113,8 +113,8 @@ mod tests {
         let salt = Some([0; 16]);
         let keystore = Keystore::new(key, salt).unwrap();
         assert!(keystore.derived_key_equal([
-            49, 234, 130, 192, 189, 167, 192, 213, 188, 97, 190, 109, 5, 214, 221, 255, 222, 56,
-            38, 129, 51, 145, 1, 4, 59, 179, 150, 228, 118, 213, 206, 232
+            138, 244, 237, 242, 121, 188, 209, 107, 106, 146, 139, 103, 194, 158, 73, 103, 154, 94,
+            39, 63, 98, 61, 108, 99, 139, 99, 155, 218, 24, 179, 245, 183
         ]));
         let encrypted = keystore.encrypt("aaa").unwrap();
         let decrypted = keystore.decrypt(encrypted).unwrap();

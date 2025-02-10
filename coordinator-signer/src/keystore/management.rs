@@ -85,6 +85,9 @@ mod tests {
     fn test_keystore_management() {
         let keystore = Arc::new(Keystore::new(b"test", None).unwrap());
         let path = PathBuf::from(".test");
+        if path.exists() {
+            std::fs::remove_dir_all(path.clone()).unwrap();
+        }
         let (mut keystore, decrypted_data) =
             KeystoreManagement::new(keystore, path.clone()).unwrap();
         println!("decrypted_data: {:?}", decrypted_data);

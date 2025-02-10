@@ -43,6 +43,7 @@ use tokio::time::Instant;
 pub struct Coordinator<VI: ValidatorIdentity> {
     p2p_keypair: libp2p::identity::Keypair,
     signer_whitelist: Option<HashSet<VI::Identity>>,
+    listen_port: u16,
     swarm: libp2p::Swarm<CoorBehaviour<VI::Identity>>,
     ipc_path: PathBuf,
     valid_validators: HashMap<VI::Identity, Validator<VI>>,
@@ -96,6 +97,7 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
         p2p_keypair: libp2p::identity::Keypair,
         base_path: PathBuf,
         signer_whitelist: Option<HashSet<VI::Identity>>,
+        port: u16,
         automatic_dkg: Option<u16>,
     ) -> anyhow::Result<Self> {
         let swarm = libp2p::SwarmBuilder::with_existing_identity(p2p_keypair.clone())
@@ -156,7 +158,11 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                 ));
             }
             if min_signers == 0 || signer_whitelist.clone().unwrap().len() < min_signers as usize {
-                return Err(anyhow::anyhow!("min_signers must be greater than 0 and less than or equal to the number of signers in the whitelist"));
+                return Err(anyhow::anyhow!(
+                    "min_signers must be greater than 0 and less than or equal to the number of signers in the whitelist, min signer:{:?}, whitelist:{:?}",
+                    min_signers,
+                    signer_whitelist.clone().unwrap().len()
+                ));
             }
             Some(AutoDKG::new(min_signers, signer_whitelist.clone().unwrap()))
         } else {
@@ -165,6 +171,7 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
         Ok(Self {
             p2p_keypair,
             signer_whitelist,
+            listen_port: port,
             swarm,
             ipc_path: base_path.join(Settings::global().coordinator.ipc_socket_path),
             valid_validators: HashMap::new(),
@@ -184,9 +191,8 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
     // if automatic_dkg is Some(min_signers), the coordinator will do dkg for all ciphersuites,
     // if automatic_dkg is None, the coordinator will do dkg manually,
     pub async fn start_listening(mut self) -> Result<(), anyhow::Error> {
-        self.swarm.listen_on(
-            format!("/ip4/0.0.0.0/tcp/{}", Settings::global().coordinator.port).parse()?,
-        )?;
+        self.swarm
+            .listen_on(format!("/ip4/0.0.0.0/tcp/{}", self.listen_port).parse()?)?;
         let listener = self.start_ipc_listening().await?;
         loop {
             tokio::select! {

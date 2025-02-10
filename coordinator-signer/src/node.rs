@@ -2,7 +2,6 @@ use dashmap::DashMap;
 use libp2p::request_response::{OutboundRequestId, ProtocolSupport};
 use libp2p::{request_response, PeerId, StreamProtocol};
 use std::collections::HashMap;
-use std::net::IpAddr;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
@@ -474,16 +473,10 @@ impl<VI: ValidatorIdentity> Node<VI> {
     pub fn new(
         node_keypair: VI::Keypair,
         base_path: PathBuf,
-        coordinator_ip_addr: IpAddr,
+        coordinator_multiaddr: Multiaddr,
         coordinator_peer_id: PeerId,
     ) -> Result<Self, anyhow::Error> {
-        let coordinator_port = Settings::global().coordinator.port;
         let p2p_keypair = libp2p::identity::Keypair::generate_ed25519();
-        let coordinator_addr: Multiaddr = format!(
-            "/ip4/{}/tcp/{}/p2p/{}",
-            coordinator_ip_addr, coordinator_port, coordinator_peer_id
-        )
-        .parse()?;
         let fmt_string = node_keypair.to_public_key().to_identity().to_fmt_string();
         let ipc_path = base_path
             .join(Settings::global().node.ipc_socket_path)
@@ -503,7 +496,7 @@ impl<VI: ValidatorIdentity> Node<VI> {
         let (auto_dkg_request_sender, auto_dkg_request_receiver) = unbounded_channel();
         let swarm_node = NodeSwarm::<VI>::new(
             p2p_keypair.clone(),
-            coordinator_addr.clone(),
+            coordinator_multiaddr.clone(),
             coordinator_peer_id,
             dkg_request_receiver,
             signing_request_receiver,
@@ -517,7 +510,7 @@ impl<VI: ValidatorIdentity> Node<VI> {
         Ok(Self {
             node_keypair: node_keypair,
             p2p_keypair: p2p_keypair,
-            coordinator_addr: coordinator_addr,
+            coordinator_addr: coordinator_multiaddr,
             coordinator_peer_id: coordinator_peer_id,
             dkg_request_sender: dkg_request_sender,
             signing_request_sender: signing_request_sender,
@@ -550,7 +543,7 @@ impl<VI: ValidatorIdentity> Node<VI> {
         return request;
     }
     pub fn key_generate(
-        &mut self,
+        &self,
         crypto_type: CryptoType,
         participants: Vec<VI::Identity>,
         min_signers: u16,
@@ -569,7 +562,7 @@ impl<VI: ValidatorIdentity> Node<VI> {
         return Ok(receiver);
     }
     pub async fn key_generate_async(
-        &mut self,
+        &self,
         crypto_type: CryptoType,
         participants: Vec<VI::Identity>,
         min_signers: u16,
@@ -621,13 +614,16 @@ impl<VI: ValidatorIdentity> Node<VI> {
         ))?;
         return Ok(receiver);
     }
-    pub async fn auto_dkg_async(&self) -> Result<AutoDKG<VI::Identity>, anyhow::Error> {
+    pub async fn auto_dkg_async(
+        &self,
+        timeout: Option<Duration>,
+    ) -> Result<AutoDKG<VI::Identity>, anyhow::Error> {
         let r = self.auto_dkg()?;
-        let timeout = tokio::time::timeout(
-            Duration::from_secs(Settings::global().node.connection_timeout),
-            r,
-        )
-        .await?;
+        if timeout.is_none() {
+            let r = r.await?;
+            return r.map_err(|e| anyhow::anyhow!("auto_dkg error: {:?}", e));
+        }
+        let timeout = tokio::time::timeout(timeout.unwrap(), r).await?;
         let timeout = timeout.map_err(|e| anyhow::anyhow!("Timeout: {:?}", e))?;
         return timeout.map_err(|e| anyhow::anyhow!("auto_dkg error: {:?}", e));
     }
@@ -652,18 +648,19 @@ impl<VI: ValidatorIdentity> Node<VI> {
         &self,
         pkid: PkId,
         tweak_data: Option<Vec<u8>>,
+        timeout: Option<Duration>,
     ) -> Result<GroupPublicKeyInfo, anyhow::Error> {
         let r = self.pk(pkid, tweak_data)?;
-        let timeout = tokio::time::timeout(
-            Duration::from_secs(Settings::global().node.connection_timeout),
-            r,
-        )
-        .await?;
+        if timeout.is_none() {
+            let r = r.await?;
+            return r.map_err(|e| anyhow::anyhow!("pk error: {:?}", e));
+        }
+        let timeout = tokio::time::timeout(timeout.unwrap(), r).await?;
         let timeout = timeout.map_err(|e| anyhow::anyhow!("Timeout: {:?}", e))?;
         return timeout.map_err(|e| anyhow::anyhow!("pk error: {:?}", e));
     }
     pub fn sign(
-        &mut self,
+        &self,
         pkid: PkId,
         msg: Vec<u8>,
         tweak_data: Option<Vec<u8>>,
@@ -683,17 +680,18 @@ impl<VI: ValidatorIdentity> Node<VI> {
         return Ok(receiver);
     }
     pub async fn sign_async(
-        &mut self,
+        &self,
         pkid: PkId,
         msg: Vec<u8>,
         tweak_data: Option<Vec<u8>>,
+        timeout: Option<Duration>,
     ) -> Result<SignatureSuiteInfo<VI::Identity>, anyhow::Error> {
         let r = self.sign(pkid, msg, tweak_data)?;
-        let timeout = tokio::time::timeout(
-            Duration::from_secs(Settings::global().node.connection_timeout),
-            r,
-        )
-        .await?;
+        if timeout.is_none() {
+            let r = r.await?;
+            return r.map_err(|e| anyhow::anyhow!("sign error: {:?}", e));
+        }
+        let timeout = tokio::time::timeout(timeout.unwrap(), r).await?;
         let timeout = timeout.map_err(|e| anyhow::anyhow!("sign error: {:?}", e))?;
         return timeout.map_err(|e| anyhow::anyhow!("sign error: {:?}", e));
     }

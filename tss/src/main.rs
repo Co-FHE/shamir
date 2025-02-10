@@ -7,10 +7,9 @@ use coordinator_signer::signer::Signer;
 use coordinator_signer::{
     coordinator::Coordinator, crypto::validator_identity::ValidatorIdentityIdentity,
 };
-use libp2p::PeerId;
+use libp2p::{Multiaddr, PeerId};
 use rand::Rng;
 use std::collections::HashSet;
-use std::net::IpAddr;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::Duration;
@@ -51,11 +50,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
             None
         },
     );
-    let coordinator_ip_addr = Settings::global()
-        .coordinator
-        .remote_addr
-        .parse::<IpAddr>()
-        .unwrap();
+    // convert ip addr to multiaddr
+    let coordinator_multiaddr = format!(
+        "/ip4/{}/tcp/{}",
+        Settings::global().coordinator.remote_addr,
+        Settings::global().coordinator.port
+    )
+    .parse::<Multiaddr>()
+    .unwrap();
     let coordinator_peer_id =
         <PeerId as FromStr>::from_str(&Settings::global().coordinator.peer_id)?;
     let whitelist: HashSet<<P2pIdentity as ValidatorIdentity>::Identity> = Settings::global()
@@ -64,13 +66,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .iter()
         .map(|peer_id| <P2pIdentity as ValidatorIdentity>::Identity::from_fmt_str(peer_id).unwrap())
         .collect();
+    let min_signer = whitelist.len() as u16 / 2 + 1;
     let cmd = commands::parse_args();
     match cmd {
         commands::Commands::Coordinator => {
             // default keypair = 12D3KooWB3LpKiErRF3byUAsCvY6JL8TtQeSCrF5Hw23UoKJ7F88
             let keypair = load_keypair(Settings::global().coordinator.keypair_path.as_str());
-            let coordinator =
-                Coordinator::<P2pIdentity>::new(keypair, home_dir, Some(whitelist), Some(2))?;
+            let coordinator = Coordinator::<P2pIdentity>::new(
+                keypair,
+                home_dir,
+                Some(whitelist.clone()),
+                Settings::global().coordinator.port,
+                Some(min_signer),
+            )?;
             // coordinator.start_listening().await?;
             coordinator.start_listening().await?;
         }
@@ -88,7 +96,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             let signer = Signer::<P2pIdentity>::new(
                 keypair,
                 home_dir,
-                coordinator_ip_addr,
+                coordinator_multiaddr,
                 coordinator_peer_id,
                 |_, _| true,
             )?;
@@ -99,10 +107,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
             crypto_type,
         } => {
             let keypair = load_keypair(Settings::global().node.keypair_path.as_str());
-            let mut node = Node::<P2pIdentity>::new(
+            let node = Node::<P2pIdentity>::new(
                 keypair,
                 home_dir,
-                coordinator_ip_addr,
+                coordinator_multiaddr,
                 coordinator_peer_id,
             )?;
             let participants = Settings::global()
@@ -127,10 +135,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
             println!("message: {}", message);
             println!("tweak: {:?}", tweak);
             let keypair = load_keypair(Settings::global().node.keypair_path.as_str());
-            let mut node = Node::<P2pIdentity>::new(
+            let node = Node::<P2pIdentity>::new(
                 keypair,
                 home_dir,
-                coordinator_ip_addr,
+                coordinator_multiaddr,
                 coordinator_peer_id,
             )?;
             let resp = node
@@ -148,10 +156,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
             let pkid = PkId::new(hex::decode(&pkid).unwrap());
             let tweak = random_readable_string(100);
             let keypair = load_keypair(Settings::global().node.keypair_path.as_str());
-            let mut node = Node::<P2pIdentity>::new(
+            let node = Node::<P2pIdentity>::new(
                 keypair,
                 home_dir,
-                coordinator_ip_addr,
+                coordinator_multiaddr,
                 coordinator_peer_id,
             )?;
             let mut queue = Vec::new();
@@ -188,7 +196,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             let node = Node::<P2pIdentity>::new(
                 keypair,
                 home_dir,
-                coordinator_ip_addr,
+                coordinator_multiaddr,
                 coordinator_peer_id,
             )?;
             let r = node.lspk_async().await.unwrap();
@@ -202,10 +210,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
             let node = Node::<P2pIdentity>::new(
                 keypair,
                 home_dir,
-                coordinator_ip_addr,
+                coordinator_multiaddr,
                 coordinator_peer_id,
             )?;
-            let r = node.auto_dkg_async().await.unwrap();
+            let r = node.auto_dkg_async(None).await.unwrap();
             println!("{}", r);
         }
         commands::Commands::Pk { pkid, tweak } => {
@@ -213,13 +221,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
             let node = Node::<P2pIdentity>::new(
                 keypair,
                 home_dir,
-                coordinator_ip_addr,
+                coordinator_multiaddr,
                 coordinator_peer_id,
             )?;
             let r = node
                 .pk_async(
                     PkId::new(hex::decode(&pkid).unwrap()),
                     tweak.map(|t| t.as_bytes().to_vec()),
+                    None,
                 )
                 .await
                 .unwrap();

@@ -255,6 +255,9 @@ impl<VII: ValidatorIdentityIdentity + Serialize + for<'de> Deserialize<'de>>
             .verify(&message, &signature)
             .map_err(|e| e.to_string())
     }
+    pub fn signature(&self) -> Vec<u8> {
+        self.signature.clone()
+    }
 }
 impl<VII: ValidatorIdentityIdentity + Serialize + for<'de> Deserialize<'de>>
     SignatureSuiteInfo<VII>

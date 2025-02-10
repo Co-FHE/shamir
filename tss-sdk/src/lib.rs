@@ -5,6 +5,7 @@ pub mod crypto {
     pub mod sr25519_identity {
         pub use coordinator_signer::crypto::validator_identity::sr25519_identity::*;
     }
+    pub use coordinator_signer::crypto::CryptoType;
     pub use coordinator_signer::crypto::PkId;
     pub use coordinator_signer::crypto::ValidatorIdentity;
     pub use coordinator_signer::crypto::ValidatorIdentityIdentity;

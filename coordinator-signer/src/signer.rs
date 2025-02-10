@@ -7,7 +7,6 @@ use libp2p::{ping, rendezvous, request_response, PeerId, StreamProtocol};
 use manager::{Request, SessionManagerError};
 use session::SessionWrap;
 use std::collections::HashMap;
-use std::net::IpAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -45,7 +44,7 @@ pub struct Signer<VI: ValidatorIdentity> {
     validator_keypair: VI::Keypair,
     p2p_keypair: libp2p::identity::Keypair,
     swarm: libp2p::Swarm<SigBehaviour<VI::Identity>>,
-    coordinator_addr: Multiaddr,
+    coordinator_multiaddr: Multiaddr,
     ipc_path: PathBuf,
     coordinator_peer_id: PeerId,
     register_request_id: Option<request_response::OutboundRequestId>,
@@ -71,11 +70,10 @@ impl<VI: ValidatorIdentity> Signer<VI> {
     pub fn new<F: Fn(&VI::Identity, &[u8]) -> bool + Send + Sync + 'static>(
         validator_keypair: VI::Keypair,
         base_path: PathBuf,
-        coordinator_ip_addr: IpAddr,
+        coordinator_multiaddr: Multiaddr,
         coordinator_peer_id: PeerId,
         verify_message_fn: F,
     ) -> Result<Self, anyhow::Error> {
-        let coordinator_port = Settings::global().coordinator.port;
         let keypair = libp2p::identity::Keypair::generate_ed25519();
         let mut swarm = libp2p::SwarmBuilder::with_existing_identity(keypair.clone())
             .with_tokio()
@@ -107,12 +105,7 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                     .with_max_negotiating_inbound_streams(100000)
             })
             .build();
-        let coordinator_addr: Multiaddr = format!(
-            "/ip4/{}/tcp/{}/p2p/{}",
-            coordinator_ip_addr, coordinator_port, coordinator_peer_id
-        )
-        .parse()?;
-        swarm.add_peer_address(coordinator_peer_id, coordinator_addr.clone());
+        swarm.add_peer_address(coordinator_peer_id, coordinator_multiaddr.clone());
         let (request_sender, request_receiver) = tokio::sync::mpsc::unbounded_channel();
         manager::SignerSessionManager::new(
             request_receiver,
@@ -131,7 +124,7 @@ impl<VI: ValidatorIdentity> Signer<VI> {
             validator_keypair: validator_keypair.clone(),
             p2p_keypair: keypair,
             swarm,
-            coordinator_addr,
+            coordinator_multiaddr,
             ipc_path: base_path
                 .join(Settings::global().signer.ipc_socket_path)
                 .join(format!(
@@ -168,7 +161,7 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                             .to_public_key()
                             .to_identity()
                             .to_fmt_string(),
-                        self.coordinator_addr
+                        self.coordinator_multiaddr
                     );
                     self.dial_coordinator()?;
                     self.connection_state =
@@ -182,7 +175,7 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                             .to_identity()
                             .to_fmt_string(),
                         last_connecting_time.elapsed().as_secs_f64(),
-                        self.coordinator_addr
+                        self.coordinator_multiaddr
                     );
                     let elapsed = last_connecting_time.elapsed();
                     if elapsed
@@ -217,7 +210,7 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                     {
                         tracing::info!(
                             "Connecting timeout, start dialing coordinator {:?}",
-                            self.coordinator_addr
+                            self.coordinator_multiaddr
                         );
                         self.dial_coordinator()?;
                         self.connection_state =
@@ -266,7 +259,7 @@ impl<VI: ValidatorIdentity> Signer<VI> {
         }
     }
     pub(crate) fn dial_coordinator(&mut self) -> Result<(), anyhow::Error> {
-        self.swarm.dial(self.coordinator_addr.clone())?;
+        self.swarm.dial(self.coordinator_multiaddr.clone())?;
         Ok(())
     }
     pub(crate) async fn handle_swarm_event(
@@ -573,7 +566,7 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                 match command {
                     Command::PeerId => {
                         tracing::info!("Sending peer id");
-                        reader.get_mut().write_all(format!("p2p peer id: {}\nvalidator peer id: {}\ncoordinator peer id: {}", self.p2p_keypair.public().to_peer_id().to_base58(), self.validator_keypair.to_public_key().to_identity().to_fmt_string(), self.coordinator_addr.to_string()).as_bytes()).await?;
+                        reader.get_mut().write_all(format!("p2p peer id: {}\nvalidator peer id: {}\ncoordinator peer id: {}", self.p2p_keypair.public().to_peer_id().to_base58(), self.validator_keypair.to_public_key().to_identity().to_fmt_string(), self.coordinator_multiaddr.to_string()).as_bytes()).await?;
                         reader.get_mut().write_all(b"\n").await?;
                     }
                     Command::Help => {
@@ -601,7 +594,7 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                         tracing::info!("Sending coordinator peer id");
                         reader
                             .get_mut()
-                            .write_all(self.coordinator_addr.to_string().as_bytes())
+                            .write_all(self.coordinator_multiaddr.to_string().as_bytes())
                             .await?;
                         reader.get_mut().write_all(b"\n").await?;
                     }

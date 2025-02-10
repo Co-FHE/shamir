@@ -13,9 +13,9 @@ coordinator:
   ipc_socket_path: "ipc/coordinator.sock"
   keystore_path: "keystore/coordinator"
   peer_id_whitelist:
-    - "12D3KooWQdd3vZB7PQtcGBGxpP52oCXX4X4xCVrqi8r8Ejs6nTg3"
-    - "12D3KooWRL6gitv6stQxyERJuraGNVZGQThWXGo9TC2Njf6XFB1X"
-    - "12D3KooWERAyoKaecWpu7u9iN9ZaoL2r5ZBtWtkKSZ4rFs2KBWW4"
+    - "12D3KooWRL6gitv6stQxyERJuraGNVZGQThWXGo9TC2Njf6XFB1X" # signer 1
+    - "12D3KooWQdd3vZB7PQtcGBGxpP52oCXX4X4xCVrqi8r8Ejs6nTg3" # signer 2
+    # - "12D3KooWERAyoKaecWpu7u9iN9ZaoL2r5ZBtWtkKSZ4rFs2KBWW4"
 signer:
   allow_external_address: true
   keypair_path_mapping: { 1: "keys_for_test/signer1.key", 2: "keys_for_test/signer2.key", 3: "keys_for_test/signer3.key" }

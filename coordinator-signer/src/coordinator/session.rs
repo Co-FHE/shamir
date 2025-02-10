@@ -96,7 +96,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
             None => HashMap::new(),
         };
         for (pkid, _) in signing_sessions.iter() {
-            tracing::info!("{} restored from keystore", pkid);
+            tracing::info!("Coordinator restored pkid: {} from local keystore", pkid);
         }
         Ok(Self {
             signing_sessions,
@@ -248,7 +248,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
         });
     }
     async fn handle_instruction(&mut self, instruction: InstructionCipher<VII>) {
-        tracing::info!("Received instruction: {:?}", instruction);
+        tracing::debug!("Coordinator received instruction: {:?}", instruction);
         match instruction {
             InstructionCipher::NewKey {
                 participants,
@@ -310,7 +310,6 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
                         Ok(GroupPublicKeyInfo::new(group_public_key_tweak, tweak_data))
                     })
                     .map_err(|e| SessionManagerError::SessionError(e.to_string()));
-                tracing::info!("Sending pk response: {:?}", r);
                 if let Err(e) = pk_response_oneshot.send(r) {
                     tracing::error!("Error sending pk response: {:?}", e);
                 }

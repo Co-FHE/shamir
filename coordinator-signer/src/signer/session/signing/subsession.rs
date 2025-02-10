@@ -34,7 +34,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SignerSubsession<VII, C> {
     ) -> Result<(Self, SigningResponse<VII, C>), SessionError<C>> {
         if let SigningRequestStage::Round1 {} = request.stage.clone() {
             base.check_request(&request)?;
-            tracing::info!("round1 {:?}", base.key_package);
+            tracing::debug!("round1 {:?}", base.key_package);
             let (nonces, commitments) = C::commit(&base.key_package, &mut rng);
             let response = SigningResponse {
                 base_info: request.base_info.clone(),

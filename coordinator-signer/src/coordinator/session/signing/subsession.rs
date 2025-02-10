@@ -113,7 +113,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
                     }
                 }
             }
-            tracing::info!("Sent {} round 1 requests", round1_sent);
+            tracing::debug!("Sent {} round 1 requests", round1_sent);
             let (event_channel_tx, mut event_channel_rx) = unbounded_channel();
             // round1 thread
             let handle = tokio::spawn(async move {
@@ -303,7 +303,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
                     Ok(next_state) => {
                         self.state = next_state;
                         if let Some((signature, joined_participants)) = self.state.completed() {
-                            tracing::info!("Signing completed successfully");
+                            tracing::debug!("Signing completed successfully");
                             break 'out Ok(SignatureSuite {
                                 signature,
                                 pk: self.public_key.clone(),

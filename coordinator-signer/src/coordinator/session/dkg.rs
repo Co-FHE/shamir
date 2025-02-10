@@ -103,7 +103,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher + PartialEq + Eq> CoordinatorDKGS
                         public_key_package,
                     });
                 }
-                tracing::info!("Starting new DKG round");
+                tracing::debug!("Starting new DKG round");
                 let mut futures = FuturesUnordered::new();
                 match self.split_into_single_requests() {
                     Ok(requests) => {
@@ -135,7 +135,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher + PartialEq + Eq> CoordinatorDKGS
                     }
                 }
                 let mut responses = BTreeMap::new();
-                tracing::info!("Waiting for {} responses", self.participants.len());
+                tracing::debug!("Waiting for {} responses", self.participants.len());
                 for i in 0..self.participants.len() {
                     tracing::debug!("Waiting for response {}/{}", i + 1, self.participants.len());
                     let response = futures.next().await;
@@ -377,7 +377,10 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher + PartialEq + Eq> CoordinatorDKGS
                     // TODO: check public key package is the same
                 }
                 if let Some(public_key) = public_key {
-                    tracing::info!("DKG state completed, public key: {:?}", public_key);
+                    tracing::info!(
+                        "Coordinator DKG state completed, public key: {:?}",
+                        public_key
+                    );
                     Ok(CoordinatorDKGState::Completed { public_key })
                 } else {
                     Err(SessionError::InvalidResponse(

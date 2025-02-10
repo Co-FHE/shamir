@@ -143,7 +143,7 @@ impl<VI: ValidatorIdentity> Signer<VI> {
     }
     pub async fn start_listening(mut self) -> Result<(), anyhow::Error> {
         tracing::info!(
-            "signer {:?} start listening",
+            "Signer {} start listening",
             self.validator_keypair
                 .to_public_key()
                 .to_identity()
@@ -156,7 +156,7 @@ impl<VI: ValidatorIdentity> Signer<VI> {
             match self.connection_state {
                 ConnectionState::Disconnected(None) => {
                     tracing::info!(
-                        "signer {:?}'s connection state is disconnected, start dialing coordinator {:?}",
+                        "Signer {}'s connection state is disconnected, start dialing coordinator {}",
                         self.validator_keypair
                             .to_public_key()
                             .to_identity()
@@ -169,7 +169,7 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                 }
                 ConnectionState::Disconnected(Some(last_connecting_time)) => {
                     tracing::info!(
-                        "signer {:?}'s connection state is disconnected, last connecting time: {:?} seconds ago, start dialing coordinator {:?}",
+                        "Signer {}'s connection state is disconnected, last connecting time: {:?} seconds ago, start dialing coordinator {}",
                         self.validator_keypair
                             .to_public_key()
                             .to_identity()
@@ -198,7 +198,7 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                 }
                 ConnectionState::Connecting(start_time) => {
                     tracing::info!(
-                        "signer {:?}'s connection state is connecting, start connecting time: {:?} seconds ago",
+                        "Signer {}'s connection state is connecting, start connecting time: {:?} seconds ago",
                         self.validator_keypair
                             .to_public_key()
                             .to_identity()
@@ -209,7 +209,11 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                         > Duration::from_secs(common::Settings::global().signer.connection_timeout)
                     {
                         tracing::info!(
-                            "Connecting timeout, start dialing coordinator {:?}",
+                            "Signer {} connecting timeout, start dialing coordinator {}",
+                            self.validator_keypair
+                                .to_public_key()
+                                .to_identity()
+                                .to_fmt_string(),
                             self.coordinator_multiaddr
                         );
                         self.dial_coordinator()?;
@@ -251,7 +255,7 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                 }
             } else {
                 let event = self.swarm.select_next_some().await;
-                tracing::info!("received swarm event: {:?}", event);
+                tracing::debug!("Signer received swarm event: {:?}", event);
                 if let Err(e) = self.handle_swarm_event(event).await {
                     tracing::error!("Error handling behaviour event: {}", e);
                 }
@@ -271,7 +275,7 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                 if Settings::global().signer.allow_external_address {
                     self.swarm.add_external_address(address.clone());
                 }
-                tracing::info!("Listening on {address:?}")
+                tracing::info!("Signer listening on {address:?}")
             }
             SwarmEvent::ConnectionClosed {
                 peer_id,
@@ -282,17 +286,17 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                 self.connection_state = ConnectionState::Disconnected(None);
             }
             SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
-                tracing::info!(
-                    "peer_id:{:?}, coordinator_peer_id:{:?}",
-                    peer_id,
-                    self.coordinator_peer_id
-                );
                 if peer_id == Some(self.coordinator_peer_id) {
-                    tracing::error!("Outgoing connection to {:?} error: {:?}", peer_id, error);
+                    tracing::error!(
+                        "Signer outgoing connection error, peer_id:{:?}, coordinator_peer_id:{:?}, error: {:?}",
+                        peer_id,
+                        self.coordinator_peer_id,
+                        error
+                    );
                     if let ConnectionState::Connecting(last_connecting_time) = self.connection_state
                     {
                         tracing::info!(
-                            "Outgoing connection error, set connection state to disconnected with last connecting time: {:.3} seconds ago",
+                            "Signer outgoing connection error, set connection state to disconnected with last connecting time: {:.3} seconds ago",
                             last_connecting_time.elapsed().as_secs_f64()
                         );
                         self.connection_state =
@@ -312,7 +316,6 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                     tracing::error!("Failed to register: {error}");
                     return Err(anyhow::anyhow!("Failed to register: {error}"));
                 }
-                tracing::info!("Connection established with coordinator {}", peer_id);
                 let hash = list_hash(&[
                     "register".as_bytes(),
                     self.validator_keypair
@@ -337,7 +340,7 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                     SigToCoorRequest::ValidatorIndentity(request.clone()),
                 );
                 tracing::info!(
-                    "Sent registration request to coordinator with request_id: {:?}, pk: {}, validator_peer_id: {:?}, nonce: {:?}",
+                    "Signer sent registration request to coordinator with request_id: {:?}, pk: {}, validator_peer_id: {:?}, nonce: {:?}",
                     request_id,
                     hex::encode(request.public_key),
                     self.validator_keypair.to_public_key().to_identity().to_fmt_string(),
@@ -352,8 +355,8 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                     rendezvous_node,
                 },
             )) => {
-                tracing::info!(
-                    "Registered for namespace '{}' at rendezvous point {} for the next {} seconds",
+                tracing::debug!(
+                    "Signer registered for namespace '{}' at rendezvous point {} for the next {} seconds",
                     namespace,
                     rendezvous_node,
                     ttl
@@ -379,7 +382,7 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                 result: Ok(rtt),
                 ..
             })) if peer != self.coordinator_peer_id => {
-                tracing::info!("Ping to {} is {}ms", peer, rtt.as_millis())
+                tracing::debug!("Ping to {} is {}ms", peer, rtt.as_millis())
             }
             SwarmEvent::Behaviour(SigBehaviourEvent::Identify(identify::Event::Received {
                 ..
@@ -409,14 +412,14 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                     tracing::warn!("Received request from invalid peer: {}", peer);
                     return Ok(());
                 }
-                tracing::info!(
-                    "Received request from {:?} with request {:?}",
-                    peer,
-                    request
-                );
                 match request {
                     CoorToSigRequest::DKGRequest(request) => {
-                        tracing::info!("Received dkg request: {:?}", request);
+                        tracing::info!(
+                            "Signer received dkg request: crypto_type: {}, from identity: {}, request_id: {}",
+                            request.crypto_type(),
+                            request.identity().to_fmt_string(),
+                            request_id
+                        );
                         let (tx, rx) = tokio::sync::oneshot::channel();
                         self.dkg_response_futures.push(rx);
                         self.channel_mapping.insert(request_id, channel);
@@ -425,7 +428,13 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                             .unwrap();
                     }
                     CoorToSigRequest::SigningRequest(request) => {
-                        tracing::info!("Received signing request: {:?}", request);
+                        tracing::info!(
+                            "Signer received signing request: crypto_type: {}, from identity: {}, message: {:?}, request_id: {}",
+                            request.crypto_type(),
+                            request.identity().to_fmt_string(),
+                            request.message().map(|m| hex::encode(m)),
+                            request_id
+                        );
                         if let Some(message) = request.message() {
                             // TODO: verifying message may take a long time, we need to do it in a separate thread
                             // TODO: should response rejecting the request if the message is invalid instead of discarding the request
@@ -443,7 +452,7 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                             .unwrap();
                     }
                     CoorToSigRequest::Empty => {
-                        tracing::info!("Received empty request");
+                        tracing::info!("Signer received an empty request");
                     }
                 }
             }
@@ -473,7 +482,7 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                     self.register_request_id = None;
                     match response {
                         SigToCoorResponse::Success => {
-                            tracing::info!("Registered with coordinator");
+                            tracing::info!("Signer registered with coordinator successfully");
                         }
                         SigToCoorResponse::Failure(error) => {
                             tracing::error!("Failed to register: {}", error);
@@ -506,7 +515,10 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                     .send_response(channel, CoorToSigResponse::DKGResponse(response.clone()));
                 match r {
                     Ok(_) => {
-                        tracing::info!("Sent dkg response to coordinator");
+                        tracing::info!(
+                            "Signer sent dkg response to coordinator successfully with request_id: {}",
+                            id
+                        );
                     }
                     Err(e) => {
                         tracing::error!("Failed to send dkg response to coordinator: {:?}", e);
@@ -536,7 +548,10 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                 );
                 match r {
                     Ok(_) => {
-                        tracing::info!("Sent signing response to coordinator");
+                        tracing::info!(
+                            "Signer sent signing response to coordinator successfully with request_id: {}",
+                            request_id
+                        );
                     }
                     Err(e) => {
                         tracing::error!("Failed to send signing response to coordinator: {:?}", e);
@@ -561,16 +576,16 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                 if bytes_read == 0 {
                     return Ok(());
                 }
-                tracing::info!("Received command: {}", line);
+                tracing::debug!("Received command: {}", line);
                 let command = Command::parse(&line);
                 match command {
                     Command::PeerId => {
-                        tracing::info!("Sending peer id");
+                        tracing::debug!("Sending peer id");
                         reader.get_mut().write_all(format!("p2p peer id: {}\nvalidator peer id: {}\ncoordinator peer id: {}", self.p2p_keypair.public().to_peer_id().to_base58(), self.validator_keypair.to_public_key().to_identity().to_fmt_string(), self.coordinator_multiaddr.to_string()).as_bytes()).await?;
                         reader.get_mut().write_all(b"\n").await?;
                     }
                     Command::Help => {
-                        tracing::info!("Sending help text");
+                        tracing::debug!("Sending help text");
                         reader
                             .get_mut()
                             .write_all(Command::help_text().as_bytes())
@@ -591,7 +606,7 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                         reader.get_mut().write_all(b"\n").await?;
                     }
                     Command::CoordinatorPeerId => {
-                        tracing::info!("Sending coordinator peer id");
+                        tracing::debug!("Sending coordinator peer id");
                         reader
                             .get_mut()
                             .write_all(self.coordinator_multiaddr.to_string().as_bytes())
@@ -599,7 +614,7 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                         reader.get_mut().write_all(b"\n").await?;
                     }
                     Command::P2pPeerId => {
-                        tracing::info!("Sending p2p peer id");
+                        tracing::debug!("Sending p2p peer id");
                         reader
                             .get_mut()
                             .write_all(
@@ -613,7 +628,7 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                         reader.get_mut().write_all(b"\n").await?;
                     }
                     Command::PingCoordinator => {
-                        tracing::info!("Pinging coordinator");
+                        tracing::debug!("Pinging coordinator");
                         if let Err(e) = self.dial_coordinator() {
                             reader.get_mut().write_all(e.to_string().as_bytes()).await?;
                         } else {
@@ -621,7 +636,7 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                         }
                     }
                     Command::Unknown(cmd) => {
-                        tracing::info!("Unknown command: {}", cmd);
+                        tracing::debug!("Unknown command: {}", cmd);
                         let msg = format!("Unknown command: {}\n", cmd);
                         reader.get_mut().write_all(msg.as_bytes()).await?;
                         reader
@@ -639,7 +654,7 @@ impl<VI: ValidatorIdentity> Signer<VI> {
     }
     pub async fn start_ipc_listening(&mut self) -> anyhow::Result<UnixListener> {
         // Remove existing IPC socket file if it exists
-        tracing::info!("IPC Listening on {:?}", self.ipc_path);
+        tracing::info!("Signer IPC Listening on {:?}", self.ipc_path);
         if self.ipc_path.exists() {
             std::fs::remove_file(&self.ipc_path)?;
         } else {

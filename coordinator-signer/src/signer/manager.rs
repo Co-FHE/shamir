@@ -152,7 +152,7 @@ impl<VII: ValidatorIdentityIdentity> SignerSessionManager<VII> {
                                 .session_inst_channels
                                 .get(&signing_request_wrap.crypto_type());
                             if let Some(session_inst_channel) = session_inst_channel {
-                                tracing::info!("sending signing request");
+                                tracing::debug!("sending signing request");
                                 session_inst_channel
                                     .send(Request::Signing(
                                         (request_id, signing_request_wrap),

@@ -211,7 +211,7 @@ impl<VI: ValidatorIdentity> NodeSwarm<VI> {
                     }
                 } else {
                     let event = self.swarm.select_next_some().await;
-                    tracing::info!("{:?}", event);
+                    tracing::debug!("Node received event: {:?}", event);
                     if let Err(e) = self.handle_swarm_event(event).await {
                         tracing::error!("Error handling behaviour event: {}", e);
                     }
@@ -289,18 +289,22 @@ impl<VI: ValidatorIdentity> NodeSwarm<VI> {
     ) -> Result<(), anyhow::Error> {
         match event {
             SwarmEvent::NewListenAddr { address, .. } => {
-                tracing::info!("Listening on {address:?}")
+                tracing::info!("Node listening on {address:?}")
             }
             SwarmEvent::ConnectionClosed {
                 peer_id,
                 cause: Some(error),
                 ..
             } if peer_id == self.coordinator_peer_id => {
-                tracing::warn!("Lost connection to rendezvous point {}", error);
+                tracing::warn!("Node lost connection to rendezvous point {}", error);
                 self.connection_state = ConnectionState::Disconnected(None);
             }
             SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
-                tracing::error!("Outgoing connection to {:?} error: {:?}", peer_id, error);
+                tracing::error!(
+                    "Node outgoing connection to {:?} error: {:?}",
+                    peer_id,
+                    error
+                );
                 if let ConnectionState::Connecting(start_time) = self.connection_state {
                     self.connection_state = ConnectionState::Disconnected(Some(start_time));
                 }
@@ -317,7 +321,7 @@ impl<VI: ValidatorIdentity> NodeSwarm<VI> {
                 //     tracing::error!("Failed to register: {error}");
                 //     return Err(anyhow::anyhow!("Failed to register: {error}"));
                 // }
-                // tracing::info!("Connection established with coordinator {}", peer_id);
+                tracing::info!("Node connected to coordinator {}", peer_id);
             }
             SwarmEvent::Behaviour(NodeBehaviourEvent::Identify(identify::Event::Received {
                 ..
@@ -488,7 +492,7 @@ impl<VI: ValidatorIdentity> Node<VI> {
             std::fs::remove_file(&ipc_path)?;
         }
 
-        tracing::info!("IPC Listening on {:?}", ipc_path);
+        tracing::info!("Node IPC Listening on {}", ipc_path.display());
         let (dkg_request_sender, dkg_request_receiver) = unbounded_channel();
         let (signing_request_sender, signing_request_receiver) = unbounded_channel();
         let (lspk_request_sender, lspk_request_receiver) = unbounded_channel();
@@ -697,17 +701,14 @@ impl<VI: ValidatorIdentity> Node<VI> {
     }
     pub fn print_info(&self) -> Result<(), anyhow::Error> {
         tracing::info!(
-            "p2p peer id: {}",
-            self.p2p_keypair.public().to_peer_id().to_base58()
-        );
-        tracing::info!(
-            "validator peer id: {}",
+            "Node's identity: {}, p2p peer id: {}, coordinator peer id: {}",
             self.node_keypair
                 .to_public_key()
                 .to_identity()
-                .to_fmt_string()
+                .to_fmt_string(),
+            self.p2p_keypair.public().to_peer_id().to_base58(),
+            self.coordinator_addr.to_string()
         );
-        tracing::info!("coordinator peer id: {}", self.coordinator_addr.to_string());
 
         Ok(())
     }

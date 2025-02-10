@@ -41,9 +41,6 @@ impl KeystoreManagement {
             let data = keystore.decrypt(ciphertext)?;
             Some(data)
         };
-        println!("data: {:?}", data);
-        println!("path: {:?}", path);
-        println!("tmp_path: {:?}", tmp_path);
         Ok((
             Self {
                 keystore,

@@ -401,8 +401,19 @@ impl<VI: ValidatorIdentity> NodeSwarm<VI> {
                         if let Some((_, response_oneshot)) =
                             self.auto_dkg_response_mapping.remove(&request_id)
                         {
-                            if let Err(e) = response_oneshot.send(Ok(auto_dkg_result)) {
-                                tracing::error!("Failed to send response: {:?}", e);
+                            match auto_dkg_result {
+                                Some(auto_dkg_result) => {
+                                    if let Err(e) = response_oneshot.send(Ok(auto_dkg_result)) {
+                                        tracing::error!("Failed to send response: {:?}", e);
+                                    }
+                                }
+                                None => {
+                                    if let Err(e) = response_oneshot
+                                        .send(Err("auto_dkg_result is None".to_string()))
+                                    {
+                                        tracing::error!("Failed to send response: {:?}", e);
+                                    }
+                                }
                             }
                         }
                     }

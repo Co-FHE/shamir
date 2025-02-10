@@ -377,10 +377,15 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher + PartialEq + Eq> CoordinatorDKGS
                     // TODO: check public key package is the same
                 }
                 if let Some(public_key) = public_key {
-                    tracing::info!(
-                        "Coordinator DKG state completed, public key: {:?}",
-                        public_key
-                    );
+                    match public_key.pkid() {
+                        Ok(pkid) => {
+                            tracing::info!("Coordinator DKG state completed, pkid: {}", pkid)
+                        }
+                        Err(e) => tracing::error!(
+                            "Coordinator DKG state completed, but got error when getting pkid: {}",
+                            e
+                        ),
+                    };
                     Ok(CoordinatorDKGState::Completed { public_key })
                 } else {
                     Err(SessionError::InvalidResponse(

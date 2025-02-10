@@ -421,7 +421,7 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
             )) => match response {
                 CoorToSigResponse::DKGResponse(response) => {
                     tracing::info!(
-                        "Coordinator received dkg response from signer {:?} with request_id {:?}",
+                        "Coordinator received dkg response from signer {} with request_id {}",
                         peer,
                         request_id
                     );
@@ -642,13 +642,25 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                         });
                     }
                     NodeToCoorRequest::AutoDKGRequest { .. } => {
-                        let auto_dkg = self.auto_dkg.as_ref().unwrap();
-                        let auto_dkg_result = auto_dkg.read().await.clone();
-                        if let Err(e) = self.swarm.behaviour_mut().node2coor.send_response(
-                            channel,
-                            NodeToCoorResponse::AutoDKGResponse { auto_dkg_result },
-                        ) {
-                            tracing::error!("Error sending response to node: {:?}", e);
+                        if let Some(auto_dkg) = &self.auto_dkg {
+                            let auto_dkg_result = auto_dkg.read().await.clone();
+                            if let Err(e) = self.swarm.behaviour_mut().node2coor.send_response(
+                                channel,
+                                NodeToCoorResponse::AutoDKGResponse {
+                                    auto_dkg_result: Some(auto_dkg_result),
+                                },
+                            ) {
+                                tracing::error!("Error sending response to node: {:?}", e);
+                            }
+                        } else {
+                            if let Err(e) = self.swarm.behaviour_mut().node2coor.send_response(
+                                channel,
+                                NodeToCoorResponse::AutoDKGResponse {
+                                    auto_dkg_result: None,
+                                },
+                            ) {
+                                tracing::error!("Error sending response to node: {:?}", e);
+                            }
                         }
                     }
                     NodeToCoorRequest::PkTweakRequest {
@@ -825,15 +837,17 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
             }
             // update auto dkg
             if let Some(auto_dkg) = &self.auto_dkg {
+                let min_signers = auto_dkg.read().await.min_signers;
                 if let Some(participants) = auto_dkg
                     .write()
                     .await
                     .register_signer(validator_peer.clone())
                 {
+                    // note you cannot use read() here, because it will block the thread
                     tracing::info!(
                         "Coordinator starts auto DKG with {} participants and min signers {}",
                         participants.len(),
-                        auto_dkg.read().await.min_signers
+                        min_signers
                     );
                     for crypto_type in <CryptoType as strum::IntoEnumIterator>::iter() {
                         let manger_instruction_sender = self.instruction_sender.clone();

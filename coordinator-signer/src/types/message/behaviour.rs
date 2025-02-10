@@ -104,7 +104,7 @@ pub(crate) enum NodeToCoorResponse<VII: ValidatorIdentityIdentity> {
         pkid: PkId,
     },
     AutoDKGResponse {
-        auto_dkg_result: AutoDKG<VII>,
+        auto_dkg_result: Option<AutoDKG<VII>>,
     },
     SigningResponse {
         signature_suite_info: SignatureSuiteInfo<VII>,

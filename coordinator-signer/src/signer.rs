@@ -240,7 +240,6 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                     }
                     Some(Result::Ok(dkg_request)) = self.dkg_response_futures.next() => {
                         tracing::debug!("Received dkg request");
-                        println!("Received dkg request");
                         if let Err(e) = self.dkg_handle_response(dkg_request).await {
                             tracing::error!("Error handling dkg response: {}", e);
                         }

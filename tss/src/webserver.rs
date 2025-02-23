@@ -3,12 +3,10 @@ use coordinator_signer::crypto::{CryptoType, PkId};
 use coordinator_signer::node::Node;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::time::Duration;
-use tokio;
 use warp::reply::Json;
 use warp::Filter;
-use warp::Reply;
 #[derive(Deserialize)]
 struct GetPublicKeyRequest {
     crypto_type: String,

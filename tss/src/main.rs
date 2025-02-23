@@ -29,10 +29,10 @@ pub fn load_keypair(path: &str) -> libp2p::identity::Keypair {
     libp2p::identity::Keypair::from_protobuf_encoding(buffer.as_slice()).unwrap()
 }
 pub(crate) fn random_readable_string(length: usize) -> String {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let mut bytes = Vec::with_capacity(length);
     for _ in 0..length {
-        bytes.push(rng.gen::<u8>());
+        bytes.push(rng.random::<u8>());
     }
     hex::encode(bytes)
 }

@@ -1,4 +1,5 @@
 mod commands;
+mod webserver;
 use common::Settings;
 use coordinator_signer::crypto::validator_identity::p2p_identity::P2pIdentity;
 use coordinator_signer::crypto::{PkId, ValidatorIdentity};
@@ -12,11 +13,13 @@ use rand::Rng;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::sync::Arc;
 use std::time::Duration;
 use std::{error::Error, fs::File, io::Read};
 use tokio::time::Instant;
 use tokio::{self, time};
 use tracing;
+use webserver::start_webserver;
 
 pub fn load_keypair(path: &str) -> libp2p::identity::Keypair {
     let mut f = File::open(path).unwrap();
@@ -151,6 +154,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
             let r = resp.await.unwrap().unwrap();
             println!("{}", r.pretty_print());
             println!("{:?}", r._verify());
+        }
+        commands::Commands::Web { port } => {
+            let keypair = load_keypair(Settings::global().node.keypair_path.as_str());
+            let node = Node::<P2pIdentity>::new(
+                keypair,
+                home_dir,
+                coordinator_multiaddr,
+                coordinator_peer_id,
+            )?;
+            start_webserver(Arc::new(node), port).await?;
         }
         commands::Commands::LoopSign { pkid, times } => {
             let pkid = PkId::new(hex::decode(&pkid).unwrap());

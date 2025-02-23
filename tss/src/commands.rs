@@ -45,6 +45,10 @@ pub enum Commands {
         /// The ID of the signer
         id: u16,
     },
+    Web {
+        #[arg(short, long, default_value = "3030")]
+        port: u16,
+    },
 }
 
 fn parse_crypto_type(s: &str) -> Result<CryptoType, String> {

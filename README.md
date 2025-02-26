@@ -36,6 +36,7 @@ Here we explain some terms related to the framework design:
 The state machine plays a crucial role here. Each session may involve multiple rounds of interaction, and the state update for each interaction needs to be tracked and verified. By designing a state machine, multiple sessions can run in parallel without interfering with each other, significantly improving system efficiency.
 
 #### Coordinator/Dealer
+![Responsibility of Coordinator](assets/imgs/coordiantor_responsibility.png)
 
 The Coordinator plays a pivotal role in coordinating the activities of signers and facilitating computations involving public information. Their responsibilities are as follows:
 

@@ -195,7 +195,6 @@ The sr25519-based identity solution is implemented in the `sr25519_identity.rs` 
 
 - **Identity and Public Key Conversion:**  
   - Converts sr25519 public keys into `AccountId32` identities using the `from_public_key` method.
-  - Supports bidirectional conversions between identity representations (strings and byte arrays) with methods such as `to_fmt_string`, `from_fmt_str`, `to_bytes`, and `from_bytes`. 
 
 
 The sr25519 scheme is ideal for on-chain operations within the Substrate ecosystem, where high security in managing and distributing secret shares is critical.

@@ -30,13 +30,16 @@ enum DKGSignerState<C: Cipher> {
 pub(crate) struct DKGSession<VII: ValidatorIdentityIdentity, C: Cipher> {
     session_id: SessionId,
     min_signers: u16,
-    participants: Participants<VII, C>,
+    participants: Participants<VII, C::Identifier>,
     dkg_state: DKGSignerState<C>,
     identity: VII,
     identifier: C::Identifier,
 }
 impl<VII: ValidatorIdentityIdentity, C: Cipher + PartialEq + Eq> DKGSession<VII, C> {
-    fn match_base_info(&self, base_info: &DKGBaseMessage<VII, C>) -> Result<(), SessionError<C>> {
+    fn match_base_info(
+        &self,
+        base_info: &DKGBaseMessage<VII, C::Identifier>,
+    ) -> Result<(), SessionError<C>> {
         if self.session_id != base_info.session_id {
             return Err(SessionError::BaseInfoNotMatch(format!(
                 "session id does not match: {:?} vs {:?}",

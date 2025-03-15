@@ -25,7 +25,7 @@ pub(crate) struct CoordinatorSigningSession<VII: ValidatorIdentityIdentity, C: C
     pub(crate) pkid: PkId,
     pub(crate) public_key_package: C::PublicKeyPackage,
     pub(crate) min_signers: u16,
-    pub(crate) participants: Participants<VII, C>,
+    pub(crate) participants: Participants<VII, C::Identifier>,
     signing_sender: UnboundedSender<(
         SigningRequestWrap<VII>,
         oneshot::Sender<SigningResponseWrap<VII>>,
@@ -35,7 +35,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSigningSession<VII, C
     pub(crate) fn new(
         public_key_package: C::PublicKeyPackage,
         min_signers: u16,
-        participants: Participants<VII, C>,
+        participants: Participants<VII, C::Identifier>,
         signing_sender: UnboundedSender<(
             SigningRequestWrap<VII>,
             oneshot::Sender<SigningResponseWrap<VII>>,
@@ -59,10 +59,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSigningSession<VII, C
                 .serialize_binary()
                 .map_err(|e| SessionError::CryptoError(e))?,
             min_signers: self.min_signers,
-            participants: self
-                .participants
-                .serialize()
-                .map_err(|e| SessionError::InvalidParticipants(e.to_string()))?,
+            participants: self.participants.serialize()?,
         })
     }
     pub(crate) fn serialize(&self) -> Result<Vec<u8>, SessionError<C>> {
@@ -82,8 +79,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSigningSession<VII, C
             public_key_package: C::PublicKeyPackage::deserialize_binary(&info.public_key_package)
                 .map_err(|e| SessionError::CryptoError(e))?,
             min_signers: info.min_signers,
-            participants: Participants::deserialize(&info.participants)
-                .map_err(|e| SessionError::InvalidParticipants(e.to_string()))?,
+            participants: Participants::deserialize(&info.participants)?,
             signing_sender,
         })
     }

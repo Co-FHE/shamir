@@ -11,7 +11,7 @@ use crate::{
 };
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct SigningBaseMessage<VII: ValidatorIdentityIdentity, C: Cipher> {
-    pub(crate) participants: Participants<VII, C>,
+    pub(crate) participants: Participants<VII, C::Identifier>,
     pub(crate) pkid: PkId,
     pub(crate) subsession_id: SubsessionId,
     pub(crate) identifier: C::Identifier,
@@ -28,7 +28,7 @@ pub(crate) enum SigningRequestStage<VII: ValidatorIdentityIdentity, C: Cipher> {
     Round1 {},
     Round2 {
         tweak_data: Option<Vec<u8>>,
-        joined_participants: Participants<VII, C>,
+        joined_participants: Participants<VII, C::Identifier>,
         signing_commitments_map: BTreeMap<C::Identifier, C::SigningCommitments>,
         message: Vec<u8>,
     },
@@ -119,6 +119,9 @@ impl<VII: ValidatorIdentityIdentity> SigningResponseWrap<VII> {
                         "Error transforming Signing response to SigningResponseWrap".to_string(),
                     ))?
                     .clone(),
+            )),
+            _ => Err(SessionError::<C>::TransformWrapingMessageError(
+                "non-schnorr signature is not supported".to_string(),
             )),
         }
     }
@@ -272,6 +275,9 @@ impl<VII: ValidatorIdentityIdentity> SigningRequestWrap<VII> {
                         "Error transforming Signing request to SigningRequestWrap".to_string(),
                     ))?
                     .clone(),
+            )),
+            _ => Err(SessionError::<C>::TransformWrapingMessageError(
+                "non-schnorr signature is not supported".to_string(),
             )),
         }
     }

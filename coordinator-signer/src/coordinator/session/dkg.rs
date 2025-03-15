@@ -35,19 +35,19 @@ pub(crate) struct CoordinatorDKGSession<VII: ValidatorIdentityIdentity, C: Ciphe
     session_id: SessionId,
     min_signers: u16,
     dkg_state: CoordinatorDKGState<C>,
-    participants: Participants<VII, C>,
+    participants: Participants<VII, C::Identifier>,
     dkg_sender: UnboundedSender<(DKGRequestWrap<VII>, oneshot::Sender<DKGResponseWrap<VII>>)>,
 }
 #[derive(Debug, Clone)]
 pub(crate) struct DKGInfo<VII: ValidatorIdentityIdentity, C: Cipher> {
     pub(crate) min_signers: u16,
-    pub(crate) participants: Participants<VII, C>,
+    pub(crate) participants: Participants<VII, C::Identifier>,
     pub(crate) session_id: SessionId,
     pub(crate) public_key_package: C::PublicKeyPackage,
 }
 impl<VII: ValidatorIdentityIdentity, C: Cipher + PartialEq + Eq> CoordinatorDKGSession<VII, C> {
     pub fn new(
-        participants: Participants<VII, C>,
+        participants: Participants<VII, C::Identifier>,
         min_signers: u16,
         dkg_sender: UnboundedSender<(DKGRequestWrap<VII>, oneshot::Sender<DKGResponseWrap<VII>>)>,
     ) -> Result<Self, SessionError<C>> {
@@ -63,7 +63,10 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher + PartialEq + Eq> CoordinatorDKGS
             dkg_sender,
         })
     }
-    fn match_base_info(&self, base_info: &DKGBaseMessage<VII, C>) -> Result<(), SessionError<C>> {
+    fn match_base_info(
+        &self,
+        base_info: &DKGBaseMessage<VII, C::Identifier>,
+    ) -> Result<(), SessionError<C>> {
         if self.session_id != base_info.session_id {
             return Err(SessionError::BaseInfoNotMatch(format!(
                 "session id does not match: {:?} vs {:?}",

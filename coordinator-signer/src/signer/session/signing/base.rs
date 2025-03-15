@@ -22,7 +22,7 @@ pub(crate) struct SigningSignerBase<VII: ValidatorIdentityIdentity, C: Cipher> {
     pub(crate) key_package: C::KeyPackage,
     pub(crate) _public_key_package: C::PublicKeyPackage,
     pub(crate) _min_signers: u16,
-    pub(crate) participants: Participants<VII, C>,
+    pub(crate) participants: Participants<VII, C::Identifier>,
     pub(crate) identifier: C::Identifier,
     pub(crate) identity: VII,
 }
@@ -32,7 +32,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SigningSignerBase<VII, C> {
         public_key_package: C::PublicKeyPackage,
         key_package: C::KeyPackage,
         min_signers: u16,
-        participants: Participants<VII, C>,
+        participants: Participants<VII, C::Identifier>,
         identifier: C::Identifier,
         identity: VII,
     ) -> Result<Self, SessionError<C>> {

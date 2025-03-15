@@ -1,8 +1,10 @@
 use crate::{crypto::Cipher, keystore::KeystoreError};
+
+use super::session::ParticipantsError;
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum SessionError<C: Cipher> {
     #[error("Invalid participants: {0}")]
-    InvalidParticipants(String),
+    InvalidParticipants(ParticipantsError),
     #[error("Missing data for split into request: {0}")]
     MissingDataForSplitIntoRequest(String),
     #[error("Invalid request: {0}")]
@@ -31,6 +33,11 @@ pub(crate) enum SessionError<C: Cipher> {
 impl<C: Cipher> From<KeystoreError> for SessionError<C> {
     fn from(e: KeystoreError) -> Self {
         SessionError::KeystoreError(e.to_string())
+    }
+}
+impl<C: Cipher> From<ParticipantsError> for SessionError<C> {
+    fn from(e: ParticipantsError) -> Self {
+        SessionError::InvalidParticipants(e)
     }
 }
 

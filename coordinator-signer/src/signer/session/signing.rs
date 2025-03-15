@@ -24,7 +24,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SigningSession<VII, C> {
     pub(crate) fn new(
         public_key_package: C::PublicKeyPackage,
         min_signers: u16,
-        participants: Participants<VII, C>,
+        participants: Participants<VII, C::Identifier>,
         key_package: C::KeyPackage,
         identifier: C::Identifier,
         identity: VII,

@@ -23,6 +23,8 @@ libp2p = { version = "0.55", features = [
     "serde",
     "rendezvous",
 ] }
+secp256k1 = "0.30.0"
+ecdsa = "0.16.9"
 anyhow = "1.0.70"
 frost-core = { git = "https://github.com/verisense-network/frost.git", branch = "main", package = "frost-core", features = [
     "serde",

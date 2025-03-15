@@ -25,13 +25,13 @@ use super::{
 pub(crate) enum CoordinatorSigningState<VII: ValidatorIdentityIdentity, C: Cipher> {
     Round1,
     Round2 {
-        joined_participants: Participants<VII, C>,
+        joined_participants: Participants<VII, C::Identifier>,
         signing_package: C::SigningPackage,
         signing_commitments_map: BTreeMap<C::Identifier, C::SigningCommitments>,
     },
     Completed {
         signature: C::Signature,
-        joined_participants: Participants<VII, C>,
+        joined_participants: Participants<VII, C::Identifier>,
     },
 }
 pub(crate) struct CoordinatorSubsession<VII: ValidatorIdentityIdentity, C: Cipher> {
@@ -39,7 +39,7 @@ pub(crate) struct CoordinatorSubsession<VII: ValidatorIdentityIdentity, C: Ciphe
     tweak_data: Option<Vec<u8>>,
     subsession_id: SubsessionId,
     min_signers: u16,
-    participants: Participants<VII, C>,
+    participants: Participants<VII, C::Identifier>,
     state: CoordinatorSigningState<VII, C>,
     public_key: C::PublicKeyPackage,
     pkid: PkId,
@@ -53,7 +53,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
         pkid: PkId,
         public_key: C::PublicKeyPackage,
         min_signers: u16,
-        participants: Participants<VII, C>,
+        participants: Participants<VII, C::Identifier>,
         sign_message: Vec<u8>,
         tweak_data: Option<Vec<u8>>,
         sender: UnboundedSender<(
@@ -440,12 +440,12 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
         }
         self.participants
             .check_keys_includes(&response, self.min_signers as u16)
-            .map_err(|e| (e, None))?;
+            .map_err(|e| (e.into(), None))?;
 
         let joined_participants = self
             .participants
             .extract_identifiers(&response)
-            .map_err(|e| (e, None))?;
+            .map_err(|e| (e.into(), None))?;
         match self.state.clone() {
             CoordinatorSigningState::Round1 => {
                 let commitments_map = response
@@ -517,7 +517,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
 }
 
 impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSigningState<VII, C> {
-    pub(crate) fn completed(&self) -> Option<(C::Signature, Participants<VII, C>)> {
+    pub(crate) fn completed(&self) -> Option<(C::Signature, Participants<VII, C::Identifier>)> {
         match self {
             CoordinatorSigningState::Completed {
                 signature,

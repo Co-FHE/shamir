@@ -2,7 +2,9 @@ mod command;
 mod manager;
 mod session;
 use futures::stream::FuturesUnordered;
-use libp2p::request_response::{InboundRequestId, ProtocolSupport, ResponseChannel};
+use libp2p::request_response::{
+    InboundRequestId, OutboundRequestId, ProtocolSupport, ResponseChannel,
+};
 use libp2p::{ping, rendezvous, request_response, PeerId, StreamProtocol};
 use manager::{Request, SessionManagerError};
 use session::SessionWrap;
@@ -13,7 +15,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::unix::SocketAddr;
 use tokio::net::{UnixListener, UnixStream};
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot;
 
 use common::Settings;
@@ -34,7 +36,8 @@ use crate::crypto::{
 use crate::keystore;
 use crate::types::message::{
     CoorToSigRequest, CoorToSigResponse, DKGResponseWrap, SigBehaviour, SigBehaviourEvent,
-    SigToCoorRequest, SigToCoorResponse, SigningResponseWrap, ValidatorIdentityRequest,
+    SigToCoorRequest, SigToCoorResponse, SignerToCoordinatorRequestWrap, SigningResponseWrap,
+    ValidatorIdentityRequest,
 };
 use crate::types::ConnectionState;
 use crate::utils::list_hash;
@@ -48,7 +51,8 @@ pub struct Signer<VI: ValidatorIdentity> {
     ipc_path: PathBuf,
     coordinator_peer_id: PeerId,
     register_request_id: Option<request_response::OutboundRequestId>,
-    request_sender: UnboundedSender<Request<VI::Identity>>,
+    coor2signer_request_sender: UnboundedSender<Request<VI::Identity>>,
+    signer2coor_request_receiver: UnboundedReceiver<SignerToCoordinatorRequestWrap<VI::Identity>>,
     dkg_response_futures: FuturesUnordered<
         oneshot::Receiver<(
             InboundRequestId,
@@ -106,9 +110,13 @@ impl<VI: ValidatorIdentity> Signer<VI> {
             })
             .build();
         swarm.add_peer_address(coordinator_peer_id, coordinator_multiaddr.clone());
-        let (request_sender, request_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let (coor2signer_request_sender, coor2signer_request_receiver) =
+            tokio::sync::mpsc::unbounded_channel();
+        let (signer2coor_request_sender, signer2coor_request_receiver) =
+            tokio::sync::mpsc::unbounded_channel();
         manager::SignerSessionManager::new(
-            request_receiver,
+            coor2signer_request_receiver,
+            signer2coor_request_sender,
             Arc::new(keystore::Keystore::new(
                 validator_keypair.derive_key(b"keystore"),
                 None,
@@ -133,7 +141,8 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                 )),
             coordinator_peer_id,
             register_request_id: None,
-            request_sender,
+            coor2signer_request_sender,
+            signer2coor_request_receiver,
             dkg_response_futures: FuturesUnordered::new(),
             signing_response_futures: FuturesUnordered::new(),
             channel_mapping: HashMap::new(),
@@ -249,6 +258,12 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                         println!("Received signing request");
                         if let Err(e) = self.signing_handle_response(signing_request).await {
                             tracing::error!("Error handling signing response: {}", e);
+                        }
+                    }
+                    Some(request) = self.signer2coor_request_receiver.recv() => {
+                        tracing::debug!("Received signer2coor request");
+                        if let Err(e) = self.handle_signer2coor_request(request).await {
+                            tracing::error!("Error handling signer2coor request: {}", e);
                         }
                     }
                 }
@@ -422,7 +437,7 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                         let (tx, rx) = tokio::sync::oneshot::channel();
                         self.dkg_response_futures.push(rx);
                         self.channel_mapping.insert(request_id, channel);
-                        self.request_sender
+                        self.coor2signer_request_sender
                             .send(Request::DKG((request_id, request), tx))
                             .unwrap();
                     }
@@ -446,7 +461,7 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                         self.signing_response_futures.push(rx);
                         self.channel_mapping.insert(request_id, channel);
                         // send request to manager
-                        self.request_sender
+                        self.coor2signer_request_sender
                             .send(Request::Signing((request_id, request), tx))
                             .unwrap();
                     }
@@ -562,6 +577,16 @@ impl<VI: ValidatorIdentity> Signer<VI> {
             }
         }
         Ok(())
+    }
+    pub(crate) async fn handle_signer2coor_request(
+        &mut self,
+        request: SignerToCoordinatorRequestWrap<VI::Identity>,
+    ) -> Result<OutboundRequestId, anyhow::Error> {
+        let request_id = self.swarm.behaviour_mut().sig2coor.send_request(
+            &self.coordinator_peer_id,
+            SigToCoorRequest::SignerToCoordinatorRequest(request),
+        );
+        Ok(request_id)
     }
     pub(crate) async fn handle_command(
         &mut self,

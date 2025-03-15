@@ -4,7 +4,7 @@ use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use super::{CryptoType, PkId};
+use super::{CryptoType, Identifier, PkId};
 mod ed25519;
 mod ed448;
 mod p256;
@@ -20,7 +20,9 @@ pub use secp256k1::*;
 pub use secp256k1_tr::*;
 
 pub trait Cipher: Clone + std::fmt::Debug + Send + Sync + 'static + PartialEq + Eq {
-    type Identifier: Identifier<CryptoError = Self::CryptoError>;
+    type Identifier: Identifier<CryptoError = Self::CryptoError>
+        + Serialize
+        + serde::de::DeserializeOwned;
     type Signature: Signature<CryptoError = Self::CryptoError>;
     type SigningCommitments: Serialize
         + for<'de> Deserialize<'de>
@@ -128,17 +130,7 @@ pub trait Signature:
     fn to_bytes(&self) -> Result<Vec<u8>, Self::CryptoError>;
     fn from_bytes<T: AsRef<[u8]>>(bytes: T) -> Result<Self, Self::CryptoError>;
 }
-pub trait Identifier:
-    Serialize + for<'de> Deserialize<'de> + fmt::Debug + Clone + TryFrom<u16> + Ord + Send + Sync
-{
-    type CryptoError: std::error::Error + std::marker::Send + std::marker::Sync + 'static;
-    fn to_bytes(&self) -> Vec<u8>;
-    fn from_bytes<T: AsRef<[u8]>>(bytes: T) -> Result<Self, Self::CryptoError>;
-    fn from_u16(n: u16) -> Result<Self, Self::CryptoError>;
-    fn to_string(&self) -> String {
-        hex::encode(self.to_bytes())
-    }
-}
+
 pub trait SigningPackage:
     Serialize + for<'de> Deserialize<'de> + fmt::Debug + Clone + Send + Sync
 {

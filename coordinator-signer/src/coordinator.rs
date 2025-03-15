@@ -741,6 +741,9 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                         }
                     }
                 }
+                SigToCoorRequest::SignerToCoordinatorRequest(request) => {
+                    tracing::debug!("Received signer to coordinator request: {:?}", request);
+                }
             },
             other => {
                 tracing::debug!("Unhandled {:?}", other);

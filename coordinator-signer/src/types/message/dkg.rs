@@ -4,23 +4,23 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     crypto::{
-        Cipher, CryptoType, Ed25519Sha512, Ed448Shake256, P256Sha256, Ristretto255Sha512,
-        Secp256K1Sha256, Secp256K1Sha256TR, ValidatorIdentityIdentity,
+        Cipher, CryptoType, Ed25519Sha512, Ed448Shake256, Identifier, P256Sha256,
+        Ristretto255Sha512, Secp256K1Sha256, Secp256K1Sha256TR, ValidatorIdentityIdentity,
     },
     types::{error::SessionError, Participants, SessionId},
 };
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct DKGBaseMessage<VII: ValidatorIdentityIdentity, C: Cipher> {
+pub(crate) struct DKGBaseMessage<VII: ValidatorIdentityIdentity, CI: Identifier> {
     pub(crate) session_id: SessionId,
     pub(crate) min_signers: u16,
-    pub(crate) participants: Participants<VII, C>,
-    pub(crate) identifier: C::Identifier,
+    pub(crate) participants: Participants<VII, CI>,
+    pub(crate) identifier: CI,
     pub(crate) identity: VII,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct DKGRequest<VII: ValidatorIdentityIdentity, C: Cipher> {
-    pub(crate) base_info: DKGBaseMessage<VII, C>,
-    pub(crate) stage: DKGRequestStage<C>,
+pub(crate) struct DKGRequest<VII: ValidatorIdentityIdentity, CI: Identifier, Stage> {
+    pub(crate) base_info: DKGBaseMessage<VII, CI>,
+    pub(crate) stage: Stage,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum DKGRequestStage<C: Cipher> {
@@ -41,11 +41,12 @@ pub(crate) enum DKGRequestWrap<VII: ValidatorIdentityIdentity> {
     P256(DKGRequest<VII, P256Sha256>),
     Ed448(DKGRequest<VII, Ed448Shake256>),
     Ristretto255(DKGRequest<VII, Ristretto255Sha512>),
+    EcdsaSecp256k1(DKGEcdsaRequest<VII>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct DKGResponse<VII: ValidatorIdentityIdentity, C: Cipher> {
-    pub(crate) base_info: DKGBaseMessage<VII, C>,
+    pub(crate) base_info: DKGBaseMessage<VII, C::Identifier>,
     pub(crate) stage: DKGResponseStage<C>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -70,6 +71,7 @@ pub(crate) enum DKGResponseWrap<VII: ValidatorIdentityIdentity> {
     P256(DKGResponse<VII, P256Sha256>),
     Ed448(DKGResponse<VII, Ed448Shake256>),
     Ristretto255(DKGResponse<VII, Ristretto255Sha512>),
+    EcdsaSecp256k1(DKGResponse<VII, EcdsaSecp256k1>),
 }
 fn try_cast_response<VII: ValidatorIdentityIdentity, C: Cipher, T: Cipher>(
     r: &dyn Any,
@@ -127,6 +129,9 @@ impl<VII: ValidatorIdentityIdentity> DKGResponseWrap<VII> {
                     ))?
                     .clone(),
             )),
+            _ => Err(SessionError::<C>::TransformWrapingMessageError(
+                "non-schnorr signature is not supported".to_string(),
+            )),
         }
     }
 }
@@ -139,6 +144,7 @@ impl<VII: ValidatorIdentityIdentity> DKGRequestWrap<VII> {
             DKGRequestWrap::P256(r) => &r.base_info.identity,
             DKGRequestWrap::Ed448(r) => &r.base_info.identity,
             DKGRequestWrap::Ristretto255(r) => &r.base_info.identity,
+            DKGRequestWrap::EcdsaSecp256k1(r) => &r.base_info.identity,
         }
     }
     pub(crate) fn crypto_type(&self) -> CryptoType {
@@ -149,6 +155,7 @@ impl<VII: ValidatorIdentityIdentity> DKGRequestWrap<VII> {
             DKGRequestWrap::P256(_) => CryptoType::P256,
             DKGRequestWrap::Ed448(_) => CryptoType::Ed448,
             DKGRequestWrap::Ristretto255(_) => CryptoType::Ristretto255,
+            DKGRequestWrap::EcdsaSecp256k1(_) => CryptoType::EcdsaSecp256k1,
         }
     }
     pub(crate) fn failure(&self, msg: String) -> DKGResponseWrap<VII> {
@@ -213,6 +220,12 @@ impl<VII: ValidatorIdentityIdentity> DKGRequestWrap<VII> {
                 },
                 stage: DKGResponseStage::Failure(msg),
             }),
+            DKGRequestWrap::EcdsaSecp256k1(r) => DKGResponseWrap::EcdsaSecp256k1(DKGResponse {
+                base_info: DKGBaseMessage {
+                    session_id: r.base_info.session_id.clone(),
+                    min_signers: r.base_info.min_signers,
+                },
+            }),
         }
     }
     pub(crate) fn from<C: Cipher>(r: DKGRequest<VII, C>) -> Result<Self, SessionError<C>> {
@@ -258,6 +271,9 @@ impl<VII: ValidatorIdentityIdentity> DKGRequestWrap<VII> {
                         "Error transforming DKG request to DKGRequestWrap".to_string(),
                     ))?
                     .clone(),
+            )),
+            _ => Err(SessionError::<C>::TransformWrapingMessageError(
+                "non-schnorr signature is not supported".to_string(),
             )),
         }
     }

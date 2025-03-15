@@ -12,7 +12,10 @@ use crate::{
     types::{AutoDKG, GroupPublicKeyInfo, SignatureSuiteInfo},
 };
 
-use super::{DKGRequestWrap, DKGResponseWrap, SigningRequestWrap, SigningResponseWrap};
+use super::{
+    DKGRequestWrap, DKGResponseWrap, SignerToCoordinatorRequestWrap, SigningRequestWrap,
+    SigningResponseWrap,
+};
 
 #[derive(NetworkBehaviour)]
 pub(crate) struct CoorBehaviour<
@@ -20,7 +23,8 @@ pub(crate) struct CoorBehaviour<
 > {
     pub(crate) identify: identify::Behaviour,
     pub(crate) ping: ping::Behaviour,
-    pub(crate) sig2coor: request_response::cbor::Behaviour<SigToCoorRequest, SigToCoorResponse>,
+    pub(crate) sig2coor:
+        request_response::cbor::Behaviour<SigToCoorRequest<VII>, SigToCoorResponse>,
     pub(crate) coor2sig:
         request_response::cbor::Behaviour<CoorToSigRequest<VII>, CoorToSigResponse<VII>>,
     pub(crate) node2coor:
@@ -44,15 +48,17 @@ pub(crate) struct SigBehaviour<
 > {
     pub(crate) identify: identify::Behaviour,
     pub(crate) ping: ping::Behaviour,
-    pub(crate) sig2coor: request_response::cbor::Behaviour<SigToCoorRequest, SigToCoorResponse>,
+    pub(crate) sig2coor:
+        request_response::cbor::Behaviour<SigToCoorRequest<VII>, SigToCoorResponse>,
     pub(crate) coor2sig:
         request_response::cbor::Behaviour<CoorToSigRequest<VII>, CoorToSigResponse<VII>>,
     pub(crate) rendezvous: rendezvous::client::Behaviour,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) enum SigToCoorRequest {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) enum SigToCoorRequest<VII: ValidatorIdentityIdentity> {
     ValidatorIndentity(ValidatorIdentityRequest),
+    SignerToCoordinatorRequest(SignerToCoordinatorRequestWrap<VII>),
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum NodeToCoorRequest<VII: ValidatorIdentityIdentity> {

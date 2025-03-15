@@ -1,9 +1,11 @@
+use super::{Participants, SubsessionId, ValidatorIdentityIdentity};
 use crate::crypto::{
     Cipher, Ed25519Sha512, PkId, PublicKeyPackage, Secp256K1Sha256, Secp256K1Sha256TR, Signature,
     VerifyingKey,
 };
 use crate::crypto::{CryptoType, Identifier};
 use crate::crypto::{Ed448Shake256, P256Sha256, Ristretto255Sha512, Tweak};
+use secp256k1::{ecdsa, Message, PublicKey, Secp256k1};
 use serde::{Deserialize, Serialize};
 use serde_json;
 use std::{
@@ -11,18 +13,16 @@ use std::{
     fmt::{Display, Formatter},
 };
 
-use super::{Participants, SubsessionId, ValidatorIdentityIdentity};
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct SignatureSuite<VII: ValidatorIdentityIdentity, C: Cipher> {
     pub(crate) signature: C::Signature,
     pub(crate) pk: C::PublicKeyPackage,
     pub(crate) tweak_data: Option<Vec<u8>>,
     pub(crate) subsession_id: SubsessionId,
-    pub(crate) participants: Participants<VII, C>,
+    pub(crate) participants: Participants<VII, C::Identifier>,
     pub(crate) pkid: PkId,
     pub(crate) message: Vec<u8>,
-    pub(crate) joined_participants: Participants<VII, C>,
+    pub(crate) joined_participants: Participants<VII, C::Identifier>,
 }
 impl<VII: ValidatorIdentityIdentity, C: Cipher> SignatureSuite<VII, C> {
     fn pretty_print(&self) -> String {
@@ -217,7 +217,33 @@ impl<VII: ValidatorIdentityIdentity + Serialize + for<'de> Deserialize<'de>>
             CryptoType::Ristretto255 => self.verify::<crate::crypto::Ristretto255Sha512>(),
             CryptoType::Secp256k1 => self.verify::<crate::crypto::Secp256K1Sha256>(),
             CryptoType::Secp256k1Tr => self.verify::<crate::crypto::Secp256K1Sha256TR>(),
+            CryptoType::EcdsaSecp256k1 => self.verify_ecdsa(),
         }
+    }
+    pub fn verify_ecdsa(&self) -> Result<(), String> {
+        if self.crypto_type != CryptoType::EcdsaSecp256k1 {
+            return Err(format!("Crypto type is not ecdsa-secp256k1"));
+        }
+        // signature must be 64 bytes
+        if self.signature.len() != 64 {
+            return Err(format!("Signature must be 64 bytes"));
+        }
+        let signature =
+            ecdsa::Signature::from_compact(&self.signature).map_err(|e| e.to_string())?;
+        if self.message.len() != 32 {
+            return Err(format!("Message must be 32 bytes"));
+        }
+        let message = Message::from_digest(self.message.as_slice().try_into().unwrap());
+        let secp = Secp256k1::verification_only();
+        // pubkey must be 33 bytes or 65 bytes
+        if self.pk.len() != 33 && self.pk.len() != 65 {
+            return Err(format!("Public key must be 33 bytes or 65 bytes"));
+        }
+        let pubkey = PublicKey::from_slice(&self.pk).map_err(|e| e.to_string())?;
+        if !secp.verify_ecdsa(&message, &signature, &pubkey).is_ok() {
+            return Err(format!("Signature is invalid"));
+        }
+        Ok(())
     }
     pub fn verify<C: Cipher>(&self) -> Result<(), String> {
         let pk =
@@ -282,6 +308,7 @@ impl<VII: ValidatorIdentityIdentity + Serialize + for<'de> Deserialize<'de>>
             CryptoType::Ristretto255 => self
                 .verify::<Ristretto255Sha512>()
                 .map_err(|e| e.to_string()),
+            CryptoType::EcdsaSecp256k1 => self.verify_ecdsa().map_err(|e| e.to_string()),
         }
     }
 }

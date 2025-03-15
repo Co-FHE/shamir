@@ -33,10 +33,10 @@ impl<'de> Deserialize<'de> for SubsessionId {
 }
 
 impl SubsessionId {
-    pub fn new<VII: ValidatorIdentityIdentity, C: Cipher>(
+    pub fn new<VII: ValidatorIdentityIdentity, CI: Identifier>(
         crypto_type: CryptoType,
         min_signers: u16,
-        participants: &Participants<VII, C>,
+        participants: &Participants<VII, CI>,
         sign_message: Vec<u8>,
         tweak_data: Option<Vec<u8>>,
         pkid: PkId,

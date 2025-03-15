@@ -6,7 +6,8 @@ use crate::crypto::CryptoTypeError;
 use crate::keystore::{Keystore, KeystoreError};
 use crate::types::error::SessionError;
 use crate::types::message::{
-    DKGRequestWrap, DKGResponseWrap, SigningRequestWrap, SigningResponseWrap,
+    DKGRequestWrap, DKGResponseWrap, SignerToCoordinatorRequestWrap, SigningRequestWrap,
+    SigningResponseWrap,
 };
 use libp2p::request_response::InboundRequestId;
 use strum::EnumCount;
@@ -63,10 +64,13 @@ macro_rules! new_session_wrap {
 pub(crate) struct SignerSessionManager<VII: ValidatorIdentityIdentity + Sized> {
     session_inst_channels: HashMap<CryptoType, UnboundedSender<Request<VII>>>,
     request_receiver: UnboundedReceiver<Request<VII>>,
+    // for bidirectional communication
+    request_sender: UnboundedSender<SignerToCoordinatorRequestWrap<VII>>,
 }
 impl<VII: ValidatorIdentityIdentity> SignerSessionManager<VII> {
     pub(crate) fn new(
         request_receiver: UnboundedReceiver<Request<VII>>,
+        request_sender: UnboundedSender<SignerToCoordinatorRequestWrap<VII>>,
         keystore: Arc<Keystore>,
         base_path: &PathBuf,
     ) -> Result<Self, SessionManagerError> {
@@ -117,6 +121,7 @@ impl<VII: ValidatorIdentityIdentity> SignerSessionManager<VII> {
 
         Ok(Self {
             request_receiver,
+            request_sender,
             session_inst_channels,
         })
     }

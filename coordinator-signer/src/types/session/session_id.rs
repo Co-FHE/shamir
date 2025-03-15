@@ -30,10 +30,10 @@ impl<'de> Deserialize<'de> for SessionId {
     }
 }
 impl SessionId {
-    pub fn new<VII: ValidatorIdentityIdentity, C: Cipher>(
+    pub fn new<VII: ValidatorIdentityIdentity, CI: Identifier>(
         crypto_type: CryptoType,
         min_signers: u16,
-        participants: &Participants<VII, C>,
+        participants: &Participants<VII, CI>,
     ) -> Result<Self, SessionIdError> {
         let mut bytes = [0u8; 37];
 

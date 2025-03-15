@@ -11,67 +11,79 @@ use crate::crypto::Identifier;
 use super::{error::SessionError, Cipher, ValidatorIdentityIdentity};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub(crate) struct Participants<VII: ValidatorIdentityIdentity, C: Cipher>(
-    BTreeMap<C::Identifier, VII>,
-);
-
-impl<VII: ValidatorIdentityIdentity, C: Cipher> Participants<VII, C> {
-    pub(crate) fn new<T: IntoIterator<Item = (C::Identifier, VII)>>(
+pub(crate) struct Participants<VII: ValidatorIdentityIdentity, CI: Identifier>(BTreeMap<CI, VII>);
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, thiserror::Error)]
+pub(crate) enum ParticipantsError {
+    #[error("duplicate participant id: {0}")]
+    DuplicateParticipantId(String),
+    #[error("duplicate participant identity: {0}")]
+    DuplicateParticipantIdentity(String),
+    #[error("invalid min signers: {0}")]
+    MinSigners(String),
+    #[error("max signers is 255, got {0}")]
+    MaxSigners(usize),
+    #[error("serialize error: {0}")]
+    SerializeError(String),
+    #[error("deserialize error: {0}")]
+    DeserializeError(String),
+    #[error("identity does not match: {0} vs {1}")]
+    IdentityDoesNotMatch(String, String),
+    #[error("identity not found for identifier: {0}")]
+    IdentityNotFound(String),
+    #[error("participants not match: {0}")]
+    ParticipantsNotMatch(String),
+}
+impl<VII: ValidatorIdentityIdentity, CI: Identifier> Participants<VII, CI> {
+    pub(crate) fn new<T: IntoIterator<Item = (CI, VII)>>(
         participants: T,
-    ) -> Result<Self, SessionError<C>> {
-        let mut participants_map: BTreeMap<C::Identifier, VII> = BTreeMap::new();
+    ) -> Result<Self, ParticipantsError> {
+        let mut participants_map: BTreeMap<CI, VII> = BTreeMap::new();
         for (id, identity) in participants {
-            if participants_map.contains_key(&id.clone().try_into().unwrap()) {
-                return Err(SessionError::InvalidParticipants(format!(
-                    "duplicate participant id: {}",
-                    id.to_string()
-                )));
+            if participants_map.contains_key(&id.clone()) {
+                return Err(ParticipantsError::DuplicateParticipantId(id.to_string()));
             }
             // Identity must be different
             if participants_map
                 .values()
                 .any(|_identity| _identity == &identity)
             {
-                return Err(SessionError::InvalidParticipants(format!(
-                    "duplicate participant identity: {}",
-                    identity.to_fmt_string()
-                )));
+                return Err(ParticipantsError::DuplicateParticipantIdentity(
+                    identity.to_fmt_string(),
+                ));
             }
             participants_map.insert(id, identity);
         }
         if participants_map.len() < 1 {
-            return Err(SessionError::InvalidParticipants(format!(
-                "min signers is 1, got {}",
+            return Err(ParticipantsError::MinSigners(format!(
+                "min signers is {}, got {}",
+                1,
                 participants_map.len()
             )));
         }
         if participants_map.len() > 255 {
-            return Err(SessionError::InvalidParticipants(format!(
-                "max signers is 255, got {}",
-                participants_map.len()
-            )));
+            return Err(ParticipantsError::MaxSigners(participants_map.len()));
         }
 
         Ok(Self(participants_map))
     }
-    pub(crate) fn serialize(&self) -> Result<Vec<u8>, SessionError<C>> {
+    pub(crate) fn serialize(&self) -> Result<Vec<u8>, ParticipantsError> {
         let mut vec = Vec::new();
         for (id, identity) in self.0.iter() {
             vec.push((id.to_bytes(), identity.to_bytes()));
         }
         Ok(bincode::serialize(&vec)
-            .map_err(|e| SessionError::InvalidParticipants(e.to_string()))?)
+            .map_err(|e| ParticipantsError::SerializeError(e.to_string()))?)
     }
-    pub(crate) fn deserialize(bytes: &[u8]) -> Result<Self, SessionError<C>> {
+    pub(crate) fn deserialize(bytes: &[u8]) -> Result<Self, ParticipantsError> {
         let vec = bincode::deserialize::<Vec<(Vec<u8>, Vec<u8>)>>(bytes)
-            .map_err(|e| SessionError::InvalidParticipants(e.to_string()))?;
+            .map_err(|e| ParticipantsError::DeserializeError(e.to_string()))?;
         let mut participants_map = BTreeMap::new();
         for (id, identity) in vec {
             participants_map.insert(
-                C::Identifier::from_bytes(&id)
-                    .map_err(|e| SessionError::InvalidParticipants(e.to_string()))?,
+                CI::from_bytes(&id)
+                    .map_err(|e| ParticipantsError::DeserializeError(e.to_string()))?,
                 VII::from_bytes(&identity)
-                    .map_err(|e| SessionError::InvalidParticipants(e.to_string()))?,
+                    .map_err(|e| ParticipantsError::DeserializeError(e.to_string()))?,
             );
         }
         Ok(Self(participants_map))
@@ -81,44 +93,45 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> Participants<VII, C> {
     }
     pub(crate) fn check_identifier_identity_exists(
         &self,
-        identifier: &C::Identifier,
+        identifier: &CI,
         identity: &VII,
-    ) -> Result<(), SessionError<C>> {
+    ) -> Result<(), ParticipantsError> {
         match self.get(identifier) {
             Some(_identity) => {
                 if _identity != identity {
-                    return Err(SessionError::InvalidParticipants(format!(
-                        "identity does not match: {:?} vs {:?}",
-                        _identity, identity
-                    )));
+                    return Err(ParticipantsError::IdentityDoesNotMatch(
+                        _identity.to_fmt_string(),
+                        identity.to_fmt_string(),
+                    ));
                 }
             }
             None => {
-                return Err(SessionError::InvalidParticipants(format!(
-                    "identity not found for identifier: {:?}",
-                    identifier
-                )));
+                return Err(ParticipantsError::IdentityNotFound(identifier.to_string()));
             }
         }
         Ok(())
     }
     pub(crate) fn check_keys_equal<V>(
         &self,
-        other: &BTreeMap<C::Identifier, V>,
-    ) -> Result<(), SessionError<C>> {
+        other: &BTreeMap<CI, V>,
+    ) -> Result<(), ParticipantsError> {
         if self.len() != other.len() {
-            return Err(SessionError::InvalidParticipants(format!(
-                "participants length does not match: {:?} vs {:?}",
+            return Err(ParticipantsError::ParticipantsNotMatch(format!(
+                "length: {:?} vs {:?}",
                 self.len(),
                 other.len()
             )));
         }
         for (key, _) in self.iter() {
             if !other.contains_key(key) {
-                return Err(SessionError::InvalidParticipants(format!(
-                    "participants keys do not match: {:?} vs {:?}",
-                    self.keys(),
-                    other.keys()
+                return Err(ParticipantsError::ParticipantsNotMatch(format!(
+                    "key: {:?} not included in {:?}",
+                    key.to_string(),
+                    other
+                        .keys()
+                        .map(|k| k.to_string())
+                        .collect::<Vec<String>>()
+                        .join(", "),
                 )));
             }
         }
@@ -126,11 +139,11 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> Participants<VII, C> {
     }
     pub(crate) fn check_keys_includes<V>(
         &self,
-        other: &BTreeMap<C::Identifier, V>,
+        other: &BTreeMap<CI, V>,
         min_signers: u16,
-    ) -> Result<(), SessionError<C>> {
+    ) -> Result<(), ParticipantsError> {
         if self.len() < min_signers as usize {
-            return Err(SessionError::InvalidParticipants(format!(
+            return Err(ParticipantsError::ParticipantsNotMatch(format!(
                 "participants length does not match: {:?} vs {:?}",
                 self.len(),
                 other.len()
@@ -138,10 +151,17 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> Participants<VII, C> {
         }
         for (key, _) in other.iter() {
             if !self.contains_key(key) {
-                return Err(SessionError::InvalidParticipants(format!(
+                return Err(ParticipantsError::ParticipantsNotMatch(format!(
                     "participants key not included: p:{:?} vs o:{:?}",
-                    self.keys(),
-                    other.keys()
+                    self.keys()
+                        .map(|k| k.to_string())
+                        .collect::<Vec<String>>()
+                        .join(", "),
+                    other
+                        .keys()
+                        .map(|k| k.to_string())
+                        .collect::<Vec<String>>()
+                        .join(", "),
                 )));
             }
         }
@@ -149,21 +169,21 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> Participants<VII, C> {
     }
     pub(crate) fn extract_identifiers<V>(
         &self,
-        other: &BTreeMap<C::Identifier, V>,
-    ) -> Result<Participants<VII, C>, SessionError<C>> {
+        other: &BTreeMap<CI, V>,
+    ) -> Result<Participants<VII, CI>, ParticipantsError> {
         let o = other
             .iter()
             .map(|(id, _)| match self.get(&id) {
                 Some(v) => Ok((id.clone(), v.clone())),
                 None => {
-                    return Err(SessionError::InvalidParticipants(format!(
+                    return Err(ParticipantsError::ParticipantsNotMatch(format!(
                         "participants key not included: p:{:?} vs o:{:?}",
                         self.keys(),
                         other.keys()
                     )));
                 }
             })
-            .collect::<Result<Vec<(C::Identifier, VII)>, SessionError<C>>>()?;
+            .collect::<Result<Vec<(CI, VII)>, ParticipantsError>>()?;
 
         let participants = Participants::new(o)?;
         participants.check_keys_equal(other)?;
@@ -171,11 +191,11 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> Participants<VII, C> {
     }
     pub(crate) fn check_keys_equal_except_self<V>(
         &self,
-        identifier: &C::Identifier,
-        other: &BTreeMap<C::Identifier, V>,
-    ) -> Result<(), SessionError<C>> {
+        identifier: &CI,
+        other: &BTreeMap<CI, V>,
+    ) -> Result<(), ParticipantsError> {
         if self.len() != other.len() + 1 {
-            return Err(SessionError::InvalidParticipants(format!(
+            return Err(ParticipantsError::ParticipantsNotMatch(format!(
                 "participants length does not match except self: {:?} vs {:?}",
                 self.len(),
                 other.len()
@@ -186,7 +206,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> Participants<VII, C> {
                 continue;
             }
             if !other.contains_key(key) {
-                return Err(SessionError::InvalidParticipants(format!(
+                return Err(ParticipantsError::ParticipantsNotMatch(format!(
                     "participants keys do not match except self: {:?} vs {:?}",
                     self.keys(),
                     other.keys()
@@ -195,29 +215,28 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> Participants<VII, C> {
         }
         Ok(())
     }
-    pub(crate) fn check_min_signers(&self, min_signers: u16) -> Result<(), SessionError<C>> {
+    pub(crate) fn check_min_signers(&self, min_signers: u16) -> Result<(), ParticipantsError> {
         if self.len() < min_signers as usize {
-            return Err(SessionError::InvalidParticipants(format!(
-                "min signers is {}, got {}",
-                min_signers,
-                self.len() as u16
+            return Err(ParticipantsError::MinSigners(format!(
+                "total participants is {}, min signers is {}",
+                self.len(),
+                min_signers
             )));
         }
 
         if min_signers < (self.len() as u16 + 1) / 2 || min_signers == 0 {
-            let msg = format!(
+            return Err(ParticipantsError::MinSigners(format!(
                 "Min signers is too low, min_signers: {}, validators: {}",
                 min_signers,
                 self.len()
-            );
-            return Err(SessionError::InvalidParticipants(msg));
+            )));
         }
         Ok(())
     }
 }
 
-impl<VII: ValidatorIdentityIdentity, C: Cipher> Deref for Participants<VII, C> {
-    type Target = BTreeMap<C::Identifier, VII>;
+impl<VII: ValidatorIdentityIdentity, CI: Identifier> Deref for Participants<VII, CI> {
+    type Target = BTreeMap<CI, VII>;
 
     fn deref(&self) -> &Self::Target {
         &self.0

@@ -2,15 +2,15 @@ use crate::{crypto::Cipher, keystore::KeystoreError};
 
 use super::session::ParticipantsError;
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub(crate) enum SessionError<C: Cipher> {
+pub(crate) enum SessionError {
     #[error("Invalid participants: {0}")]
-    InvalidParticipants(ParticipantsError),
+    InvalidParticipants(#[from] ParticipantsError),
     #[error("Missing data for split into request: {0}")]
     MissingDataForSplitIntoRequest(String),
     #[error("Invalid request: {0}")]
     InvalidRequest(String),
     #[error("Frost error: {0}")]
-    CryptoError(C::CryptoError),
+    CryptoError(String),
     #[error("Session id error: {0}")]
     SessionIdError(#[from] SessionIdError),
     #[error("Invalid response: {0}")]
@@ -28,19 +28,8 @@ pub(crate) enum SessionError<C: Cipher> {
     #[error("PkId not found: {0}")]
     PkIdNotFound(String),
     #[error("Keystore error: {0}")]
-    KeystoreError(String),
+    KeystoreError(#[from] KeystoreError),
 }
-impl<C: Cipher> From<KeystoreError> for SessionError<C> {
-    fn from(e: KeystoreError) -> Self {
-        SessionError::KeystoreError(e.to_string())
-    }
-}
-impl<C: Cipher> From<ParticipantsError> for SessionError<C> {
-    fn from(e: ParticipantsError) -> Self {
-        SessionError::InvalidParticipants(e)
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum SessionIdError {
     #[error("Invalid session id format: {0}")]

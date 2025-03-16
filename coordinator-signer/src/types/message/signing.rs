@@ -76,51 +76,51 @@ fn try_cast_request<VII: ValidatorIdentityIdentity, C: Cipher, T: Cipher>(
 }
 
 impl<VII: ValidatorIdentityIdentity> SigningResponseWrap<VII> {
-    pub(crate) fn from<C: Cipher>(r: SigningResponse<VII, C>) -> Result<Self, SessionError<C>> {
+    pub(crate) fn from<C: Cipher>(r: SigningResponse<VII, C>) -> Result<Self, SessionError> {
         match C::crypto_type() {
             CryptoType::Ed25519 => Ok(SigningResponseWrap::Ed25519(
                 try_cast_response::<VII, C, Ed25519Sha512>(&r)
-                    .ok_or(SessionError::<C>::TransformWrapingMessageError(
+                    .ok_or(SessionError::TransformWrapingMessageError(
                         "Error transforming Signing response to SigningResponseWrap".to_string(),
                     ))?
                     .clone(),
             )),
             CryptoType::Secp256k1 => Ok(SigningResponseWrap::Secp256k1(
                 try_cast_response::<VII, C, Secp256K1Sha256>(&r)
-                    .ok_or(SessionError::<C>::TransformWrapingMessageError(
+                    .ok_or(SessionError::TransformWrapingMessageError(
                         "Error transforming Signing response to SigningResponseWrap".to_string(),
                     ))?
                     .clone(),
             )),
             CryptoType::Secp256k1Tr => Ok(SigningResponseWrap::Secp256k1Tr(
                 try_cast_response::<VII, C, Secp256K1Sha256TR>(&r)
-                    .ok_or(SessionError::<C>::TransformWrapingMessageError(
+                    .ok_or(SessionError::TransformWrapingMessageError(
                         "Error transforming Signing response to SigningResponseWrap".to_string(),
                     ))?
                     .clone(),
             )),
             CryptoType::P256 => Ok(SigningResponseWrap::P256(
                 try_cast_response::<VII, C, P256Sha256>(&r)
-                    .ok_or(SessionError::<C>::TransformWrapingMessageError(
+                    .ok_or(SessionError::TransformWrapingMessageError(
                         "Error transforming Signing response to SigningResponseWrap".to_string(),
                     ))?
                     .clone(),
             )),
             CryptoType::Ed448 => Ok(SigningResponseWrap::Ed448(
                 try_cast_response::<VII, C, Ed448Shake256>(&r)
-                    .ok_or(SessionError::<C>::TransformWrapingMessageError(
+                    .ok_or(SessionError::TransformWrapingMessageError(
                         "Error transforming Signing response to SigningResponseWrap".to_string(),
                     ))?
                     .clone(),
             )),
             CryptoType::Ristretto255 => Ok(SigningResponseWrap::Ristretto255(
                 try_cast_response::<VII, C, Ristretto255Sha512>(&r)
-                    .ok_or(SessionError::<C>::TransformWrapingMessageError(
+                    .ok_or(SessionError::TransformWrapingMessageError(
                         "Error transforming Signing response to SigningResponseWrap".to_string(),
                     ))?
                     .clone(),
             )),
-            _ => Err(SessionError::<C>::TransformWrapingMessageError(
+            _ => Err(SessionError::TransformWrapingMessageError(
                 "non-schnorr signature is not supported".to_string(),
             )),
         }
@@ -232,51 +232,51 @@ impl<VII: ValidatorIdentityIdentity> SigningRequestWrap<VII> {
             }
         }
     }
-    pub(crate) fn from<C: Cipher>(r: SigningRequest<VII, C>) -> Result<Self, SessionError<C>> {
+    pub(crate) fn from<C: Cipher>(r: SigningRequest<VII, C>) -> Result<Self, SessionError> {
         match C::crypto_type() {
             CryptoType::Ed25519 => Ok(SigningRequestWrap::Ed25519(
                 try_cast_request::<VII, C, Ed25519Sha512>(&r)
-                    .ok_or(SessionError::<C>::TransformWrapingMessageError(
+                    .ok_or(SessionError::TransformWrapingMessageError(
                         "Error transforming Signing request to SigningRequestWrap".to_string(),
                     ))?
                     .clone(),
             )),
             CryptoType::Secp256k1 => Ok(SigningRequestWrap::Secp256k1(
                 try_cast_request::<VII, C, Secp256K1Sha256>(&r)
-                    .ok_or(SessionError::<C>::TransformWrapingMessageError(
+                    .ok_or(SessionError::TransformWrapingMessageError(
                         "Error transforming Signing request to SigningRequestWrap".to_string(),
                     ))?
                     .clone(),
             )),
             CryptoType::Secp256k1Tr => Ok(SigningRequestWrap::Secp256k1Tr(
                 try_cast_request::<VII, C, Secp256K1Sha256TR>(&r)
-                    .ok_or(SessionError::<C>::TransformWrapingMessageError(
+                    .ok_or(SessionError::TransformWrapingMessageError(
                         "Error transforming Signing request to SigningRequestWrap".to_string(),
                     ))?
                     .clone(),
             )),
             CryptoType::P256 => Ok(SigningRequestWrap::P256(
                 try_cast_request::<VII, C, P256Sha256>(&r)
-                    .ok_or(SessionError::<C>::TransformWrapingMessageError(
+                    .ok_or(SessionError::TransformWrapingMessageError(
                         "Error transforming Signing request to SigningRequestWrap".to_string(),
                     ))?
                     .clone(),
             )),
             CryptoType::Ed448 => Ok(SigningRequestWrap::Ed448(
                 try_cast_request::<VII, C, Ed448Shake256>(&r)
-                    .ok_or(SessionError::<C>::TransformWrapingMessageError(
+                    .ok_or(SessionError::TransformWrapingMessageError(
                         "Error transforming Signing request to SigningRequestWrap".to_string(),
                     ))?
                     .clone(),
             )),
             CryptoType::Ristretto255 => Ok(SigningRequestWrap::Ristretto255(
                 try_cast_request::<VII, C, Ristretto255Sha512>(&r)
-                    .ok_or(SessionError::<C>::TransformWrapingMessageError(
+                    .ok_or(SessionError::TransformWrapingMessageError(
                         "Error transforming Signing request to SigningRequestWrap".to_string(),
                     ))?
                     .clone(),
             )),
-            _ => Err(SessionError::<C>::TransformWrapingMessageError(
+            _ => Err(SessionError::TransformWrapingMessageError(
                 "non-schnorr signature is not supported".to_string(),
             )),
         }
@@ -289,40 +289,38 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SigningRequest<VII, C> {
         }
         None
     }
-    pub(crate) fn from(
-        r: SigningRequestWrap<VII>,
-    ) -> Result<SigningRequest<VII, C>, SessionError<C>> {
+    pub(crate) fn from(r: SigningRequestWrap<VII>) -> Result<SigningRequest<VII, C>, SessionError> {
         match r {
             SigningRequestWrap::Ed25519(r) => Ok(try_cast_request::<VII, Ed25519Sha512, C>(&r)
-                .ok_or(SessionError::<C>::TransformWrapingMessageError(
+                .ok_or(SessionError::TransformWrapingMessageError(
                     "Error transforming Signing requestWrap to SigningRequest".to_string(),
                 ))?
                 .clone()),
             SigningRequestWrap::Secp256k1(r) => Ok(try_cast_request::<VII, Secp256K1Sha256, C>(&r)
-                .ok_or(SessionError::<C>::TransformWrapingMessageError(
+                .ok_or(SessionError::TransformWrapingMessageError(
                     "Error transforming Signing requestWrap to SigningRequest".to_string(),
                 ))?
                 .clone()),
             SigningRequestWrap::Secp256k1Tr(r) => {
                 Ok(try_cast_request::<VII, Secp256K1Sha256TR, C>(&r)
-                    .ok_or(SessionError::<C>::TransformWrapingMessageError(
+                    .ok_or(SessionError::TransformWrapingMessageError(
                         "Error transforming Signing requestWrap to SigningRequest".to_string(),
                     ))?
                     .clone())
             }
             SigningRequestWrap::P256(r) => Ok(try_cast_request::<VII, P256Sha256, C>(&r)
-                .ok_or(SessionError::<C>::TransformWrapingMessageError(
+                .ok_or(SessionError::TransformWrapingMessageError(
                     "Error transforming Signing requestWrap to SigningRequest".to_string(),
                 ))?
                 .clone()),
             SigningRequestWrap::Ed448(r) => Ok(try_cast_request::<VII, Ed448Shake256, C>(&r)
-                .ok_or(SessionError::<C>::TransformWrapingMessageError(
+                .ok_or(SessionError::TransformWrapingMessageError(
                     "Error transforming Signing requestWrap to SigningRequest".to_string(),
                 ))?
                 .clone()),
             SigningRequestWrap::Ristretto255(r) => {
                 Ok(try_cast_request::<VII, Ristretto255Sha512, C>(&r)
-                    .ok_or(SessionError::<C>::TransformWrapingMessageError(
+                    .ok_or(SessionError::TransformWrapingMessageError(
                         "Error transforming Signing requestWrap to SigningRequest".to_string(),
                     ))?
                     .clone())
@@ -333,40 +331,40 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SigningRequest<VII, C> {
 impl<VII: ValidatorIdentityIdentity, C: Cipher> SigningResponse<VII, C> {
     pub(crate) fn from(
         r: SigningResponseWrap<VII>,
-    ) -> Result<SigningResponse<VII, C>, SessionError<C>> {
+    ) -> Result<SigningResponse<VII, C>, SessionError> {
         match r {
             SigningResponseWrap::Ed25519(r) => Ok(try_cast_response::<VII, Ed25519Sha512, C>(&r)
-                .ok_or(SessionError::<C>::TransformWrapingMessageError(
+                .ok_or(SessionError::TransformWrapingMessageError(
                     "Error transforming Signing responseWrap to SigningResponse".to_string(),
                 ))?
                 .clone()),
             SigningResponseWrap::Secp256k1(r) => {
                 Ok(try_cast_response::<VII, Secp256K1Sha256, C>(&r)
-                    .ok_or(SessionError::<C>::TransformWrapingMessageError(
+                    .ok_or(SessionError::TransformWrapingMessageError(
                         "Error transforming Signing responseWrap to SigningResponse".to_string(),
                     ))?
                     .clone())
             }
             SigningResponseWrap::Secp256k1Tr(r) => {
                 Ok(try_cast_response::<VII, Secp256K1Sha256TR, C>(&r)
-                    .ok_or(SessionError::<C>::TransformWrapingMessageError(
+                    .ok_or(SessionError::TransformWrapingMessageError(
                         "Error transforming Signing responseWrap to SigningResponse".to_string(),
                     ))?
                     .clone())
             }
             SigningResponseWrap::P256(r) => Ok(try_cast_response::<VII, P256Sha256, C>(&r)
-                .ok_or(SessionError::<C>::TransformWrapingMessageError(
+                .ok_or(SessionError::TransformWrapingMessageError(
                     "Error transforming Signing responseWrap to SigningResponse".to_string(),
                 ))?
                 .clone()),
             SigningResponseWrap::Ed448(r) => Ok(try_cast_response::<VII, Ed448Shake256, C>(&r)
-                .ok_or(SessionError::<C>::TransformWrapingMessageError(
+                .ok_or(SessionError::TransformWrapingMessageError(
                     "Error transforming Signing responseWrap to SigningResponse".to_string(),
                 ))?
                 .clone()),
             SigningResponseWrap::Ristretto255(r) => {
                 Ok(try_cast_response::<VII, Ristretto255Sha512, C>(&r)
-                    .ok_or(SessionError::<C>::TransformWrapingMessageError(
+                    .ok_or(SessionError::TransformWrapingMessageError(
                         "Error transforming Signing responseWrap to SigningResponse".to_string(),
                     ))?
                     .clone())

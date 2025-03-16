@@ -62,9 +62,9 @@ pub(crate) struct SessionWrap<VII: ValidatorIdentityIdentity, C: Cipher> {
     >,
 
     dkg_futures:
-        FuturesUnordered<oneshot::Receiver<Result<DKGInfo<VII, C>, (SessionId, SessionError<C>)>>>,
+        FuturesUnordered<oneshot::Receiver<Result<DKGInfo<VII, C>, (SessionId, SessionError)>>>,
     signing_futures: FuturesUnordered<
-        oneshot::Receiver<Result<SignatureSuite<VII, C>, (Option<SubsessionId>, SessionError<C>)>>,
+        oneshot::Receiver<Result<SignatureSuite<VII, C>, (Option<SubsessionId>, SessionError)>>,
     >,
 
     instruction_receiver: UnboundedReceiver<InstructionCipher<VII>>,
@@ -83,7 +83,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
         instruction_receiver: UnboundedReceiver<InstructionCipher<VII>>,
         keystore: Arc<crate::keystore::Keystore>,
         base_path: &PathBuf,
-    ) -> Result<Self, SessionError<C>> {
+    ) -> Result<Self, SessionError> {
         let path = base_path
             .join(Settings::global().coordinator.keystore_path)
             .join(C::crypto_type().to_string());
@@ -110,7 +110,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
             keystore_management,
         })
     }
-    pub(crate) fn check_serialize_deserialize(&self) -> Result<(), SessionError<C>> {
+    pub(crate) fn check_serialize_deserialize(&self) -> Result<(), SessionError> {
         let serialized = self.serialize_sessions()?;
         let deserialized =
             Self::deserialize_sessions(serialized.as_slice(), self.signing_session_sender.clone())?;
@@ -139,7 +139,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
             SigningRequestWrap<VII>,
             oneshot::Sender<SigningResponseWrap<VII>>,
         )>,
-    ) -> Result<HashMap<PkId, SigningSession<VII, C>>, SessionError<C>> {
+    ) -> Result<HashMap<PkId, SigningSession<VII, C>>, SessionError> {
         let sessions: HashMap<PkId, Vec<u8>> = bincode::deserialize(bytes)
             .map_err(|e| SessionError::CoordinatorSessionError(e.to_string()))?;
         let mut signing_sessions = HashMap::new();
@@ -149,7 +149,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
         }
         Ok(signing_sessions)
     }
-    fn serialize_sessions(&self) -> Result<Vec<u8>, SessionError<C>> {
+    fn serialize_sessions(&self) -> Result<Vec<u8>, SessionError> {
         let sessions = self
             .signing_sessions
             .iter()
@@ -157,7 +157,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
                 Ok(data) => Ok((pkid.clone(), data)),
                 Err(e) => Err(e),
             })
-            .collect::<Result<HashMap<PkId, Vec<u8>>, SessionError<C>>>()?;
+            .collect::<Result<HashMap<PkId, Vec<u8>>, SessionError>>()?;
         Ok(bincode::serialize(&sessions).unwrap())
     }
     async fn new_key<IT>(
@@ -165,7 +165,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
         participants: Vec<(IT, VII)>,
         min_signers: u16,
         identifier_transform: impl Fn(IT) -> Result<C::Identifier, C::CryptoError> + 'static,
-    ) -> Result<SessionId, SessionError<C>> {
+    ) -> Result<SessionId, SessionError> {
         //TODO: remove the following participants judgement
         let participants = participants
             .into_iter()
@@ -201,7 +201,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
         let signing_session = self
             .signing_sessions
             .get_mut(&pkid)
-            .ok_or(SessionError::<C>::SignerSessionError(
+            .ok_or(SessionError::SignerSessionError(
                 "Signing session not found".to_string(),
             ))
             .map_err(|e| SessionManagerError::SessionError(e.to_string()));
@@ -296,7 +296,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
                 let r = self
                     .signing_sessions
                     .get(&pkid)
-                    .ok_or(SessionError::<C>::SignerSessionError(
+                    .ok_or(SessionError::SignerSessionError(
                         "Signing session not found".to_string(),
                     ))
                     .and_then(|session| {
@@ -306,7 +306,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
                             .tweak(tweak_data.clone())
                             .verifying_key()
                             .serialize_frost()
-                            .map_err(|e| SessionError::<C>::CryptoError(e))?;
+                            .map_err(|e| SessionError::CryptoError(e))?;
                         Ok(GroupPublicKeyInfo::new(group_public_key_tweak, tweak_data))
                     })
                     .map_err(|e| SessionManagerError::SessionError(e.to_string()));
@@ -318,8 +318,8 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
     }
     async fn handle_dkg_future(
         &mut self,
-        dkg_info: Result<DKGInfo<VII, C>, (SessionId, SessionError<C>)>,
-    ) -> Result<(), SessionError<C>> {
+        dkg_info: Result<DKGInfo<VII, C>, (SessionId, SessionError)>,
+    ) -> Result<(), SessionError> {
         match dkg_info {
             Ok(dkg_info) => {
                 self.signing_sessions.insert(
@@ -373,8 +373,8 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
     }
     async fn handle_signing_future(
         &mut self,
-        signing_session: Result<SignatureSuite<VII, C>, (Option<SubsessionId>, SessionError<C>)>,
-    ) -> Result<(), SessionError<C>> {
+        signing_session: Result<SignatureSuite<VII, C>, (Option<SubsessionId>, SessionError)>,
+    ) -> Result<(), SessionError> {
         match signing_session {
             Ok(signature_suite) => {
                 let subsession_id = signature_suite.subsession_id;

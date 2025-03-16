@@ -74,7 +74,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
         let response = match self.signing_sessions.get_mut(&pkid) {
             Some(session) => Ok(session.apply_request(request, &mut rng)?),
             None => Err(SessionManagerError::SessionError(
-                SessionError::<C>::PkIdNotFound(pkid.to_string()).to_string(),
+                SessionError::PkIdNotFound(pkid.to_string()).to_string(),
             )),
         }?;
         Ok(SigningResponseWrap::from(response)?)
@@ -85,7 +85,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
         request_receiver: UnboundedReceiver<Request<VII>>,
         keystore: Arc<crate::keystore::Keystore>,
         base_path: &PathBuf,
-    ) -> Result<Self, SessionError<C>> {
+    ) -> Result<Self, SessionError> {
         let path = base_path
             .join(Settings::global().signer.keystore_path)
             .join(C::crypto_type().to_string());
@@ -104,7 +104,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
     }
     fn deserialize_sessions(
         bytes: &[u8],
-    ) -> Result<HashMap<PkId, SigningSession<VII, C>>, SessionError<C>> {
+    ) -> Result<HashMap<PkId, SigningSession<VII, C>>, SessionError> {
         let sessions: HashMap<PkId, Vec<u8>> = bincode::deserialize(bytes)
             .map_err(|e| SessionError::SignerSessionError(e.to_string()))?;
         let mut signing_sessions = HashMap::new();
@@ -114,7 +114,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
         }
         Ok(signing_sessions)
     }
-    fn serialize_sessions(&self) -> Result<Vec<u8>, SessionError<C>> {
+    fn serialize_sessions(&self) -> Result<Vec<u8>, SessionError> {
         tracing::debug!("serialize_sessions");
         let sessions = self
             .signing_sessions
@@ -126,7 +126,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
                     Err(e) => Err(e),
                 }
             })
-            .collect::<Result<HashMap<PkId, Vec<u8>>, SessionError<C>>>()?;
+            .collect::<Result<HashMap<PkId, Vec<u8>>, SessionError>>()?;
         tracing::debug!("serialize_sessions complete");
         Ok(bincode::serialize(&sessions).unwrap())
     }

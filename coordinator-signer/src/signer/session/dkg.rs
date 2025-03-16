@@ -39,7 +39,14 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher + PartialEq + Eq> DKGSession<VII,
     fn match_base_info(
         &self,
         base_info: &DKGBaseMessage<VII, C::Identifier>,
-    ) -> Result<(), SessionError<C>> {
+    ) -> Result<(), SessionError> {
+        if C::crypto_type() != base_info.crypto_type {
+            return Err(SessionError::BaseInfoNotMatch(format!(
+                "crypto type does not match: {:?} vs {:?}",
+                C::crypto_type(),
+                base_info.crypto_type
+            )));
+        }
         if self.session_id != base_info.session_id {
             return Err(SessionError::BaseInfoNotMatch(format!(
                 "session id does not match: {:?} vs {:?}",
@@ -76,14 +83,22 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher + PartialEq + Eq> DKGSession<VII,
     pub(crate) fn new_from_request<R: RngCore + CryptoRng>(
         request: DKGRequest<VII, C>,
         mut rng: R,
-    ) -> Result<(Self, DKGResponse<VII, C>), SessionError<C>> {
+    ) -> Result<(Self, DKGResponse<VII, C>), SessionError> {
         let DKGBaseMessage {
+            crypto_type,
             session_id,
             min_signers,
             participants,
             identifier,
             identity,
         } = request.base_info.clone();
+        if crypto_type != C::crypto_type() {
+            return Err(SessionError::BaseInfoNotMatch(format!(
+                "crypto type does not match: {:?} vs {:?}",
+                crypto_type,
+                C::crypto_type()
+            )));
+        }
         participants.check_identifier_identity_exists(&identifier, &identity)?;
         if let DKGRequestStage::Part1 {} = request.stage.clone() {
             participants.check_identifier_identity_exists(&identifier, &identity)?;
@@ -93,7 +108,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher + PartialEq + Eq> DKGSession<VII,
                 min_signers,
                 &mut rng,
             )
-            .map_err(|e| SessionError::CryptoError(e))?;
+            .map_err(|e| SessionError::CryptoError(e.to_string()))?;
             let response = DKGResponse {
                 base_info: request.base_info.clone(),
                 stage: DKGResponseStage::Part1 {
@@ -123,7 +138,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher + PartialEq + Eq> DKGSession<VII,
     pub(crate) fn update_from_request(
         &mut self,
         request: DKGRequest<VII, C>,
-    ) -> Result<DKGResponse<VII, C>, SessionError<C>> {
+    ) -> Result<DKGResponse<VII, C>, SessionError> {
         let DKGBaseMessage {
             identifier,
             identity,
@@ -150,7 +165,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher + PartialEq + Eq> DKGSession<VII,
                     round1_package_map.remove(&self.identifier);
                     let (round2_secret_package, round2_package_map) =
                         C::dkg_part2(round1_secret_package.clone(), &round1_package_map)
-                            .map_err(|e| SessionError::CryptoError(e))?;
+                            .map_err(|e| SessionError::CryptoError(e.to_string()))?;
                     let response = DKGResponse {
                         base_info: request.base_info.clone(),
                         stage: DKGResponseStage::Part2 {
@@ -192,7 +207,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher + PartialEq + Eq> DKGSession<VII,
                         &round1_package_map,
                         &round2_package_map,
                     )
-                    .map_err(|e| SessionError::CryptoError(e))?;
+                    .map_err(|e| SessionError::CryptoError(e.to_string()))?;
                     let response = DKGResponse {
                         base_info: request.base_info.clone(),
                         stage: DKGResponseStage::GenPublicKey {
@@ -214,7 +229,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher + PartialEq + Eq> DKGSession<VII,
         };
         Ok(resp)
     }
-    pub(crate) fn is_completed(&self) -> Result<Option<SigningSession<VII, C>>, SessionError<C>> {
+    pub(crate) fn is_completed(&self) -> Result<Option<SigningSession<VII, C>>, SessionError> {
         match self.dkg_state.clone() {
             DKGSignerState::Completed {
                 key_package,

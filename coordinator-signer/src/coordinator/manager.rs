@@ -28,8 +28,8 @@ pub(crate) enum SessionManagerError {
     #[error("crypto type Error: {0}")]
     CryptoTypeError(#[from] CryptoTypeError),
 }
-impl<C: Cipher> From<SessionError<C>> for SessionManagerError {
-    fn from(e: SessionError<C>) -> Self {
+impl<C: Cipher> From<SessionError> for SessionManagerError {
+    fn from(e: SessionError) -> Self {
         SessionManagerError::SessionError(e.to_string())
     }
 }

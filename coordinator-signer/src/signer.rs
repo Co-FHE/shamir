@@ -36,8 +36,7 @@ use crate::crypto::{
 use crate::keystore;
 use crate::types::message::{
     CoorToSigRequest, CoorToSigResponse, DKGResponseWrap, SigBehaviour, SigBehaviourEvent,
-    SigToCoorRequest, SigToCoorResponse, SignerToCoordinatorRequestWrap, SigningResponseWrap,
-    ValidatorIdentityRequest,
+    SigToCoorRequest, SigToCoorResponse, SigningResponseWrap, ValidatorIdentityRequest,
 };
 use crate::types::ConnectionState;
 use crate::utils::list_hash;
@@ -52,7 +51,7 @@ pub struct Signer<VI: ValidatorIdentity> {
     coordinator_peer_id: PeerId,
     register_request_id: Option<request_response::OutboundRequestId>,
     coor2signer_request_sender: UnboundedSender<Request<VI::Identity>>,
-    signer2coor_request_receiver: UnboundedReceiver<SignerToCoordinatorRequestWrap<VI::Identity>>,
+    signer2coor_request_receiver: UnboundedReceiver<Request<VI::Identity>>,
     dkg_response_futures: FuturesUnordered<
         oneshot::Receiver<(
             InboundRequestId,

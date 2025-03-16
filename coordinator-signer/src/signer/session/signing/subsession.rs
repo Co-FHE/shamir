@@ -31,7 +31,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SignerSubsession<VII, C> {
         request: SigningRequest<VII, C>,
         base: SigningSignerBase<VII, C>,
         mut rng: R,
-    ) -> Result<(Self, SigningResponse<VII, C>), SessionError<C>> {
+    ) -> Result<(Self, SigningResponse<VII, C>), SessionError> {
         if let SigningRequestStage::Round1 {} = request.stage.clone() {
             base.check_request(&request)?;
             tracing::debug!("round1 {:?}", base.key_package);
@@ -63,7 +63,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SignerSubsession<VII, C> {
     pub(crate) fn update_from_request(
         &mut self,
         request: SigningRequest<VII, C>,
-    ) -> Result<SigningResponse<VII, C>, SessionError<C>> {
+    ) -> Result<SigningResponse<VII, C>, SessionError> {
         self.base.check_request(&request)?;
         match request.stage.clone() {
             SigningRequestStage::Round1 { .. } => {

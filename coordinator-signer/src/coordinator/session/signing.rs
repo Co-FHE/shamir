@@ -40,7 +40,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSigningSession<VII, C
             SigningRequestWrap<VII>,
             oneshot::Sender<SigningResponseWrap<VII>>,
         )>,
-    ) -> Result<Self, SessionError<C>> {
+    ) -> Result<Self, SessionError> {
         Ok(Self {
             pkid: public_key_package
                 .pkid()
@@ -51,7 +51,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSigningSession<VII, C
             signing_sender,
         })
     }
-    fn info(&self) -> Result<CoordinatorSigningSessionInfo, SessionError<C>> {
+    fn info(&self) -> Result<CoordinatorSigningSessionInfo, SessionError> {
         Ok(CoordinatorSigningSessionInfo {
             pkid: self.pkid.clone(),
             public_key_package: self
@@ -62,7 +62,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSigningSession<VII, C
             participants: self.participants.serialize()?,
         })
     }
-    pub(crate) fn serialize(&self) -> Result<Vec<u8>, SessionError<C>> {
+    pub(crate) fn serialize(&self) -> Result<Vec<u8>, SessionError> {
         Ok(bincode::serialize(&self.info()?).unwrap())
     }
     pub(crate) fn deserialize(
@@ -71,7 +71,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSigningSession<VII, C
             SigningRequestWrap<VII>,
             oneshot::Sender<SigningResponseWrap<VII>>,
         )>,
-    ) -> Result<Self, SessionError<C>> {
+    ) -> Result<Self, SessionError> {
         let info: CoordinatorSigningSessionInfo = bincode::deserialize(bytes)
             .map_err(|e| SessionError::CoordinatorSessionError(e.to_string()))?;
         Ok(Self {
@@ -88,7 +88,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSigningSession<VII, C
         msg: T,
         tweak_data: Option<T>,
         response: oneshot::Sender<
-            Result<SignatureSuite<VII, C>, (Option<SubsessionId>, SessionError<C>)>,
+            Result<SignatureSuite<VII, C>, (Option<SubsessionId>, SessionError)>,
         >,
         callback: impl FnOnce(SubsessionId),
     ) {

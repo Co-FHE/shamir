@@ -35,7 +35,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SigningSignerBase<VII, C> {
         participants: Participants<VII, C::Identifier>,
         identifier: C::Identifier,
         identity: VII,
-    ) -> Result<Self, SessionError<C>> {
+    ) -> Result<Self, SessionError> {
         Ok(Self {
             pkid: public_key_package
                 .pkid()
@@ -48,7 +48,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SigningSignerBase<VII, C> {
             identity,
         })
     }
-    pub(crate) fn serialize(&self) -> Result<Vec<u8>, SessionError<C>> {
+    pub(crate) fn serialize(&self) -> Result<Vec<u8>, SessionError> {
         let base_info = SigningSignerBaseInfo {
             pkid: self.pkid.clone(),
             key_package: self
@@ -66,7 +66,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SigningSignerBase<VII, C> {
         };
         Ok(bincode::serialize(&base_info).unwrap())
     }
-    pub(crate) fn deserialize(bytes: &[u8]) -> Result<Self, SessionError<C>> {
+    pub(crate) fn deserialize(bytes: &[u8]) -> Result<Self, SessionError> {
         let base_info: SigningSignerBaseInfo = bincode::deserialize(bytes).unwrap();
         Ok(Self {
             pkid: base_info.pkid,
@@ -87,7 +87,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SigningSignerBase<VII, C> {
     pub(crate) fn check_request(
         &self,
         request: &SigningRequest<VII, C>,
-    ) -> Result<(), SessionError<C>> {
+    ) -> Result<(), SessionError> {
         if request.base_info.identifier != self.identifier {
             return Err(SessionError::BaseInfoNotMatch(format!(
                 "Identifier mismatch: expected {}, got {}",

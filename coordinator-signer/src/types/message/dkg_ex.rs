@@ -12,7 +12,12 @@ use crate::{
 
 use super::DKGMessage;
 pub(crate) type DKGRequestEx<VII: ValidatorIdentityIdentity> =
-    DKGMessage<VII, u16, DKGStageEx<u16, Vec<u8>>>;
+    DKGMessage<VII, u16, DKGStageEx<u16, DKGFinal>>;
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct DKGFinal {
+    pub(crate) key_package: Vec<u8>,
+    pub(crate) public_key: Vec<u8>,
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum DKGRequestWrapEx<VII: ValidatorIdentityIdentity> {
     EcdsaSecp256k1(DKGRequestEx<VII>),
@@ -50,91 +55,31 @@ impl<VII: ValidatorIdentityIdentity> DKGRequestWrapEx<VII> {
     ) -> Result<Self, SessionError> {
         match crypto_type {
             CryptoType::EcdsaSecp256k1 => Ok(DKGRequestWrapEx::EcdsaSecp256k1(r)),
-            _ => Err(SessionError::CryptoError(format!(
-                "Unsupported crypto type for DKGRequestWrapEx: {}",
-                crypto_type
-            ))),
+            _ => Err(SessionError::CryptoTypeError(crypto_type)),
         }
+    }
+    pub(crate) fn dkg_request_ex(&self) -> Result<DKGRequestEx<VII>, SessionError> {
+        DKGRequestEx::from(self)
     }
 }
 impl<VII: ValidatorIdentityIdentity> DKGRequestEx<VII> {
-    pub(crate) fn from(r: DKGRequestWrapEx<VII>) -> Result<DKGRequest<VII, C>, SessionError> {
+    pub(crate) fn from(r: &DKGRequestWrapEx<VII>) -> Result<DKGRequestEx<VII>, SessionError> {
         match r {
-            DKGRequestWrap::Ed25519(r) => Ok(try_cast_request::<VII, Ed25519Sha512, C>(&r)
-                .ok_or(SessionError::TransformWrapingMessageError(
-                    "Error transforming DKG requestWrap to DKGRequest".to_string(),
-                ))?
-                .clone()),
-            DKGRequestWrap::Secp256k1(r) => Ok(try_cast_request::<VII, Secp256K1Sha256, C>(&r)
-                .ok_or(SessionError::TransformWrapingMessageError(
-                    "Error transforming DKG requestWrap to DKGRequest".to_string(),
-                ))?
-                .clone()),
-            DKGRequestWrap::Secp256k1Tr(r) => Ok(try_cast_request::<VII, Secp256K1Sha256TR, C>(&r)
-                .ok_or(SessionError::TransformWrapingMessageError(
-                    "Error transforming DKG requestWrap to DKGRequest".to_string(),
-                ))?
-                .clone()),
-            DKGRequestWrap::P256(r) => Ok(try_cast_request::<VII, P256Sha256, C>(&r)
-                .ok_or(SessionError::TransformWrapingMessageError(
-                    "Error transforming DKG requestWrap to DKGRequest".to_string(),
-                ))?
-                .clone()),
-            DKGRequestWrap::Ed448(r) => Ok(try_cast_request::<VII, Ed448Shake256, C>(&r)
-                .ok_or(SessionError::TransformWrapingMessageError(
-                    "Error transforming DKG requestWrap to DKGRequest".to_string(),
-                ))?
-                .clone()),
-            DKGRequestWrap::Ristretto255(r) => {
-                Ok(try_cast_request::<VII, Ristretto255Sha512, C>(&r)
-                    .ok_or(SessionError::TransformWrapingMessageError(
-                        "Error transforming DKG requestWrap to DKGRequest".to_string(),
-                    ))?
-                    .clone())
+            DKGRequestWrapEx::EcdsaSecp256k1(r) => {
+                if r.base_info.crypto_type != CryptoType::EcdsaSecp256k1 {
+                    return Err(SessionError::CryptoTypeError(r.base_info.crypto_type));
+                }
+                Ok(r.clone())
             }
+        }
+    }
+    pub(crate) fn into_request_wrap(self) -> Result<DKGRequestWrapEx<VII>, SessionError> {
+        match self.base_info.crypto_type {
+            CryptoType::EcdsaSecp256k1 => Ok(DKGRequestWrapEx::EcdsaSecp256k1(self)),
+            _ => Err(SessionError::CryptoTypeError(self.base_info.crypto_type)),
         }
     }
     pub(crate) fn session_id(&self) -> SessionId {
         self.base_info.session_id
-    }
-}
-impl<VII: ValidatorIdentityIdentity, C: Cipher> DKGResponse<VII, C> {
-    pub(crate) fn from(r: DKGResponseWrap<VII>) -> Result<DKGResponse<VII, C>, SessionError> {
-        match r {
-            DKGResponseWrap::Ed25519(r) => Ok(try_cast_response::<VII, Ed25519Sha512, C>(&r)
-                .ok_or(SessionError::TransformWrapingMessageError(
-                    "Error transforming DKG responseWrap to DKGResponse".to_string(),
-                ))?
-                .clone()),
-            DKGResponseWrap::Secp256k1(r) => Ok(try_cast_response::<VII, Secp256K1Sha256, C>(&r)
-                .ok_or(SessionError::TransformWrapingMessageError(
-                    "Error transforming DKG responseWrap to DKGResponse".to_string(),
-                ))?
-                .clone()),
-            DKGResponseWrap::Secp256k1Tr(r) => {
-                Ok(try_cast_response::<VII, Secp256K1Sha256TR, C>(&r)
-                    .ok_or(SessionError::TransformWrapingMessageError(
-                        "Error transforming DKG responseWrap to DKGResponse".to_string(),
-                    ))?
-                    .clone())
-            }
-            DKGResponseWrap::P256(r) => Ok(try_cast_response::<VII, P256Sha256, C>(&r)
-                .ok_or(SessionError::TransformWrapingMessageError(
-                    "Error transforming DKG responseWrap to DKGResponse".to_string(),
-                ))?
-                .clone()),
-            DKGResponseWrap::Ed448(r) => Ok(try_cast_response::<VII, Ed448Shake256, C>(&r)
-                .ok_or(SessionError::TransformWrapingMessageError(
-                    "Error transforming DKG responseWrap to DKGResponse".to_string(),
-                ))?
-                .clone()),
-            DKGResponseWrap::Ristretto255(r) => {
-                Ok(try_cast_response::<VII, Ristretto255Sha512, C>(&r)
-                    .ok_or(SessionError::TransformWrapingMessageError(
-                        "Error transforming DKG responseWrap to DKGResponse".to_string(),
-                    ))?
-                    .clone())
-            }
-        }
     }
 }

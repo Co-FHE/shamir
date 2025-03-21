@@ -5,7 +5,6 @@ use crate::{
     types::{
         error::SessionError,
         message::{DKGBaseMessage, DKGRequest, DKGRequestStage, DKGResponse, DKGResponseStage},
-        Participants, SessionId,
     },
 };
 use rand_core::RngCore;
@@ -28,69 +27,21 @@ enum DKGSignerState<C: Cipher> {
     },
 }
 pub(crate) struct DKGSession<VII: ValidatorIdentityIdentity, C: Cipher> {
-    session_id: SessionId,
-    min_signers: u16,
-    participants: Participants<VII, C::Identifier>,
+    base_info: DKGBaseMessage<VII, C::Identifier>,
     dkg_state: DKGSignerState<C>,
-    identity: VII,
-    identifier: C::Identifier,
 }
 impl<VII: ValidatorIdentityIdentity, C: Cipher + PartialEq + Eq> DKGSession<VII, C> {
-    fn match_base_info(
-        &self,
-        base_info: &DKGBaseMessage<VII, C::Identifier>,
-    ) -> Result<(), SessionError> {
-        if C::crypto_type() != base_info.crypto_type {
-            return Err(SessionError::BaseInfoNotMatch(format!(
-                "crypto type does not match: {:?} vs {:?}",
-                C::crypto_type(),
-                base_info.crypto_type
-            )));
-        }
-        if self.session_id != base_info.session_id {
-            return Err(SessionError::BaseInfoNotMatch(format!(
-                "session id does not match: {:?} vs {:?}",
-                self.session_id, base_info.session_id
-            )));
-        }
-        if self.min_signers != base_info.min_signers {
-            return Err(SessionError::BaseInfoNotMatch(format!(
-                "min signers does not match: {:?} vs {:?}",
-                self.min_signers, base_info.min_signers
-            )));
-        }
-        if self.participants != base_info.participants {
-            return Err(SessionError::BaseInfoNotMatch(format!(
-                "participants does not match: {:?} vs {:?}",
-                self.participants, base_info.participants
-            )));
-        }
-        if self.identifier != base_info.identifier {
-            return Err(SessionError::BaseInfoNotMatch(format!(
-                "identifier does not match: {:?} vs {:?}",
-                self.identifier, base_info.identifier
-            )));
-        }
-        if self.identity != base_info.identity {
-            return Err(SessionError::BaseInfoNotMatch(format!(
-                "identity does not match: {:?} vs {:?}",
-                self.identity, base_info.identity
-            )));
-        }
-
-        Ok(())
-    }
     pub(crate) fn new_from_request<R: RngCore + CryptoRng>(
         request: DKGRequest<VII, C>,
         mut rng: R,
     ) -> Result<(Self, DKGResponse<VII, C>), SessionError> {
         let DKGBaseMessage {
             crypto_type,
-            session_id,
             min_signers,
             participants,
             identifier,
             identity,
+            ..
         } = request.base_info.clone();
         if crypto_type != C::crypto_type() {
             return Err(SessionError::BaseInfoNotMatch(format!(
@@ -117,14 +68,10 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher + PartialEq + Eq> DKGSession<VII,
             };
             Ok((
                 Self {
-                    session_id: session_id.clone(),
-                    min_signers,
                     dkg_state: DKGSignerState::Part1 {
                         round1_secret_package,
                     },
-                    participants: participants.clone(),
-                    identity: identity.clone(),
-                    identifier: identifier,
+                    base_info: request.base_info.clone(),
                 },
                 response,
             ))
@@ -144,8 +91,14 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher + PartialEq + Eq> DKGSession<VII,
             identity,
             ..
         } = request.base_info.clone();
-        self.match_base_info(&request.base_info)?;
-        self.participants
+        if self.base_info != request.base_info {
+            return Err(SessionError::BaseInfoNotMatch(format!(
+                "base info does not match: {:?} vs {:?}",
+                self.base_info, request.base_info
+            )));
+        }
+        self.base_info
+            .participants
             .check_identifier_identity_exists(&identifier, &identity)?;
         let resp = match request.stage.clone() {
             DKGRequestStage::Part1 { .. } => {
@@ -160,9 +113,11 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher + PartialEq + Eq> DKGSession<VII,
                 } = &self.dkg_state
                 {
                     let mut round1_package_map = round1_package_map.clone();
-                    self.participants
-                        .check_keys_equal_except_self(&self.identifier, &round1_package_map)?;
-                    round1_package_map.remove(&self.identifier);
+                    self.base_info.participants.check_keys_equal_except_self(
+                        &self.base_info.identifier,
+                        &round1_package_map,
+                    )?;
+                    round1_package_map.remove(&self.base_info.identifier);
                     let (round2_secret_package, round2_package_map) =
                         C::dkg_part2(round1_secret_package.clone(), &round1_package_map)
                             .map_err(|e| SessionError::CryptoError(e.to_string()))?;
@@ -194,12 +149,16 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher + PartialEq + Eq> DKGSession<VII,
                     ..
                 } = &self.dkg_state
                 {
-                    self.participants
-                        .check_keys_equal_except_self(&self.identifier, &round1_package_map)?;
+                    self.base_info.participants.check_keys_equal_except_self(
+                        &self.base_info.identifier,
+                        &round1_package_map,
+                    )?;
                     // let mut round1_package_map = round1_package_map.clone();
                     // round1_package_map.remove(&self.identifier);
-                    self.participants
-                        .check_keys_equal_except_self(&self.identifier, &round2_package_map)?;
+                    self.base_info.participants.check_keys_equal_except_self(
+                        &self.base_info.identifier,
+                        &round2_package_map,
+                    )?;
                     // let mut round2_package_map = round2_package_map.clone();
                     // round2_package_map.remove(&self.identifier);
                     let (key_package, public_key_package) = C::dkg_part3(
@@ -236,11 +195,11 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher + PartialEq + Eq> DKGSession<VII,
                 public_key_package,
             } => Ok(Some(SigningSession::new(
                 public_key_package,
-                self.min_signers,
-                self.participants.clone(),
+                self.base_info.min_signers,
+                self.base_info.participants.clone(),
                 key_package,
-                self.identifier.clone(),
-                self.identity.clone(),
+                self.base_info.identifier.clone(),
+                self.base_info.identity.clone(),
             )?)),
             _ => Ok(None),
         }

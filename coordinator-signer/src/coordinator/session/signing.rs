@@ -44,7 +44,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSigningSession<VII, C
         Ok(Self {
             pkid: public_key_package
                 .pkid()
-                .map_err(|e| SessionError::CryptoError(e))?,
+                .map_err(|e| SessionError::CryptoError(e.to_string()))?,
             public_key_package,
             min_signers,
             participants,
@@ -57,7 +57,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSigningSession<VII, C
             public_key_package: self
                 .public_key_package
                 .serialize_binary()
-                .map_err(|e| SessionError::CryptoError(e))?,
+                .map_err(|e| SessionError::CryptoError(e.to_string()))?,
             min_signers: self.min_signers,
             participants: self.participants.serialize()?,
         })
@@ -77,7 +77,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSigningSession<VII, C
         Ok(Self {
             pkid: info.pkid,
             public_key_package: C::PublicKeyPackage::deserialize_binary(&info.public_key_package)
-                .map_err(|e| SessionError::CryptoError(e))?,
+                .map_err(|e| SessionError::CryptoError(e.to_string()))?,
             min_signers: info.min_signers,
             participants: Participants::deserialize(&info.participants)?,
             signing_sender,

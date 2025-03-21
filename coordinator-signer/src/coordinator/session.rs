@@ -174,7 +174,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
                 Ok((id, validator))
             })
             .collect::<Result<Vec<(C::Identifier, VII)>, C::CryptoError>>()
-            .map_err(|e| SessionError::CryptoError(e))?;
+            .map_err(|e| SessionError::CryptoError(e.to_string()))?;
         let participants = Participants::new(participants)?;
         participants.check_min_signers(min_signers)?;
         let session = DkgSession::<VII, C>::new(
@@ -306,7 +306,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
                             .tweak(tweak_data.clone())
                             .verifying_key()
                             .serialize_frost()
-                            .map_err(|e| SessionError::CryptoError(e))?;
+                            .map_err(|e| SessionError::CryptoError(e.to_string()))?;
                         Ok(GroupPublicKeyInfo::new(group_public_key_tweak, tweak_data))
                     })
                     .map_err(|e| SessionManagerError::SessionError(e.to_string()));
@@ -326,7 +326,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SessionWrap<VII, C> {
                     dkg_info
                         .public_key_package
                         .pkid()
-                        .map_err(|e| SessionError::CryptoError(e))?,
+                        .map_err(|e| SessionError::CryptoError(e.to_string()))?,
                     SigningSession::new(
                         dkg_info.public_key_package.clone(),
                         dkg_info.min_signers,

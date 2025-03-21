@@ -22,6 +22,9 @@ signer:
   ipc_socket_path: "ipc/"
   keystore_path: "keystore/signer"
   connection_timeout: 5
+  ecdsa_port: 29197
+  ecdsa_dkg_timeout: 300
+  ecdsa_sign_timeout: 10
 connection:
   ping_interval: 1
 session:

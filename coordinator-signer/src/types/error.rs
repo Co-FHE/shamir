@@ -1,4 +1,7 @@
-use crate::{crypto::Cipher, keystore::KeystoreError};
+use crate::{
+    crypto::{Cipher, CryptoType},
+    keystore::KeystoreError,
+};
 
 use super::session::ParticipantsError;
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -29,6 +32,14 @@ pub(crate) enum SessionError {
     PkIdNotFound(String),
     #[error("Keystore error: {0}")]
     KeystoreError(#[from] KeystoreError),
+    #[error("crypto type not supported: {0}")]
+    CryptoTypeError(CryptoType),
+    #[error("external error: {0}")]
+    ExternalError(String),
+    #[error("serialization error: {0}")]
+    SerializationError(String),
+    #[error("deserialization error: {0}")]
+    DeserializationError(String),
 }
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum SessionIdError {

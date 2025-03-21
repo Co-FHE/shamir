@@ -4,25 +4,33 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     crypto::{
-        Cipher, CryptoType, Ed25519Sha512, Ed448Shake256, P256Sha256, PkId, Ristretto255Sha512,
-        Secp256K1Sha256, Secp256K1Sha256TR, ValidatorIdentityIdentity,
+        Cipher, CryptoType, Ed25519Sha512, Ed448Shake256, Identifier, P256Sha256, PkId,
+        PublicKeyPackage, Ristretto255Sha512, Secp256K1Sha256, Secp256K1Sha256TR,
+        ValidatorIdentityIdentity,
     },
     types::{error::SessionError, Participants, SubsessionId},
 };
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct SigningBaseMessage<VII: ValidatorIdentityIdentity, C: Cipher> {
-    pub(crate) participants: Participants<VII, C::Identifier>,
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+pub(crate) struct SigningBaseMessage<VII: ValidatorIdentityIdentity, CI: Identifier, PK> {
+    pub(crate) crypto_type: CryptoType,
+    pub(crate) participants: Participants<VII, CI>,
+    pub(crate) min_signers: u16,
     pub(crate) pkid: PkId,
     pub(crate) subsession_id: SubsessionId,
-    pub(crate) identifier: C::Identifier,
+    pub(crate) identifier: CI,
     pub(crate) identity: VII,
-    pub(crate) public_key: C::PublicKeyPackage,
+    pub(crate) public_key: PK,
 }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct SigningRequest<VII: ValidatorIdentityIdentity, C: Cipher> {
-    pub(crate) base_info: SigningBaseMessage<VII, C>,
-    pub(crate) stage: SigningRequestStage<VII, C>,
+pub(crate) struct SigningMessage<VII: ValidatorIdentityIdentity, CI: Identifier, PK, S> {
+    pub(crate) base_info: SigningBaseMessage<VII, CI, PK>,
+    pub(crate) stage: S,
 }
+pub(crate) type SigningResponse<VII: ValidatorIdentityIdentity, C: Cipher> =
+    SigningMessage<VII, C::Identifier, C::PublicKeyPackage, SigningResponseStage<C>>;
+pub(crate) type SigningRequest<VII: ValidatorIdentityIdentity, C: Cipher> =
+    SigningMessage<VII, C::Identifier, C::PublicKeyPackage, SigningRequestStage<VII, C>>;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum SigningRequestStage<VII: ValidatorIdentityIdentity, C: Cipher> {
     Round1 {},
@@ -41,11 +49,6 @@ pub(crate) enum SigningRequestWrap<VII: ValidatorIdentityIdentity> {
     P256(SigningRequest<VII, P256Sha256>),
     Ed448(SigningRequest<VII, Ed448Shake256>),
     Ristretto255(SigningRequest<VII, Ristretto255Sha512>),
-}
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct SigningResponse<VII: ValidatorIdentityIdentity, C: Cipher> {
-    pub(crate) base_info: SigningBaseMessage<VII, C>,
-    pub(crate) stage: SigningResponseStage<C>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -162,7 +165,9 @@ impl<VII: ValidatorIdentityIdentity> SigningRequestWrap<VII> {
         match self {
             SigningRequestWrap::Ed25519(r) => SigningResponseWrap::Ed25519(SigningResponse {
                 base_info: SigningBaseMessage {
+                    crypto_type: self.crypto_type(),
                     pkid: r.base_info.pkid.clone(),
+                    min_signers: r.base_info.min_signers,
                     subsession_id: r.base_info.subsession_id,
                     public_key: r.base_info.public_key.clone(),
                     participants: r.base_info.participants.clone(),
@@ -173,7 +178,9 @@ impl<VII: ValidatorIdentityIdentity> SigningRequestWrap<VII> {
             }),
             SigningRequestWrap::Secp256k1(r) => SigningResponseWrap::Secp256k1(SigningResponse {
                 base_info: SigningBaseMessage {
+                    crypto_type: self.crypto_type(),
                     pkid: r.base_info.pkid.clone(),
+                    min_signers: r.base_info.min_signers,
                     subsession_id: r.base_info.subsession_id,
                     public_key: r.base_info.public_key.clone(),
                     participants: r.base_info.participants.clone(),
@@ -185,7 +192,9 @@ impl<VII: ValidatorIdentityIdentity> SigningRequestWrap<VII> {
             SigningRequestWrap::Secp256k1Tr(r) => {
                 SigningResponseWrap::Secp256k1Tr(SigningResponse {
                     base_info: SigningBaseMessage {
+                        crypto_type: self.crypto_type(),
                         pkid: r.base_info.pkid.clone(),
+                        min_signers: r.base_info.min_signers,
                         subsession_id: r.base_info.subsession_id,
                         public_key: r.base_info.public_key.clone(),
                         participants: r.base_info.participants.clone(),
@@ -197,7 +206,9 @@ impl<VII: ValidatorIdentityIdentity> SigningRequestWrap<VII> {
             }
             SigningRequestWrap::P256(r) => SigningResponseWrap::P256(SigningResponse {
                 base_info: SigningBaseMessage {
+                    crypto_type: self.crypto_type(),
                     pkid: r.base_info.pkid.clone(),
+                    min_signers: r.base_info.min_signers,
                     subsession_id: r.base_info.subsession_id,
                     public_key: r.base_info.public_key.clone(),
                     participants: r.base_info.participants.clone(),
@@ -208,7 +219,9 @@ impl<VII: ValidatorIdentityIdentity> SigningRequestWrap<VII> {
             }),
             SigningRequestWrap::Ed448(r) => SigningResponseWrap::Ed448(SigningResponse {
                 base_info: SigningBaseMessage {
+                    crypto_type: self.crypto_type(),
                     pkid: r.base_info.pkid.clone(),
+                    min_signers: r.base_info.min_signers,
                     subsession_id: r.base_info.subsession_id,
                     public_key: r.base_info.public_key.clone(),
                     participants: r.base_info.participants.clone(),
@@ -220,7 +233,9 @@ impl<VII: ValidatorIdentityIdentity> SigningRequestWrap<VII> {
             SigningRequestWrap::Ristretto255(r) => {
                 SigningResponseWrap::Ristretto255(SigningResponse {
                     base_info: SigningBaseMessage {
+                        crypto_type: self.crypto_type(),
                         pkid: r.base_info.pkid.clone(),
+                        min_signers: r.base_info.min_signers,
                         subsession_id: r.base_info.subsession_id,
                         public_key: r.base_info.public_key.clone(),
                         participants: r.base_info.participants.clone(),

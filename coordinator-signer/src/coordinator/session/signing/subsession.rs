@@ -462,7 +462,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
                     .collect::<Result<BTreeMap<C::Identifier, C::SigningCommitments>, _>>()?;
                 let signing_package =
                     C::SigningPackage::new(commitments_map.clone(), &self.message)
-                        .map_err(|e| (SessionError::CryptoError(e), None))?;
+                        .map_err(|e| (SessionError::CryptoError(e.to_string()), None))?;
                 Ok(CoordinatorSigningState::Round2 {
                     signing_package,
                     joined_participants,
@@ -497,7 +497,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
                     &self.public_key,
                     self.tweak_data.clone(),
                 )
-                .map_err(|e| (SessionError::CryptoError(e), None))?;
+                .map_err(|e| (SessionError::CryptoError(e.to_string()), None))?;
                 Ok(CoordinatorSigningState::Completed {
                     signature,
                     joined_participants,

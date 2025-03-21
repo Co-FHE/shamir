@@ -14,7 +14,7 @@ use crate::{
 
 use super::{
     DKGRequestWrap, DKGRequestWrapEx, DKGResponseWrap, DKGResponseWrapEx, SigningRequestWrap,
-    SigningResponseWrap,
+    SigningRequestWrapEx, SigningResponseWrap, SigningResponseWrapEx,
 };
 
 #[derive(NetworkBehaviour)]
@@ -60,6 +60,7 @@ pub(crate) struct SigBehaviour<
 pub(crate) enum SigToCoorRequest<VII: ValidatorIdentityIdentity> {
     ValidatorIndentity(ValidatorIdentityRequest),
     DKGRequestEx(DKGRequestWrapEx<VII>),
+    SigningRequestEx(SigningRequestWrapEx<VII>),
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum NodeToCoorRequest<VII: ValidatorIdentityIdentity> {
@@ -129,6 +130,7 @@ pub(crate) enum NodeToCoorResponse<VII: ValidatorIdentityIdentity> {
 pub(crate) enum SigToCoorResponse {
     ValidatorIdentityResponse(ValidatorIdentityResponse),
     DKGResponseEx(DKGResponseWrapEx),
+    SigningResponseEx(SigningResponseWrapEx),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -136,6 +138,7 @@ pub(crate) enum CoorToSigRequest<VII: ValidatorIdentityIdentity> {
     DKGRequest(DKGRequestWrap<VII>),
     SigningRequest(SigningRequestWrap<VII>),
     DKGRequestEx(DKGRequestWrapEx<VII>),
+    SigningRequestEx(SigningRequestWrapEx<VII>),
     Empty,
 }
 
@@ -144,6 +147,7 @@ pub(crate) enum CoorToSigResponse<VII: ValidatorIdentityIdentity> {
     DKGResponse(DKGResponseWrap<VII>),
     SigningResponse(SigningResponseWrap<VII>),
     DKGResponseEx(DKGResponseWrapEx),
+    SigningResponseEx(SigningResponseWrapEx),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -10,7 +10,7 @@ use crate::crypto::Identifier;
 
 use super::{error::SessionError, Cipher, ValidatorIdentityIdentity};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Participants<VII: ValidatorIdentityIdentity, CI: Identifier>(BTreeMap<CI, VII>);
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum ParticipantsError {
@@ -240,5 +240,29 @@ impl<VII: ValidatorIdentityIdentity, CI: Identifier> Deref for Participants<VII,
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+use serde::de::Error as DeError;
+use serde::{Deserializer, Serializer};
+
+impl<VII: ValidatorIdentityIdentity, CI: Identifier> Serialize for Participants<VII, CI> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let bytes = self.serialize().map_err(serde::ser::Error::custom)?;
+        serializer.serialize_bytes(&bytes)
+    }
+}
+
+impl<'de, VII: ValidatorIdentityIdentity, CI: Identifier> Deserialize<'de>
+    for Participants<VII, CI>
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let bytes: &[u8] = <&[u8]>::deserialize(deserializer)?;
+        Participants::deserialize(bytes).map_err(DeError::custom)
     }
 }

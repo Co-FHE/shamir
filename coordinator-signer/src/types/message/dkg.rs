@@ -1,6 +1,6 @@
 use std::{any::Any, collections::BTreeMap};
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::{
     crypto::{
@@ -10,7 +10,7 @@ use crate::{
     types::{error::SessionError, Participants, SessionId},
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct DKGBaseMessage<VII: ValidatorIdentityIdentity, CI: Identifier> {
     pub(crate) crypto_type: CryptoType,
     pub(crate) session_id: SessionId,
@@ -18,6 +18,69 @@ pub(crate) struct DKGBaseMessage<VII: ValidatorIdentityIdentity, CI: Identifier>
     pub(crate) participants: Participants<VII, CI>,
     pub(crate) identifier: CI,
     pub(crate) identity: VII,
+}
+impl<VII: ValidatorIdentityIdentity, CI: Identifier> DKGBaseMessage<VII, CI> {
+    pub(crate) fn serialize(&self) -> Result<Vec<u8>, SessionError> {
+        let data = (
+            self.crypto_type,
+            self.session_id,
+            self.min_signers,
+            self.participants.serialize()?,
+            self.identifier.to_bytes(),
+            self.identity.to_bytes(),
+        );
+        Ok(bincode::serialize(&data).unwrap())
+    }
+    pub(crate) fn deserialize(bytes: &[u8]) -> Result<Self, SessionError> {
+        let data: (CryptoType, SessionId, u16, Vec<u8>, Vec<u8>, Vec<u8>) =
+            bincode::deserialize(bytes)
+                .map_err(|e| SessionError::DeserializationError(e.to_string()))?;
+        Ok(Self {
+            crypto_type: data.0,
+            session_id: data.1,
+            min_signers: data.2,
+            participants: Participants::deserialize(&data.3)
+                .map_err(|e| SessionError::DeserializationError(e.to_string()))?,
+            identifier: CI::from_bytes(&data.4)
+                .map_err(|e| SessionError::DeserializationError(e.to_string()))?,
+            identity: VII::from_bytes(&data.5)
+                .map_err(|e| SessionError::DeserializationError(e.to_string()))?,
+        })
+    }
+}
+
+pub(crate) mod dkg_base_message_serde {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    use crate::{
+        crypto::{Identifier, ValidatorIdentityIdentity},
+        types::message::DKGBaseMessage,
+    };
+
+    pub fn serialize<S, VII, CI>(
+        value: &DKGBaseMessage<VII, CI>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+        VII: ValidatorIdentityIdentity,
+        CI: Identifier,
+    {
+        let bytes = value.serialize().map_err(serde::ser::Error::custom)?;
+        serializer.serialize_bytes(&bytes)
+    }
+
+    pub fn deserialize<'de, D, VII, CI>(
+        deserializer: D,
+    ) -> Result<DKGBaseMessage<VII, CI>, D::Error>
+    where
+        D: Deserializer<'de>,
+        VII: ValidatorIdentityIdentity,
+        CI: Identifier,
+    {
+        let bytes: &[u8] = Deserialize::deserialize(deserializer)?;
+        DKGBaseMessage::deserialize(bytes).map_err(serde::de::Error::custom)
+    }
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct DKGMessage<VII: ValidatorIdentityIdentity, CI: Identifier, S> {

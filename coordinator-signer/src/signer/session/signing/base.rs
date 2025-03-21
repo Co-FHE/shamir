@@ -39,7 +39,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SigningSignerBase<VII, C> {
         Ok(Self {
             pkid: public_key_package
                 .pkid()
-                .map_err(|e| SessionError::CryptoError(e))?,
+                .map_err(|e| SessionError::CryptoError(e.to_string()))?,
             key_package,
             _public_key_package: public_key_package,
             _min_signers: min_signers,

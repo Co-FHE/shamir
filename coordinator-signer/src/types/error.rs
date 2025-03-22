@@ -1,5 +1,5 @@
 use crate::{
-    crypto::{Cipher, CryptoType},
+    crypto::{Cipher, CryptoType, CryptoTypeError},
     keystore::KeystoreError,
 };
 
@@ -34,12 +34,18 @@ pub(crate) enum SessionError {
     KeystoreError(#[from] KeystoreError),
     #[error("crypto type not supported: {0}")]
     CryptoTypeError(CryptoType),
+    #[error("Instruction response error: {0}")]
+    InstructionResponseError(String),
+    #[error("crypto type Error: {0}")]
+    CryptoTypeErrorNative(#[from] CryptoTypeError),
     #[error("external error: {0}")]
     ExternalError(String),
     #[error("serialization error: {0}")]
     SerializationError(String),
     #[error("deserialization error: {0}")]
     DeserializationError(String),
+    #[error("signature suite error: {0}")]
+    SignatureSuiteError(String),
 }
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum SessionIdError {

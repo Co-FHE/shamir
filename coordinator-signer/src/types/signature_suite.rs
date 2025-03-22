@@ -91,7 +91,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SignatureSuite<VII, C> {
                 .participants
                 .iter()
                 .map(|(k, v)| (k.to_bytes(), v.clone()))
-                .collect(),
+                .collect::<BTreeMap<_, _>>(),
             joined_participants: self
                 .joined_participants
                 .iter()

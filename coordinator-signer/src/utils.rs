@@ -45,6 +45,15 @@ pub(crate) fn new_oneshot_to_receive_success_or_error<T: std::fmt::Debug + Send 
 
     tx
 }
+pub(crate) fn derived_data(data: Option<Vec<u8>>) -> Vec<u8> {
+    if let Some(data) = data {
+        data
+    } else {
+        vec![
+            119, 104, 111, 32, 105, 115, 32, 115, 104, 105, 111, 116, 111, 108, 105, 63,
+        ]
+    }
+}
 
 #[cfg(test)]
 mod tests {

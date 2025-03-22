@@ -59,6 +59,7 @@ ring = "0.17.3"
 
 strum_macros = "0.26"
 
+itertools = "0.12"
 strum = { version = "0.26", features = ["derive"] }
 k256 = "0.13.4"
 crypto-bigint = "0.6.0"

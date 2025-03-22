@@ -28,14 +28,16 @@ impl<VII: ValidatorIdentityIdentity> DKGSessionEx<VII> {
         request: DKGRequestEx<VII>,
         mut in_rx: UnboundedReceiver<DKGRequestEx<VII>>,
         out_tx: UnboundedSender<RequestEx<VII>>,
-    ) -> Result<DKGRequestWrapEx<VII>, SessionError> {
+    ) -> Result<(DKGBaseMessage<VII, u16>, DKGFinal), SessionError> {
         let DKGBaseMessage {
             participants,
             identifier,
             identity,
+            min_signers,
             ..
         } = request.base_info.clone();
         participants.check_identifier_identity_exists(&identifier, &identity)?;
+        participants.check_min_signers(min_signers)?;
         if let DKGStageEx::Init = request.stage.clone() {
             let client =
                 ecdsa_tss::EcdsaTssSignerClient::new(common::Settings::global().signer.ecdsa_port)
@@ -128,14 +130,13 @@ impl<VII: ValidatorIdentityIdentity> DKGSessionEx<VII> {
                 .await;
             match result {
                 Ok(key_package) => {
-                    return Ok(DKGRequestEx {
-                        base_info: request.base_info.clone(),
-                        stage: DKGStageEx::Final(DKGFinal {
+                    return Ok((
+                        request.base_info.clone(),
+                        DKGFinal {
                             key_package: key_package.key_package,
                             public_key: key_package.public_key,
-                        }),
-                    }
-                    .into_request_wrap()?);
+                        },
+                    ));
                 }
                 Err(e) => {
                     return Err(SessionError::ExternalError(e.to_string()));

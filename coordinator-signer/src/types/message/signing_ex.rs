@@ -16,7 +16,8 @@ pub(crate) type SigningRequestEx<VII: ValidatorIdentityIdentity> =
     SigningMessage<VII, u16, Vec<u8>, SigningStageEx<u16, SignatureEx>>;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum SigningStageEx<CI: Identifier, R> {
-    Init(Vec<u8>, Vec<u8>),
+    // message, tweak_data
+    Init(Vec<u8>, Option<Vec<u8>>),
     Intermediate(super::MessageEx<CI, Vec<u8>>),
     Final(R),
 }
@@ -50,13 +51,10 @@ impl<VII: ValidatorIdentityIdentity> SigningRequestWrapEx<VII> {
     pub(crate) fn failure(&self, msg: String) -> SigningResponseWrapEx {
         return SigningResponseWrapEx::Failure(msg);
     }
-    pub(crate) fn from(
-        r: SigningRequestEx<VII>,
-        crypto_type: CryptoType,
-    ) -> Result<Self, SessionError> {
-        match crypto_type {
+    pub(crate) fn from(r: SigningRequestEx<VII>) -> Result<Self, SessionError> {
+        match r.base_info.crypto_type {
             CryptoType::EcdsaSecp256k1 => Ok(SigningRequestWrapEx::EcdsaSecp256k1(r)),
-            _ => Err(SessionError::CryptoTypeError(crypto_type)),
+            _ => Err(SessionError::CryptoTypeError(r.base_info.crypto_type)),
         }
     }
     pub(crate) fn signing_request_ex(&self) -> Result<SigningRequestEx<VII>, SessionError> {

@@ -361,6 +361,8 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
                 .iter()
                 .map(|(id, identity)| SigningRequest {
                     base_info: SigningBaseMessage {
+                        crypto_type: C::crypto_type(),
+                        min_signers: self.min_signers,
                         participants: self.participants.clone(),
                         pkid: self.pkid.clone(),
                         subsession_id: self.subsession_id.clone(),
@@ -379,6 +381,8 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
                 .iter()
                 .map(|(id, identity)| SigningRequest {
                     base_info: SigningBaseMessage {
+                        crypto_type: C::crypto_type(),
+                        min_signers: self.min_signers,
                         participants: self.participants.clone(),
                         pkid: self.pkid.clone(),
                         subsession_id: self.subsession_id.clone(),
@@ -398,7 +402,23 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
         }
     }
 
-    fn match_base_info(&self, base_info: &SigningBaseMessage<VII, C>) -> Result<(), SessionError> {
+    fn match_base_info(
+        &self,
+        base_info: &SigningBaseMessage<VII, C::Identifier, C::PublicKeyPackage>,
+    ) -> Result<(), SessionError> {
+        if C::crypto_type() != base_info.crypto_type {
+            return Err(SessionError::BaseInfoNotMatch(format!(
+                "crypto type does not match: {:?} vs {:?}",
+                C::crypto_type(),
+                base_info.crypto_type
+            )));
+        }
+        if self.min_signers != base_info.min_signers {
+            return Err(SessionError::BaseInfoNotMatch(format!(
+                "min signers does not match: {:?} vs {:?}",
+                self.min_signers, base_info.min_signers
+            )));
+        }
         if self.subsession_id != base_info.subsession_id {
             return Err(SessionError::BaseInfoNotMatch(format!(
                 "subsession id does not match: {:?} vs {:?}",

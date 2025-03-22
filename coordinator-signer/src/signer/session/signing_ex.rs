@@ -166,7 +166,7 @@ impl<VII: ValidatorIdentityIdentity> SigningSessionEx<VII> {
                     public_key: base.public_key.clone(),
                 }),
                 message: msg,
-                derivation_delta: derive,
+                derivation_delta: utils::derived_data(derive),
             };
             let timeout =
                 time::Duration::from_secs(common::Settings::global().signer.ecdsa_sign_timeout);

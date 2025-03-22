@@ -23,10 +23,10 @@ use crate::{
     types::{
         error::SessionError,
         message::{
-            message_ex_to_coordinator_to_signer_msg, DKGRequest, DKGRequestEx, DKGRequestWrap,
-            DKGRequestWrapEx, DKGResponseWrap, DKGResponseWrapEx, SigningRequest, SigningRequestEx,
-            SigningRequestWrap, SigningRequestWrapEx, SigningResponseWrap, SigningResponseWrapEx,
-            SigningStageEx,
+            message_ex_to_coordinator_to_signer_msg, DKGBaseMessage, DKGFinal, DKGRequest,
+            DKGRequestEx, DKGRequestWrap, DKGRequestWrapEx, DKGResponseWrap, DKGResponseWrapEx,
+            DKGStageEx, SigningRequest, SigningRequestEx, SigningRequestWrap, SigningRequestWrapEx,
+            SigningResponseWrap, SigningResponseWrapEx, SigningStageEx,
         },
         SessionId,
     },
@@ -201,6 +201,15 @@ pub(crate) struct SessionWrapEx<VII: ValidatorIdentityIdentity> {
     dkg_results_rx: UnboundedReceiver<Result<DKGRequestWrapEx<VII>, SessionError>>,
     signing_results_tx: UnboundedSender<Result<SigningRequestWrapEx<VII>, SessionError>>,
     signing_results_rx: UnboundedReceiver<Result<SigningRequestWrapEx<VII>, SessionError>>,
+
+    dkg_final_tx: UnboundedSender<(
+        SessionId,
+        Result<(DKGBaseMessage<VII, u16>, DKGFinal), SessionError>,
+    )>,
+    dkg_final_rx: UnboundedReceiver<(
+        SessionId,
+        Result<(DKGBaseMessage<VII, u16>, DKGFinal), SessionError>,
+    )>,
 }
 impl<VII: ValidatorIdentityIdentity> SessionWrapEx<VII> {
     pub(crate) fn new(
@@ -221,6 +230,7 @@ impl<VII: ValidatorIdentityIdentity> SessionWrapEx<VII> {
         };
         let (dkg_results_tx, dkg_results_rx) = tokio::sync::mpsc::unbounded_channel();
         let (signing_results_tx, signing_results_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (dkg_final_tx, dkg_final_rx) = tokio::sync::mpsc::unbounded_channel();
         Ok(Self {
             crypto_type,
             dkg_sessions_ex: HashMap::new(),
@@ -232,6 +242,8 @@ impl<VII: ValidatorIdentityIdentity> SessionWrapEx<VII> {
             dkg_results_rx,
             signing_results_tx,
             signing_results_rx,
+            dkg_final_tx,
+            dkg_final_rx,
         })
     }
     pub(crate) fn dkg_apply_request(
@@ -262,10 +274,26 @@ impl<VII: ValidatorIdentityIdentity> SessionWrapEx<VII> {
                 self.dkg_sessions_ex.insert(session_id, in_tx_internal);
                 let dkg_results_tx = self.dkg_results_tx.clone();
                 let out_tx = self.out_tx.clone();
+                let dkg_final_tx = self.dkg_final_tx.clone();
                 tokio::spawn(async move {
                     let result =
                         DKGSessionEx::new_from_request(request.clone(), in_rx_internal, out_tx)
                             .await;
+                    dkg_final_tx.send((session_id, result.clone())).unwrap();
+                    let result = result.map_or_else(
+                        |e| {
+                            Err(SessionError::ExternalError(format!(
+                                "Failed to receive DKG response: {:?}",
+                                e
+                            )))
+                        },
+                        |(base, pk)| {
+                            DKGRequestWrapEx::from(DKGRequestEx {
+                                base_info: base,
+                                stage: DKGStageEx::Final(pk.public_key),
+                            })
+                        },
+                    );
                     dkg_results_tx.send(result).unwrap();
                 });
                 return Ok(());
@@ -448,18 +476,50 @@ impl<VII: ValidatorIdentityIdentity> SessionWrapEx<VII> {
             }
         }
     }
+    pub(crate) fn handle_dkg_final(
+        &mut self,
+        request: (
+            SessionId,
+            Result<(DKGBaseMessage<VII, u16>, DKGFinal), SessionError>,
+        ),
+    ) {
+        match request.1 {
+            Ok((base, final_request)) => {
+                match SigningSessionEx::new(
+                    final_request.public_key,
+                    final_request.key_package,
+                    base,
+                ) {
+                    Ok(session) => {
+                        self.signing_sessions_ex.insert(session.pkid(), session);
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to create SigningSessionEx: {:?}", e);
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::error!("Failed to handle DKG final: {:?}", e);
+            }
+        }
+        self.dkg_sessions_ex.remove(&request.0);
+    }
     pub(crate) fn listening(mut self) {
         tokio::spawn(async move {
             loop {
                 tokio::select! {
+                    biased;
+                    Some(request) = self.in_rx.recv() => {
+                        self.handle_in_tx(request);
+                    }
+                    Some(final_request) = self.dkg_final_rx.recv() => {
+                        self.handle_dkg_final(final_request);
+                    }
                     Some(request) = self.dkg_results_rx.recv() => {
                         self.handle_dkg_result(request);
                     }
                     Some(request) = self.signing_results_rx.recv() => {
                         self.handle_signing_result(request);
-                    }
-                    Some(request) = self.in_rx.recv() => {
-                        self.handle_in_tx(request);
                     }
                 }
             }

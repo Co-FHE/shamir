@@ -1,5 +1,6 @@
 use hex::encode as hex_encode;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::fmt::{Display, Formatter};
 
 use super::{CryptoType, CryptoTypeError};
@@ -50,6 +51,7 @@ impl From<String> for PkId {
         PkId::new(hex::decode(&s).unwrap())
     }
 }
+
 impl From<Vec<u8>> for PkId {
     fn from(v: Vec<u8>) -> Self {
         PkId::new(v)

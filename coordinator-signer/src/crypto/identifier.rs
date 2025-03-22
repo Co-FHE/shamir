@@ -8,7 +8,7 @@ impl std::fmt::Display for IdentifierError {
     }
 }
 
-pub trait Identifier: fmt::Debug + Clone + TryFrom<u16> + Ord + Send + Sync {
+pub(crate) trait Identifier: fmt::Debug + Clone + TryFrom<u16> + Ord + Send + Sync {
     type CryptoError: std::error::Error + std::marker::Send + std::marker::Sync + 'static;
     fn to_bytes(&self) -> Vec<u8>;
     fn from_bytes<T: AsRef<[u8]>>(bytes: T) -> Result<Self, Self::CryptoError>;

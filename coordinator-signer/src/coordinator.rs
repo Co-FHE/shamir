@@ -45,6 +45,14 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, RwLock};
 use tokio::time::Instant;
+
+macro_rules! handle_err {
+    ($e:expr, $msg:expr) => {
+        if let Err(e) = $e {
+            tracing::error!($msg, e);
+        }
+    };
+}
 pub struct Coordinator<VI: ValidatorIdentity> {
     p2p_keypair: libp2p::identity::Keypair,
     signer_whitelist: Option<HashSet<VI::Identity>>,
@@ -1050,6 +1058,125 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                 }
                 SigToCoorRequest::SigningRequestEx(request) => {
                     tracing::debug!("Received signer to coordinator request: {:?}", request);
+                    let request_wrap = request.clone();
+                    match request.signing_request_ex() {
+                        Ok(request) => match request.stage {
+                            crate::types::message::SigningStageEx::Init(_, _) => {
+                                handle_err!(
+                                    self.swarm.behaviour_mut().sig2coor.send_response(
+                                        channel,
+                                        SigToCoorResponse::SigningResponseEx(
+                                            SigningResponseWrapEx::Failure(
+                                                "Cannot send init message".to_string(),
+                                            )
+                                        ),
+                                    ),
+                                    "Error sending success response to signer: {:?}"
+                                );
+                            }
+                            crate::types::message::SigningStageEx::Intermediate(message_ex) => {
+                                match message_ex.target {
+                                    TargetOrBroadcast::Target { to } => {
+                                        match request.base_info.participants.get(&to) {
+                                            Some(id) => {
+                                                match self.send_request_to_signer(
+                                                    &id,
+                                                    CoorToSigRequest::SigningRequestEx(
+                                                        request_wrap,
+                                                    ),
+                                                ) {
+                                                    Ok(_) => {
+                                                        handle_err!(self.swarm.behaviour_mut().sig2coor.send_response(
+                                                            channel,
+                                                            SigToCoorResponse::SigningResponseEx(SigningResponseWrapEx::Success),
+                                                        ),"Error sending success response to signer: {:?}");
+                                                    }
+                                                    Err(e) => {
+                                                        handle_err!(self.swarm.behaviour_mut().sig2coor.send_response(
+                                                            channel,
+                                                            SigToCoorResponse::SigningResponseEx(SigningResponseWrapEx::Failure(e.to_string())),
+                                                        ),"Error sending failure response to signer: {:?}");
+                                                    }
+                                                }
+                                            }
+                                            None => {
+                                                tracing::error!("Invalid participant: {}", to);
+                                                handle_err!(self.swarm.behaviour_mut().sig2coor.send_response(
+                                                    channel,
+                                                    SigToCoorResponse::SigningResponseEx(SigningResponseWrapEx::Failure(
+                                                        "Invalid participant".to_string(),
+                                                    )),
+                                                ),"Error sending failure response to signer: {:?}");
+                                            }
+                                        }
+                                    }
+                                    TargetOrBroadcast::Broadcast => {
+                                        for (identifier, peer_id) in
+                                            request.base_info.participants.iter()
+                                        {
+                                            if *identifier != message_ex.from {
+                                                match self.send_request_to_signer(
+                                                    peer_id,
+                                                    CoorToSigRequest::SigningRequestEx(
+                                                        request_wrap.clone(),
+                                                    ),
+                                                ) {
+                                                    Ok(_) => {
+                                                        tracing::debug!("Successfully sent request to signer: {:?}", peer_id);
+                                                    }
+                                                    Err(e) => {
+                                                        tracing::error!(
+                                                            "Error sending request to signer: {}",
+                                                            e
+                                                        );
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        handle_err!(
+                                            self.swarm.behaviour_mut().sig2coor.send_response(
+                                                channel,
+                                                SigToCoorResponse::SigningResponseEx(
+                                                    SigningResponseWrapEx::Success
+                                                ),
+                                            ),
+                                            "Error sending success response to signer: {:?}"
+                                        );
+                                    }
+                                }
+                            }
+                            crate::types::message::SigningStageEx::Final(_) => {
+                                let sender = utils::new_oneshot_to_receive_success_or_error();
+                                self.signing_in_final_channel_sender
+                                    .send((request_wrap, sender))
+                                    .unwrap();
+                                if let Err(e) = self.swarm.behaviour_mut().sig2coor.send_response(
+                                    channel,
+                                    SigToCoorResponse::SigningResponseEx(
+                                        SigningResponseWrapEx::Success,
+                                    ),
+                                ) {
+                                    tracing::error!(
+                                        "Error sending success response to signer: {:?}",
+                                        e
+                                    );
+                                }
+                            }
+                        },
+                        Err(e) => {
+                            if let Err(e) = self.swarm.behaviour_mut().sig2coor.send_response(
+                                channel,
+                                SigToCoorResponse::SigningResponseEx(
+                                    SigningResponseWrapEx::Failure(e.to_string()),
+                                ),
+                            ) {
+                                tracing::error!(
+                                    "Error sending success response to signer: {:?}",
+                                    e
+                                );
+                            }
+                        }
+                    }
                 }
             },
             other => {

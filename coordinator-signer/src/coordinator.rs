@@ -906,17 +906,17 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                     match request.dkg_request_ex() {
                         Ok(request) => match request.stage {
                             crate::types::message::DKGStageEx::Init => {
-                                if let Err(e) = self.swarm.behaviour_mut().sig2coor.send_response(
-                                    channel,
-                                    SigToCoorResponse::DKGResponseEx(DKGResponseWrapEx::Failure(
-                                        "Cannot send init message".to_string(),
-                                    )),
-                                ) {
-                                    tracing::error!(
-                                        "Error sending success response to signer: {:?}",
-                                        e
-                                    );
-                                }
+                                handle_err!(
+                                    self.swarm.behaviour_mut().sig2coor.send_response(
+                                        channel,
+                                        SigToCoorResponse::DKGResponseEx(
+                                            DKGResponseWrapEx::Failure(
+                                                "Cannot send init message".to_string(),
+                                            )
+                                        ),
+                                    ),
+                                    "Error sending success response to signer: {:?}"
+                                );
                             }
                             crate::types::message::DKGStageEx::Intermediate(message_ex) => {
                                 match message_ex.target {
@@ -928,66 +928,48 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                                                     CoorToSigRequest::DKGRequestEx(request_wrap),
                                                 ) {
                                                     Ok(_) => {
-                                                        if let Err(e) = self
-                                                            .swarm
-                                                            .behaviour_mut()
-                                                            .sig2coor
-                                                            .send_response(
+                                                        handle_err!(
+                                                            self.swarm.behaviour_mut().sig2coor.send_response(
                                                                 channel,
                                                                 SigToCoorResponse::DKGResponseEx(
                                                                     DKGResponseWrapEx::Success,
                                                                 ),
-                                                            )
-                                                        {
-                                                            tracing::error!("Error sending success response to signer: {:?}", e);
-                                                        }
+                                                            ),
+                                                            "Error sending success response to signer: {:?}"
+                                                        );
                                                     }
                                                     Err(e) => {
                                                         tracing::error!(
                                                             "Error sending request to signer: {}",
                                                             e
                                                         );
-                                                        if let Err(e) = self
-                                                            .swarm
-                                                            .behaviour_mut()
-                                                            .sig2coor
-                                                            .send_response(
+                                                        handle_err!(
+                                                            self.swarm.behaviour_mut().sig2coor.send_response(
                                                                 channel,
                                                                 SigToCoorResponse::DKGResponseEx(
                                                                     DKGResponseWrapEx::Failure(
                                                                         e.to_string(),
                                                                     ),
                                                                 ),
-                                                            )
-                                                        {
-                                                            tracing::error!(
-                                                                "Error sending failure response to signer: {:?}",
-                                                                e
-                                                            );
-                                                        }
+                                                            ),
+                                                            "Error sending failure response to signer: {:?}"
+                                                        );
                                                     }
                                                 }
                                             }
                                             None => {
                                                 tracing::error!("Invalid participant: {}", to);
-                                                if let Err(e) = self
-                                                    .swarm
-                                                    .behaviour_mut()
-                                                    .sig2coor
-                                                    .send_response(
+                                                handle_err!(
+                                                    self.swarm.behaviour_mut().sig2coor.send_response(
                                                         channel,
                                                         SigToCoorResponse::DKGResponseEx(
                                                             DKGResponseWrapEx::Failure(
                                                                 "Invalid participant".to_string(),
                                                             ),
                                                         ),
-                                                    )
-                                                {
-                                                    tracing::error!(
-                                                        "Error sending failure response to signer: {:?}",
-                                                        e
-                                                    );
-                                                }
+                                                    ),
+                                                    "Error sending failure response to signer: {:?}"
+                                                );
                                             }
                                         }
                                     }
@@ -1009,19 +991,15 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                                                 }
                                             }
                                         }
-                                        if let Err(e) =
+                                        handle_err!(
                                             self.swarm.behaviour_mut().sig2coor.send_response(
                                                 channel,
                                                 SigToCoorResponse::DKGResponseEx(
                                                     DKGResponseWrapEx::Success,
                                                 ),
-                                            )
-                                        {
-                                            tracing::error!(
-                                                "Error sending success response to signer: {:?}",
-                                                e
-                                            );
-                                        }
+                                            ),
+                                            "Error sending success response to signer: {:?}"
+                                        );
                                     }
                                 }
                             }
@@ -1030,29 +1008,27 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                                 self.dkg_in_final_channel_sender
                                     .send((request_wrap, sender))
                                     .unwrap();
-                                if let Err(e) = self.swarm.behaviour_mut().sig2coor.send_response(
-                                    channel,
-                                    SigToCoorResponse::DKGResponseEx(DKGResponseWrapEx::Success),
-                                ) {
-                                    tracing::error!(
-                                        "Error sending success response to signer: {:?}",
-                                        e
-                                    );
-                                }
+                                handle_err!(
+                                    self.swarm.behaviour_mut().sig2coor.send_response(
+                                        channel,
+                                        SigToCoorResponse::DKGResponseEx(
+                                            DKGResponseWrapEx::Success
+                                        ),
+                                    ),
+                                    "Error sending success response to signer: {:?}"
+                                );
                             }
                         },
                         Err(e) => {
-                            if let Err(e) = self.swarm.behaviour_mut().sig2coor.send_response(
-                                channel,
-                                SigToCoorResponse::DKGResponseEx(DKGResponseWrapEx::Failure(
-                                    e.to_string(),
-                                )),
-                            ) {
-                                tracing::error!(
-                                    "Error sending success response to signer: {:?}",
-                                    e
-                                );
-                            }
+                            handle_err!(
+                                self.swarm.behaviour_mut().sig2coor.send_response(
+                                    channel,
+                                    SigToCoorResponse::DKGResponseEx(DKGResponseWrapEx::Failure(
+                                        e.to_string(),
+                                    )),
+                                ),
+                                "Error sending success response to signer: {:?}"
+                            );
                         }
                     }
                 }

@@ -189,12 +189,14 @@ impl<VII: ValidatorIdentityIdentity> CoordinatorDKGSessionEx<VII> {
                                         "Received valid response: {:?}",
                                         request_ex.clone()
                                     );
-                                    response_chan.send(DKGResponseWrapEx::Success);
+                                    response_chan.send(DKGResponseWrapEx::Success).unwrap();
                                     results.insert(request_ex.base_info.identifier, request_ex);
                                 }
                                 Err(e) => {
                                     tracing::error!("Error receiving DKG state: {}", e);
-                                    response_chan.send(DKGResponseWrapEx::Failure(e.to_string()));
+                                    response_chan
+                                        .send(DKGResponseWrapEx::Failure(e.to_string()))
+                                        .unwrap();
                                     break 'out Err(e);
                                 }
                             }
@@ -209,6 +211,7 @@ impl<VII: ValidatorIdentityIdentity> CoordinatorDKGSessionEx<VII> {
                 }
                 break 'out self.handle_result(results);
             };
+            tracing::debug!("Coordinator dkg session result: {:?}", result);
             if let Err(e) = response_sender.send(result.map_err(|e| (self.session_id.clone(), e))) {
                 tracing::error!("Failed to send response: {:?}", e);
             }

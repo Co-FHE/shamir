@@ -456,7 +456,8 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                     &validator.p2p_peer_id,
                     CoorToSigRequest::DKGRequestEx(request),
                 );
-                tracing::debug!("Outbound request id: {:?}", outbound_request_id);
+                tracing::info!("Outbound request id: {:?}", outbound_request_id);
+
                 self.dkg_request_mapping_ex
                     .insert(outbound_request_id, (sender, validator.p2p_peer_id.clone()));
             }
@@ -618,6 +619,32 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                         request_id,
                         dkg_response_wrap_ex
                     );
+                    if self.dkg_request_mapping_ex.contains_key(&request_id) {
+                        let (_, validator_peer_id) =
+                            self.dkg_request_mapping_ex.get(&request_id).unwrap();
+                        if *validator_peer_id != peer {
+                            tracing::warn!("Invalid validator peer id: {:?}", validator_peer_id);
+                            return Ok(());
+                        }
+                        if let Some((sender, _)) = self.dkg_request_mapping_ex.remove(&request_id) {
+                            tracing::debug!(
+                                "Sending response {:?} to session",
+                                dkg_response_wrap_ex
+                            );
+                            if let Err(e) = sender.send(dkg_response_wrap_ex) {
+                                tracing::error!("Coordiantor error sending response: {:?}", e);
+                            } else {
+                                tracing::debug!("Sent response to session");
+                            }
+                        } else {
+                            tracing::error!(
+                                "Request id {:?} not found in request mapping",
+                                request_id
+                            );
+                        }
+                    } else {
+                        tracing::debug!("Request id {:?} not found in request mapping", request_id);
+                    }
                 }
                 CoorToSigResponse::SigningResponseEx(signing_response_wrap_ex) => {
                     tracing::info!(
@@ -626,6 +653,34 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                         request_id,
                         signing_response_wrap_ex
                     );
+                    if self.signing_request_mapping_ex.contains_key(&request_id) {
+                        let (_, validator_peer_id) =
+                            self.signing_request_mapping_ex.get(&request_id).unwrap();
+                        if *validator_peer_id != peer {
+                            tracing::warn!("Invalid validator peer id: {:?}", validator_peer_id);
+                            return Ok(());
+                        }
+                        if let Some((sender, _)) =
+                            self.signing_request_mapping_ex.remove(&request_id)
+                        {
+                            tracing::debug!(
+                                "Sending response {:?} to session",
+                                signing_response_wrap_ex
+                            );
+                            if let Err(e) = sender.send(signing_response_wrap_ex) {
+                                tracing::error!("Coordiantor error sending response: {:?}", e);
+                            } else {
+                                tracing::debug!("Sent response to session");
+                            }
+                        } else {
+                            tracing::error!(
+                                "Request id {:?} not found in request mapping",
+                                request_id
+                            );
+                        }
+                    } else {
+                        tracing::debug!("Request id {:?} not found in request mapping", request_id);
+                    }
                 }
             },
 
@@ -906,6 +961,7 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                     match request.dkg_request_ex() {
                         Ok(request) => match request.stage {
                             crate::types::message::DKGStageEx::Init => {
+                                tracing::info!("Received signer to coordinator request: Init");
                                 handle_err!(
                                     self.swarm.behaviour_mut().sig2coor.send_response(
                                         channel,
@@ -919,6 +975,10 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                                 );
                             }
                             crate::types::message::DKGStageEx::Intermediate(message_ex) => {
+                                tracing::info!(
+                                    "Received signer to coordinator request: Intermediate {:?}",
+                                    message_ex.target
+                                );
                                 match message_ex.target {
                                     TargetOrBroadcast::Target { to } => {
                                         match request.base_info.participants.get(&to) {
@@ -1004,6 +1064,7 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                                 }
                             }
                             crate::types::message::DKGStageEx::Final(_) => {
+                                tracing::info!("Received signer to coordinator request: Final");
                                 let sender = utils::new_oneshot_to_receive_success_or_error();
                                 self.dkg_in_final_channel_sender
                                     .send((request_wrap, sender))

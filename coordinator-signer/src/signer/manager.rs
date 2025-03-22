@@ -81,8 +81,6 @@ pub(crate) struct SignerSessionManager<VII: ValidatorIdentityIdentity + Sized> {
     session_inst_channels_ex:
         HashMap<CryptoType, UnboundedSender<RequestExWithInboundRequestId<VII>>>,
     request_receiver: UnboundedReceiver<ManagerRequestWithInboundRequestId<VII>>,
-    // for bidirectional communication
-    request_sender: UnboundedSender<RequestEx<VII>>,
 }
 impl<VII: ValidatorIdentityIdentity> SignerSessionManager<VII> {
     pub(crate) fn new(
@@ -150,7 +148,6 @@ impl<VII: ValidatorIdentityIdentity> SignerSessionManager<VII> {
 
         Ok(Self {
             request_receiver,
-            request_sender,
             session_inst_channels,
             session_inst_channels_ex,
         })

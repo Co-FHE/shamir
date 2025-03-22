@@ -7,7 +7,7 @@ use tokio::sync::{
 };
 
 use crate::{
-    crypto::{CryptoType, Identifier, PkId, PublicKeyPackage, ValidatorIdentityIdentity},
+    crypto::{CryptoType, Identifier, PkId, ValidatorIdentityIdentity},
     types::{
         error::SessionError,
         message::{SigningRequest, SigningRequestWrapEx, SigningResponse, SigningResponseWrapEx},

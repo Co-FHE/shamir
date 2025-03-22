@@ -1,6 +1,6 @@
 logging:
   console:
-    level: "debug"
+    level: "info"
   file:
     enable: true
     level: "info"

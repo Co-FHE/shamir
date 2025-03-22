@@ -1,4 +1,3 @@
-use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::hash::Hash;
 pub mod ed25519_identity;

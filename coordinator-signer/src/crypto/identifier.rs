@@ -1,6 +1,6 @@
 use std::fmt;
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct IdentifierError(String);
+pub struct IdentifierError(String);
 impl std::error::Error for IdentifierError {}
 impl std::fmt::Display for IdentifierError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -8,7 +8,7 @@ impl std::fmt::Display for IdentifierError {
     }
 }
 
-pub(crate) trait Identifier: fmt::Debug + Clone + TryFrom<u16> + Ord + Send + Sync {
+pub trait Identifier: fmt::Debug + Clone + TryFrom<u16> + Ord + Send + Sync {
     type CryptoError: std::error::Error + std::marker::Send + std::marker::Sync + 'static;
     fn to_bytes(&self) -> Vec<u8>;
     fn from_bytes<T: AsRef<[u8]>>(bytes: T) -> Result<Self, Self::CryptoError>;

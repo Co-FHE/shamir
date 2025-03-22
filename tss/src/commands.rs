@@ -16,7 +16,10 @@ pub struct CommandLineApp {
 #[derive(Subcommand)]
 pub enum Commands {
     /// Run as a coordinator role
-    Coordinator,
+    Coordinator {
+        #[arg(short, long)]
+        auto_dkg: Option<u16>,
+    },
     /// Run as a node role
     DKG {
         min_signer: u16,

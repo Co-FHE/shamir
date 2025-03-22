@@ -85,7 +85,7 @@ impl<VII: ValidatorIdentityIdentity> DKGSessionEx<VII> {
                                 }.into_request_wrap();
                                 match dkg_request_wrap {
                                     Ok(dkg_request_wrap) => {
-                                        out_tx.send(RequestEx::DKGEx(dkg_request_wrap, utils::new_oneshot_to_receive_success_or_error()));
+                                        out_tx.send(RequestEx::DKGEx(dkg_request_wrap, utils::new_oneshot_to_receive_success_or_error())).unwrap();
                                     }
                                     Err(e) => {
                                         tracing::warn!("Failed to convert DKG request: {:?}", e);
@@ -106,9 +106,13 @@ impl<VII: ValidatorIdentityIdentity> DKGSessionEx<VII> {
                                         DKGStageEx::Intermediate(message_ex) => {
                                             in_tx_client.send(CoordinatorToSignerMsg {
                                                 msg: message_ex.message,
-                                                is_broadcast: false,
+                                                is_broadcast: if message_ex.target == TargetOrBroadcast::Broadcast {
+                                                    true
+                                                } else {
+                                                    false
+                                                },
                                                 from: input.base_info.identifier as u32,
-                                            });
+                                            }).unwrap();
                                         }
                                         _ => {
                                             tracing::warn!("invalid stage: {:?}", input.stage);

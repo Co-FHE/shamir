@@ -72,7 +72,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let min_signer = whitelist.len() as u16 / 2 + 1;
     let cmd = commands::parse_args();
     match cmd {
-        commands::Commands::Coordinator => {
+        commands::Commands::Coordinator { auto_dkg } => {
             // default keypair = 12D3KooWB3LpKiErRF3byUAsCvY6JL8TtQeSCrF5Hw23UoKJ7F88
             let keypair = load_keypair(Settings::global().coordinator.keypair_path.as_str());
             let coordinator = Coordinator::<P2pIdentity>::new(
@@ -80,7 +80,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 home_dir,
                 Some(whitelist.clone()),
                 Settings::global().coordinator.port,
-                Some(min_signer),
+                auto_dkg,
             )?;
             // coordinator.start_listening().await?;
             coordinator.start_listening().await?;

@@ -492,6 +492,9 @@ impl<VII: ValidatorIdentityIdentity> SessionWrapEx<VII> {
                 ) {
                     Ok(session) => {
                         self.signing_sessions_ex.insert(session.pkid(), session);
+                        self.keystore_management
+                            .write(self.serialize_sessions().unwrap().as_slice())
+                            .unwrap();
                     }
                     Err(e) => {
                         tracing::error!("Failed to create SigningSessionEx: {:?}", e);

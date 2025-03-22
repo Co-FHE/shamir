@@ -138,6 +138,7 @@ impl<VII: ValidatorIdentityIdentity> SigningSessionEx<VII> {
             identity,
             ..
         } = request.base_info.clone();
+        // todo: check pkid
         participants.check_identifier_identity_exists(&identifier, &identity)?;
         let subsession_id = request.base_info.subsession_id.clone();
         if let SigningStageEx::Init(msg, derive) = request.stage {
@@ -193,10 +194,12 @@ impl<VII: ValidatorIdentityIdentity> SigningSessionEx<VII> {
                             .into_request_wrap();
                             match signing_request_ex {
                                 Ok(signing_request_wrap) => {
-                                    out_tx.send(RequestEx::SigningEx(
-                                        signing_request_wrap,
-                                        utils::new_oneshot_to_receive_success_or_error(),
-                                    ));
+                                    out_tx
+                                        .send(RequestEx::SigningEx(
+                                            signing_request_wrap,
+                                            utils::new_oneshot_to_receive_success_or_error(),
+                                        ))
+                                        .unwrap();
                                 }
                                 Err(e) => {
                                     tracing::warn!("Failed to convert Signing request: {:?}", e);

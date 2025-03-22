@@ -70,7 +70,7 @@ impl<VII: ValidatorIdentityIdentity> CoordinatorSubsessionEx<VII> {
         })
     }
     pub(crate) async fn start_signing(
-        mut self,
+        self,
         mut in_final_rx: UnboundedReceiver<(
             SigningRequestWrapEx<VII>,
             oneshot::Sender<SigningResponseWrapEx>,
@@ -122,7 +122,7 @@ impl<VII: ValidatorIdentityIdentity> CoordinatorSubsessionEx<VII> {
                                         SigningResponseWrapEx::Failure(format!("Signing init timeout,retry"))
                                 }
                             };
-                            tx_with_id.send((base_info.identifier, response));
+                            tx_with_id.send((base_info.identifier, response)).unwrap();
                         });
                     }
                     Err(e) => {
@@ -167,12 +167,14 @@ impl<VII: ValidatorIdentityIdentity> CoordinatorSubsessionEx<VII> {
                         match request_ex {
                             Ok(request_ex) => {
                                 tracing::debug!("Received valid response: {:?}", request_ex);
-                                response_chan.send(SigningResponseWrapEx::Success);
+                                response_chan.send(SigningResponseWrapEx::Success).unwrap();
                                 results.insert(request_ex.base_info.identifier, request_ex);
                             }
                             Err(e) => {
                                 tracing::error!("Error receiving Signing state: {}", e);
-                                response_chan.send(SigningResponseWrapEx::Failure(e.to_string()));
+                                response_chan
+                                    .send(SigningResponseWrapEx::Failure(e.to_string()))
+                                    .unwrap();
                                 break;
                             }
                         }

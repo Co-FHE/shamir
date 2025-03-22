@@ -240,25 +240,25 @@ impl<VII: ValidatorIdentityIdentity> CoordiantorSessionManager<VII> {
     pub(crate) fn listening(mut self) {
         tokio::spawn(async move {
             loop {
-                if let Some((dkg_request, response_sender)) =
-                    self.dkg_in_final_channel_receiver.recv().await
-                {
-                    let crypto_type = dkg_request.crypto_type();
-                    self.dkg_in_final_channel_mapping
-                        .get_mut(&crypto_type)
-                        .unwrap()
-                        .send((dkg_request, response_sender))
-                        .unwrap();
-                }
-                if let Some((signing_request, response_sender)) =
-                    self.signing_in_final_channel_receiver.recv().await
-                {
-                    let crypto_type = signing_request.crypto_type();
-                    self.signing_in_final_channel_mapping
-                        .get_mut(&crypto_type)
-                        .unwrap()
-                        .send((signing_request, response_sender))
-                        .unwrap();
+                tokio::select! {
+                    Some((dkg_request, response_sender)) =
+                        self.dkg_in_final_channel_receiver.recv() => {
+                            let crypto_type = dkg_request.crypto_type();
+                            self.dkg_in_final_channel_mapping
+                                .get_mut(&crypto_type)
+                                .unwrap()
+                                .send((dkg_request, response_sender))
+                                .unwrap();
+                        }
+                    Some((signing_request, response_sender)) =
+                        self.signing_in_final_channel_receiver.recv() => {
+                            let crypto_type = signing_request.crypto_type();
+                            self.signing_in_final_channel_mapping
+                                .get_mut(&crypto_type)
+                                .unwrap()
+                                .send((signing_request, response_sender))
+                                .unwrap();
+                        }
                 }
             }
         });

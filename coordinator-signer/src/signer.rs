@@ -39,8 +39,8 @@ use crate::crypto::{
 use crate::keystore;
 use crate::types::error::SessionError;
 use crate::types::message::{
-    CoorToSigRequest, CoorToSigResponse, DKGResponseWrap, DKGResponseWrapEx, SigBehaviour,
-    SigBehaviourEvent, SigToCoorRequest, SigToCoorResponse, SigningResponseWrap,
+    CoorToSigRequest, CoorToSigResponse, DKGResponseWrap, DKGResponseWrapEx, DKGStageEx,
+    SigBehaviour, SigBehaviourEvent, SigToCoorRequest, SigToCoorResponse, SigningResponseWrap,
     SigningResponseWrapEx, ValidatorIdentityRequest, ValidatorIdentityResponse,
 };
 use crate::types::ConnectionState;
@@ -511,10 +511,17 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                     }
                     CoorToSigRequest::DKGRequestEx(dkgrequest_wrap_ex) => {
                         tracing::info!(
-                            "Signer received dkg ex request: crypto_type: {}, from identity: {}, request_id: {}",
+                            "Signer received dkg ex request: crypto_type: {}, from identity: {}, request_id: {}, stage: {}",
                             dkgrequest_wrap_ex.crypto_type(),
                             dkgrequest_wrap_ex.identity().to_fmt_string(),
-                            request_id
+                            request_id,
+                            match dkgrequest_wrap_ex.dkg_request_ex().unwrap().stage {
+                                DKGStageEx::Init => "Init".to_string(),
+                                DKGStageEx::Intermediate(message_ex) => {
+                                    format!("Intermediate {:?}", message_ex.target)
+                                }
+                                DKGStageEx::Final(_) => "Final".to_string(),
+                            }
                         );
                         let (tx, rx) = tokio::sync::oneshot::channel();
                         self.dkg_response_futures_ex.push(rx);
@@ -609,12 +616,13 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                             .unwrap();
                         // convert SigToCoorResponse to DKGResponseWrapEx
                         if let SigToCoorResponse::DKGResponseEx(dkg_response_wrap_ex) = response {
-                            r.send(Ok(dkg_response_wrap_ex));
+                            r.send(Ok(dkg_response_wrap_ex)).unwrap();
                         } else {
                             r.send(Err(SessionError::InvalidResponse(format!(
                                 "Received invalid response type: {:?}",
                                 response
-                            ))));
+                            ))))
+                            .unwrap();
                         }
                     } else if self
                         .signing_out_response_channels_mapping
@@ -628,12 +636,13 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                         if let SigToCoorResponse::SigningResponseEx(signing_response_wrap_ex) =
                             response
                         {
-                            r.send(Ok(signing_response_wrap_ex));
+                            r.send(Ok(signing_response_wrap_ex)).unwrap();
                         } else {
                             r.send(Err(SessionError::InvalidResponse(format!(
                                 "Received invalid response type: {:?}",
                                 response
-                            ))));
+                            ))))
+                            .unwrap();
                         }
                     }
                 }

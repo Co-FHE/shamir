@@ -1,8 +1,8 @@
 mod dkg_ex;
 mod signing_ex;
 use super::manager::InstructionCipher;
-use super::{Cipher, PkId, PublicKeyPackage, ValidatorIdentityIdentity};
-use crate::crypto::{CryptoType, Identifier, Tweak, VerifyingKey};
+use super::{Cipher, PkId, ValidatorIdentityIdentity};
+use crate::crypto::CryptoType;
 use crate::keystore::KeystoreManagement;
 use crate::types::message::{
     DKGRequestWrapEx, DKGResponseWrapEx, SigningRequestWrapEx, SigningResponseWrapEx,
@@ -10,7 +10,7 @@ use crate::types::message::{
 use crate::types::{
     error::SessionError,
     message::{DKGRequestWrap, DKGResponseWrap, SigningRequestWrap, SigningResponseWrap},
-    Participants, SessionId, SignatureSuite,
+    Participants, SessionId,
 };
 use crate::types::{GroupPublicKeyInfo, SignatureSuiteInfo, SubsessionId};
 use crate::utils;
@@ -22,7 +22,6 @@ use signing_ex::{signature_to_pkid, CoordinatorSigningSessionEx};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::mpsc::unbounded_channel;
 use tokio::sync::{
     mpsc::{UnboundedReceiver, UnboundedSender},
     oneshot,
@@ -236,12 +235,21 @@ impl<VII: ValidatorIdentityIdentity> SessionWrapEx<VII> {
         dkg_request: DKGRequestWrapEx<VII>,
         response_sender: oneshot::Sender<DKGResponseWrapEx>,
     ) -> Result<(), SessionError> {
+        tracing::debug!(
+            "Coordinator received dkg final channel request: {:?}",
+            dkg_request
+        );
         let session_id = dkg_request.dkg_request_ex()?.base_info.session_id;
         let sender = self.dkg_in_final_channel_mapping.get_mut(&session_id);
         if let Some(sender) = sender {
             sender
                 .send((dkg_request, response_sender))
                 .map_err(|e| SessionError::SendOneshotError(e.to_string()))?;
+        } else {
+            tracing::error!("Coordinator dkg session not found: {:?}", session_id);
+            return Err(SessionError::SignerSessionError(
+                "Coordinator dkg session not found".to_string(),
+            ));
         }
         Ok(())
     }
@@ -261,6 +269,11 @@ impl<VII: ValidatorIdentityIdentity> SessionWrapEx<VII> {
             sender
                 .send((signing_request, response_sender))
                 .map_err(|e| SessionError::SendOneshotError(e.to_string()))?;
+        } else {
+            tracing::error!("Coordinator signing session not found: {:?}", subsession_id);
+            return Err(SessionError::SignerSessionError(
+                "Coordinator signing session not found".to_string(),
+            ));
         }
         Ok(())
     }
@@ -409,6 +422,7 @@ impl<VII: ValidatorIdentityIdentity> SessionWrapEx<VII> {
         &mut self,
         dkg_info: Result<DKGInfo<VII>, (SessionId, SessionError)>,
     ) -> Result<(), SessionError> {
+        tracing::debug!("Coordinator received dkg future: {:?}", dkg_info);
         match dkg_info {
             Ok(dkg_info) => {
                 let pkid = signature_to_pkid(dkg_info.crypto_type, &dkg_info.public_key_package)?;

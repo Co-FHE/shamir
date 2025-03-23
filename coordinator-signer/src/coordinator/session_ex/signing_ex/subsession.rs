@@ -1,10 +1,10 @@
 use std::{
-    collections::{BTreeMap, BTreeSet, HashSet},
+    collections::{BTreeMap, HashSet},
     time::Duration,
 };
 
 use crate::{
-    coordinator::CoordinatorStateEx,
+    coordinator::{session_ex::combinations::Combinations, CoordinatorStateEx},
     crypto::*,
     types::message::{
         SigningBaseMessage, SigningRequestEx, SigningRequestWrapEx, SigningResponseWrapEx,
@@ -70,9 +70,17 @@ impl<VII: ValidatorIdentityIdentity> CoordinatorSubsessionEx<VII> {
             oneshot::Sender<SigningResponseWrapEx>,
         )>,
         participants_candidates: Vec<u16>,
+        mut combinations: Combinations,
         response_sender: oneshot::Sender<
             // first is subsession id, second is error ids, third is error
-            Result<SignatureSuiteInfo<VII>, (Option<SubsessionId>, Vec<u16>, SessionError)>,
+            Result<
+                SignatureSuiteInfo<VII>,
+                (
+                    Option<SubsessionId>,
+                    (PkId, Vec<u8>, Option<Vec<u8>>, Combinations),
+                    SessionError,
+                ),
+            >,
         >,
     ) {
         tokio::spawn(async move {
@@ -83,7 +91,12 @@ impl<VII: ValidatorIdentityIdentity> CoordinatorSubsessionEx<VII> {
                 response_sender
                     .send(Err((
                         Some(self.subsession_id),
-                        Vec::new(),
+                        (
+                            self.base_info.pkid.clone(),
+                            self.message.clone(),
+                            self.tweak_data.clone(),
+                            combinations,
+                        ),
                         SessionError::CoordinatorSessionError(
                             "not enough participants for signing".to_string(),
                         ),
@@ -95,7 +108,7 @@ impl<VII: ValidatorIdentityIdentity> CoordinatorSubsessionEx<VII> {
 
             let request_list =
                 self.split_into_single_requests(&participants_candidates.into_iter().collect());
-            let mut error_ids: BTreeSet<u16> = BTreeSet::new();
+            let mut error_ids: HashSet<u16> = HashSet::new();
             for request in request_list {
                 let (tx, rx) = oneshot::channel();
                 let (tx_with_id, rx_with_id) = oneshot::channel();
@@ -132,12 +145,18 @@ impl<VII: ValidatorIdentityIdentity> CoordinatorSubsessionEx<VII> {
                     error_ids.insert(id);
                 }
             }
+            combinations.filter_error_ids(&error_ids);
             if error_ids.len() > 0 {
                 tracing::error!("Found {} error ids: {:?}", error_ids.len(), error_ids);
                 response_sender
                     .send(Err((
                         Some(self.subsession_id),
-                        error_ids.clone().into_iter().collect(),
+                        (
+                            self.base_info.pkid.clone(),
+                            self.message.clone(),
+                            self.tweak_data.clone(),
+                            combinations,
+                        ),
                         SessionError::CoordinatorSessionError(format!(
                             "Found {} error ids: {:?}",
                             error_ids.len(),
@@ -181,7 +200,18 @@ impl<VII: ValidatorIdentityIdentity> CoordinatorSubsessionEx<VII> {
             }
             let result = self.handle_result(results);
             response_sender
-                .send(result.map_err(|e| (Some(self.subsession_id), Vec::new(), e)))
+                .send(result.map_err(|e| {
+                    (
+                        Some(self.subsession_id),
+                        (
+                            self.base_info.pkid.clone(),
+                            self.message.clone(),
+                            self.tweak_data.clone(),
+                            combinations,
+                        ),
+                        e,
+                    )
+                }))
                 .unwrap();
         });
         //         let mut error_ids: BTreeSet<u16> = BTreeSet::new();

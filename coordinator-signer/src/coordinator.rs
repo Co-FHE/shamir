@@ -154,18 +154,21 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                 ),
                 node2coor: request_response::cbor::Behaviour::new(
                     [(StreamProtocol::new("/node2coor"), ProtocolSupport::Full)],
-                    request_response::Config::default()
-                        .with_request_timeout(Duration::from_secs(10)),
+                    request_response::Config::default().with_request_timeout(Duration::from_secs(
+                        Settings::global().connection.node2coor_request_timeout,
+                    )),
                 ),
                 sig2coor: request_response::cbor::Behaviour::new(
                     [(StreamProtocol::new("/sig2coor"), ProtocolSupport::Full)],
-                    request_response::Config::default()
-                        .with_request_timeout(Duration::from_secs(10)),
+                    request_response::Config::default().with_request_timeout(Duration::from_secs(
+                        Settings::global().connection.sig2coor_request_timeout,
+                    )),
                 ),
                 coor2sig: request_response::cbor::Behaviour::new(
                     [(StreamProtocol::new("/coor2sig"), ProtocolSupport::Full)],
-                    request_response::Config::default()
-                        .with_request_timeout(Duration::from_secs(100)),
+                    request_response::Config::default().with_request_timeout(Duration::from_secs(
+                        Settings::global().connection.coor2sig_request_timeout,
+                    )),
                 ),
             })?
             .with_swarm_config(|cfg| cfg.with_idle_connection_timeout(Duration::from_secs(1000)))
@@ -313,6 +316,7 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                     }
                 }
                 Some(Ok((result, channel))) = self.signing_response_futures_for_node.next()=> {
+                    tracing::info!("{}",channel.is_open());
                     match result {
                         Ok(signature_suite_info) => {
                             if let Err(e) = self.swarm.behaviour_mut().node2coor.send_response(channel, NodeToCoorResponse::SigningResponse { signature_suite_info }) {

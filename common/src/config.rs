@@ -69,6 +69,9 @@ pub struct NodeSettings {
 #[derive(Debug, Deserialize, Clone)]
 pub struct ConnectionSettings {
     pub ping_interval: u64,
+    pub node2coor_request_timeout: u64,
+    pub sig2coor_request_timeout: u64,
+    pub coor2sig_request_timeout: u64,
 }
 
 #[derive(Debug, Deserialize, Clone)]

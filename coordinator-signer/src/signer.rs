@@ -114,11 +114,15 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                 ),
                 sig2coor: request_response::cbor::Behaviour::new(
                     [(StreamProtocol::new("/sig2coor"), ProtocolSupport::Full)],
-                    request_response::Config::default(),
+                    request_response::Config::default().with_request_timeout(Duration::from_secs(
+                        Settings::global().connection.sig2coor_request_timeout,
+                    )),
                 ),
                 coor2sig: request_response::cbor::Behaviour::new(
                     [(StreamProtocol::new("/coor2sig"), ProtocolSupport::Full)],
-                    request_response::Config::default(),
+                    request_response::Config::default().with_request_timeout(Duration::from_secs(
+                        Settings::global().connection.coor2sig_request_timeout,
+                    )),
                 ),
                 rendezvous: rendezvous::client::Behaviour::new(key.clone()),
             })?

@@ -27,6 +27,9 @@ signer:
   ecdsa_sign_timeout: 10
 connection:
   ping_interval: 1
+  node2coor_request_timeout: 100
+  sig2coor_request_timeout: 100
+  coor2sig_request_timeout: 10
 session:
   state_channel_retry_interval: 1
   signing_round1_timeout: 10

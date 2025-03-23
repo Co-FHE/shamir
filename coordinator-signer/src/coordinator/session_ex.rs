@@ -1,3 +1,4 @@
+mod combinations;
 mod dkg_ex;
 mod signing_ex;
 use super::manager::InstructionCipher;
@@ -10,6 +11,7 @@ use crate::types::message::{
 use crate::types::{error::SessionError, Participants, SessionId};
 use crate::types::{GroupPublicKeyInfo, SignatureSuiteInfo, SubsessionId};
 use crate::utils;
+use combinations::Combinations;
 use common::Settings;
 use dkg_ex::{CoordinatorDKGSessionEx, DKGInfo};
 use futures::stream::FuturesUnordered;
@@ -22,6 +24,7 @@ use tokio::sync::{
     mpsc::{UnboundedReceiver, UnboundedSender},
     oneshot,
 };
+
 pub(crate) struct SessionWrapEx<VII: ValidatorIdentityIdentity> {
     crypto_type: CryptoType,
     signing_sessions: HashMap<PkId, CoordinatorSigningSessionEx<VII>>,
@@ -41,7 +44,15 @@ pub(crate) struct SessionWrapEx<VII: ValidatorIdentityIdentity> {
         FuturesUnordered<oneshot::Receiver<Result<DKGInfo<VII>, (SessionId, SessionError)>>>,
     signing_futures: FuturesUnordered<
         oneshot::Receiver<
-            Result<SignatureSuiteInfo<VII>, (Option<SubsessionId>, Vec<u16>, SessionError)>,
+            Result<
+                SignatureSuiteInfo<VII>,
+                (
+                    Option<SubsessionId>,
+                    // pkid, msg, tweak_data, combinations
+                    (PkId, Vec<u8>, Option<Vec<u8>>, Combinations),
+                    SessionError,
+                ),
+            >,
         >,
     >,
     dkg_in_final_channel_receiver:
@@ -199,7 +210,13 @@ impl<VII: ValidatorIdentityIdentity> SessionWrapEx<VII> {
             SigningRequestWrapEx<VII>,
             oneshot::Sender<SigningResponseWrapEx>,
         )>,
+        mut combinations: Combinations,
     ) -> Result<SubsessionId, SessionError> {
+        if msg.as_ref().len() != 32 {
+            return Err(SessionError::SignerSessionError(
+                "Message length must be 32".to_string(),
+            ));
+        }
         let pkid = PkId::new(pkid_raw.as_ref().to_vec());
         let signing_session =
             self.signing_sessions
@@ -213,17 +230,25 @@ impl<VII: ValidatorIdentityIdentity> SessionWrapEx<VII> {
                 return Err(e);
             }
         };
-        let participants_candidates = signing_session
-            .base_info
-            .participants
+        let participants_candidates: Vec<u16> = combinations
+            .pop()
+            .ok_or(SessionError::SignerSessionError(
+                "No participants candidates".to_string(),
+            ))?
             .iter()
-            .map(|(id, _)| *id)
-            .take(signing_session.base_info.min_signers as usize)
+            .map(|id| *id)
             .collect::<Vec<_>>();
         let (tx, rx) = oneshot::channel();
         self.signing_futures.push(rx);
         return signing_session
-            .start_new_signing(msg, tweak_data, tx, participants_candidates, in_final_rx)
+            .start_new_signing(
+                msg,
+                tweak_data,
+                tx,
+                participants_candidates,
+                combinations,
+                in_final_rx,
+            )
             .await;
     }
     pub(crate) fn handle_dkg_final_channel_request(
@@ -339,8 +364,24 @@ impl<VII: ValidatorIdentityIdentity> SessionWrapEx<VII> {
                 signature_response_oneshot,
             } => {
                 let (in_final_tx, in_final_rx) = tokio::sync::mpsc::unbounded_channel();
+                let sessions = self.signing_sessions.get(&pkid);
+                let combinations = match sessions {
+                    Some(sessions) => Combinations::new(
+                        sessions.base_info.participants.keys().cloned().collect(),
+                        sessions.base_info.min_signers,
+                    ),
+                    None => {
+                        signature_response_oneshot
+                            .send(Err(SessionError::SignerSessionError(format!(
+                                "Signing session with pkid {} not found",
+                                pkid.to_string()
+                            ))))
+                            .unwrap();
+                        return;
+                    }
+                };
                 let subsession_id = self
-                    .sign(pkid.to_bytes(), msg, tweak_data, in_final_rx)
+                    .sign(pkid.to_bytes(), msg, tweak_data, in_final_rx, combinations)
                     .await;
                 match subsession_id {
                     Ok(subsession_id) => {
@@ -472,11 +513,16 @@ impl<VII: ValidatorIdentityIdentity> SessionWrapEx<VII> {
         &mut self,
         signing_session: Result<
             SignatureSuiteInfo<VII>,
-            (Option<SubsessionId>, Vec<u16>, SessionError),
+            (
+                Option<SubsessionId>,
+                (PkId, Vec<u8>, Option<Vec<u8>>, Combinations),
+                SessionError,
+            ),
         >,
     ) -> Result<(), SessionError> {
         match signing_session {
             Ok(signature_suite) => {
+                tracing::info!("signature_suite: {:?}", signature_suite);
                 let subsession_id = signature_suite.subsession_id;
                 let oneshot = self.subsession_id_signaturesuite_map.remove(&subsession_id);
                 self.signing_in_final_channel_mapping.remove(&subsession_id);
@@ -496,17 +542,42 @@ impl<VII: ValidatorIdentityIdentity> SessionWrapEx<VII> {
                     )));
                 }
             }
-            Err((Some(subsession_id), _, e)) => {
+            Err((Some(subsession_id), (pkid, msg, tweak_data, combinations), e)) => {
                 tracing::error!("Error in signing future: {:?}", e);
                 let oneshot = self.subsession_id_signaturesuite_map.remove(&subsession_id);
                 self.signing_in_final_channel_mapping.remove(&subsession_id);
                 if let Some(oneshot) = oneshot {
-                    if let Err(e) = oneshot.send(Err(e)) {
-                        tracing::error!("Error sending signature response: {:?}", e);
-                        return Err(SessionError::SendOneshotError(format!(
-                            "Error sending signature response: {:?}",
-                            e
-                        )));
+                    if combinations.is_empty() {
+                        if let Err(e) = oneshot.send(Err(e)) {
+                            tracing::error!("Error sending signature response: {:?}", e);
+                            return Err(SessionError::SendOneshotError(format!(
+                                "Error sending signature response: {:?}",
+                                e
+                            )));
+                        }
+                    } else {
+                        // have another try to sign
+                        let (in_final_tx, in_final_rx) = tokio::sync::mpsc::unbounded_channel();
+                        let subsession_id = self
+                            .sign(pkid.to_bytes(), msg, tweak_data, in_final_rx, combinations)
+                            .await;
+                        match subsession_id {
+                            Ok(subsession_id) => {
+                                self.subsession_id_signaturesuite_map
+                                    .insert(subsession_id, oneshot);
+                                self.signing_in_final_channel_mapping
+                                    .insert(subsession_id, in_final_tx);
+                            }
+                            Err(e) => {
+                                if let Err(e) = oneshot.send(Err(e)) {
+                                    tracing::error!("Error sending signature response: {:?}", e);
+                                    return Err(SessionError::SendOneshotError(format!(
+                                        "Error sending signature response: {:?}",
+                                        e
+                                    )));
+                                }
+                            }
+                        }
                     }
                 }
             }

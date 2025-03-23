@@ -14,6 +14,8 @@ use crate::{
     },
     SignatureSuiteInfo,
 };
+
+use super::combinations::Combinations;
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CoordinatorSigningSessionInfo<VII: ValidatorIdentityIdentity, CI: Identifier> {
     pub(crate) crypto_type: CryptoType,
@@ -105,10 +107,17 @@ impl<VII: ValidatorIdentityIdentity> CoordinatorSigningSessionEx<VII> {
         msg: T,
         tweak_data: Option<T>,
         response: oneshot::Sender<
-            Result<SignatureSuiteInfo<VII>, (Option<SubsessionId>, Vec<u16>, SessionError)>,
+            Result<
+                SignatureSuiteInfo<VII>,
+                (
+                    Option<SubsessionId>,
+                    (PkId, Vec<u8>, Option<Vec<u8>>, Combinations),
+                    SessionError,
+                ),
+            >,
         >,
         participants_candidates: Vec<u16>,
-
+        combinations: Combinations,
         in_final_rx: UnboundedReceiver<(
             SigningRequestWrapEx<VII>,
             oneshot::Sender<SigningResponseWrapEx>,
@@ -116,6 +125,7 @@ impl<VII: ValidatorIdentityIdentity> CoordinatorSigningSessionEx<VII> {
     ) -> Result<SubsessionId, SessionError> {
         let mut base_info = self.base_info.clone();
         // check all participants candidates are in the participants
+        tracing::info!("len {:?}", base_info.participants.keys());
         for participant in participants_candidates.iter() {
             if !base_info.participants.contains_key(participant) {
                 return Err(SessionError::CoordinatorSessionError(format!(
@@ -137,12 +147,23 @@ impl<VII: ValidatorIdentityIdentity> CoordinatorSigningSessionEx<VII> {
             Ok(subsession) => {
                 let subsession_id = subsession.subsession_id();
                 subsession
-                    .start_signing(in_final_rx, participants_candidates, response)
+                    .start_signing(in_final_rx, participants_candidates, combinations, response)
                     .await;
                 Ok(subsession_id)
             }
             Err(e) => {
-                response.send(Err((None, Vec::new(), e.clone()))).unwrap();
+                response
+                    .send(Err((
+                        None,
+                        (
+                            self.base_info.pkid.clone(),
+                            msg.clone(),
+                            tweak_data.clone(),
+                            combinations,
+                        ),
+                        e.clone(),
+                    )))
+                    .unwrap();
                 Err(e)
             }
         }

@@ -106,7 +106,9 @@ impl<VI: ValidatorIdentity> NodeSwarm<VI> {
                 // rendezvous: rendezvous::client::Behaviour::new(key.clone()),
                 node2coor: request_response::cbor::Behaviour::new(
                     [(StreamProtocol::new("/node2coor"), ProtocolSupport::Full)],
-                    request_response::Config::default(),
+                    request_response::Config::default().with_request_timeout(Duration::from_secs(
+                        Settings::global().connection.node2coor_request_timeout,
+                    )),
                 ),
             })?
             .with_swarm_config(|cfg| cfg.with_idle_connection_timeout(Duration::from_secs(1000)))

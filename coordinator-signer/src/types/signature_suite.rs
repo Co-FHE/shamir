@@ -109,11 +109,33 @@ pub struct GroupPublicKeyInfo {
     pub group_public_key_tweak: Vec<u8>,
     pub tweak_data: Option<Vec<u8>>,
 }
+use k256::elliptic_curve::sec1::ToEncodedPoint;
 impl GroupPublicKeyInfo {
     pub(crate) fn new(group_public_key_tweak: Vec<u8>, tweak_data: Option<Vec<u8>>) -> Self {
         Self {
             group_public_key_tweak,
             tweak_data,
+        }
+    }
+    pub fn compressed_pk_k256(&self) -> Result<Vec<u8>, String> {
+        if self.group_public_key_tweak.len() == 33 {
+            return Ok(self.group_public_key_tweak.clone());
+        }
+        if self.group_public_key_tweak.len() == 65 {
+            let pk = k256::PublicKey::from_sec1_bytes(&self.group_public_key_tweak).unwrap();
+            return Ok(pk.to_encoded_point(true).as_bytes().to_vec());
+        }
+        return Err(format!("Invalid public key length"));
+    }
+    pub fn uncompressed_pk_k256(&self) -> Result<Vec<u8>, String> {
+        match self.group_public_key_tweak.len() {
+            65 => Ok(self.group_public_key_tweak.clone()),
+            33 => {
+                let pk = k256::PublicKey::from_sec1_bytes(&self.group_public_key_tweak)
+                    .map_err(|e| format!("Invalid compressed public key: {}", e))?;
+                Ok(pk.to_encoded_point(false).as_bytes().to_vec())
+            }
+            _ => Err("Invalid public key length".to_string()),
         }
     }
 }
@@ -284,6 +306,39 @@ impl<VII: ValidatorIdentityIdentity + Serialize + for<'de> Deserialize<'de>>
     pub fn signature(&self) -> Vec<u8> {
         self.signature.clone()
     }
+    pub fn signature_with_rsv(&self) -> Result<Vec<u8>, String> {
+        if self.signature.len() != 64 {
+            return Err(format!("Signature must be 64 bytes"));
+        }
+        let signature = secp256k1::ecdsa::Signature::from_compact(&self.signature)
+            .map_err(|e| e.to_string())?;
+        let message = secp256k1::Message::from_digest(
+            self.message
+                .clone()
+                .try_into()
+                .map_err(|e| format!("Message must be 32 bytes: {:?}", e))?,
+        );
+        let secp = secp256k1::Secp256k1::verification_only();
+        let pubkey = secp256k1::PublicKey::from_slice(&self.pk_tweak).map_err(|e| e.to_string())?;
+        if !secp.verify_ecdsa(&message, &signature, &pubkey).is_ok() {
+            return Err(format!("Signature is invalid"));
+        }
+        let recovery_id = (0..=1)
+            .find_map(|v| {
+                let rec_id = secp256k1::ecdsa::RecoveryId::try_from(v as i32).ok()?;
+                let recoverable_sig = secp256k1::ecdsa::RecoverableSignature::from_compact(
+                    &signature.serialize_compact(),
+                    rec_id,
+                )
+                .ok()?;
+                secp.recover_ecdsa(&message, &recoverable_sig).ok()?;
+                Some(v as u8)
+            })
+            .ok_or(format!("Failed to recover signature"))?;
+        let mut signature_with_rsv = self.signature.clone();
+        signature_with_rsv.push(recovery_id);
+        Ok(signature_with_rsv)
+    }
 }
 impl<VII: ValidatorIdentityIdentity + Serialize + for<'de> Deserialize<'de>>
     SignatureSuiteInfo<VII>
@@ -310,5 +365,72 @@ impl<VII: ValidatorIdentityIdentity + Serialize + for<'de> Deserialize<'de>>
                 .map_err(|e| e.to_string()),
             CryptoType::EcdsaSecp256k1 => self.verify_ecdsa().map_err(|e| e.to_string()),
         }
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use k256::{ecdsa::SigningKey, SecretKey};
+    use rand_core::OsRng;
+
+    #[test]
+    fn test_compressed_pk_k256() {
+        let sk = SecretKey::random(&mut OsRng);
+        let public_key = sk.public_key();
+        let pk_bytes = public_key.to_encoded_point(false).as_bytes().to_vec();
+        let pk = GroupPublicKeyInfo::new(pk_bytes, None);
+        let compressed_pk = pk.compressed_pk_k256().unwrap();
+        assert_eq!(compressed_pk.len(), 33);
+        let new_pk = GroupPublicKeyInfo::new(compressed_pk, None);
+        let uncompressed_pk = new_pk.uncompressed_pk_k256().unwrap();
+        assert_eq!(uncompressed_pk.len(), 65);
+        assert_eq!(pk.group_public_key_tweak, uncompressed_pk);
+    }
+    #[test]
+    fn test_signature_with_rsv() {
+        let secret_key = SecretKey::random(&mut OsRng);
+        let signing_key = SigningKey::from(secret_key.clone());
+        let verify_key = k256::ecdsa::VerifyingKey::from(&signing_key);
+
+        let public_key_bytes = verify_key.to_encoded_point(false).as_bytes().to_vec();
+
+        let message = b"testtesttesttesttesttesttesttest";
+        let (signature, recovery_id) = signing_key.sign_prehash_recoverable(message).unwrap();
+        let mut sb = signature.to_vec();
+        sb.push(recovery_id.to_byte() as u8);
+        let suite = SignatureSuiteInfo::<sp_core::crypto::AccountId32> {
+            signature: signature.to_vec(),
+            pk: vec![],
+            pk_tweak: public_key_bytes.clone(),
+            pk_verifying_key: vec![],
+            pk_verifying_key_tweak: vec![],
+            tweak_data: None,
+            subsession_id: SubsessionId::new(
+                CryptoType::EcdsaSecp256k1,
+                1,
+                &Participants::<libp2p::PeerId, u16>::new(vec![(1, libp2p::PeerId::random())])
+                    .unwrap(),
+                message.to_vec(),
+                None,
+                PkId::new(vec![0x06; 33]),
+            )
+            .unwrap(),
+            participants: BTreeMap::new(),
+            joined_participants: BTreeMap::new(),
+            pkid: PkId::new(vec![]),
+            message: message.to_vec(),
+            crypto_type: CryptoType::Secp256k1,
+            original_serialized: "".to_string(),
+        };
+        let signature = suite.signature_with_rsv().unwrap();
+        assert_eq!(signature.len(), 65);
+        let signature_with_rsv = suite.signature_with_rsv();
+        assert!(signature_with_rsv.is_ok());
+        let signature_with_rsv = signature_with_rsv.unwrap();
+        assert!(signature_with_rsv.len() == 65);
+        // signature +cover_id must equal to signature_with_rsv
+        let signature_with_rsv_bytes = signature_with_rsv.to_vec();
+
+        assert_eq!(sb, signature_with_rsv_bytes);
     }
 }

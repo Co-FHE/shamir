@@ -1,6 +1,11 @@
 use rand::Rng;
 use sha2::{Digest, Sha256};
 use tokio::sync::oneshot;
+
+use crate::{
+    crypto::{CryptoType, PkId},
+    types::error::SessionError,
+};
 /// Concatenates data and calculates their SHA256 hash
 ///
 /// # Arguments

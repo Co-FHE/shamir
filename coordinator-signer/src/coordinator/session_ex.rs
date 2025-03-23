@@ -2,7 +2,7 @@ mod dkg_ex;
 mod signing_ex;
 use super::manager::InstructionCipher;
 use super::{Cipher, PkId, ValidatorIdentityIdentity};
-use crate::crypto::CryptoType;
+use crate::crypto::{pk_to_pkid, CryptoType};
 use crate::keystore::KeystoreManagement;
 use crate::types::message::{
     DKGRequestWrapEx, DKGResponseWrapEx, SigningRequestWrapEx, SigningResponseWrapEx,
@@ -18,7 +18,7 @@ use common::Settings;
 use dkg_ex::{CoordinatorDKGSessionEx, DKGInfo};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
-use signing_ex::{signature_to_pkid, CoordinatorSigningSessionEx};
+use signing_ex::CoordinatorSigningSessionEx;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -425,7 +425,7 @@ impl<VII: ValidatorIdentityIdentity> SessionWrapEx<VII> {
         tracing::debug!("Coordinator received dkg future: {:?}", dkg_info);
         match dkg_info {
             Ok(dkg_info) => {
-                let pkid = signature_to_pkid(dkg_info.crypto_type, &dkg_info.public_key_package)?;
+                let pkid = pk_to_pkid(dkg_info.crypto_type, &dkg_info.public_key_package)?;
                 self.signing_sessions.insert(
                     pkid,
                     CoordinatorSigningSessionEx::new(
@@ -442,7 +442,7 @@ impl<VII: ValidatorIdentityIdentity> SessionWrapEx<VII> {
                 self.dkg_in_final_channel_mapping
                     .remove(&dkg_info.session_id);
                 if let Some(oneshot) = oneshot {
-                    if let Err(e) = oneshot.send(signature_to_pkid(
+                    if let Err(e) = oneshot.send(pk_to_pkid(
                         dkg_info.crypto_type,
                         &dkg_info.public_key_package,
                     )) {

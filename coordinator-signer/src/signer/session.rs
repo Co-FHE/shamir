@@ -228,6 +228,10 @@ impl<VII: ValidatorIdentityIdentity> SessionWrapEx<VII> {
             Some(data) => Self::deserialize_sessions(data.as_slice())?,
             None => HashMap::new(),
         };
+        tracing::info!("signing_sessions: {:?}", signing_sessions.len());
+        for (pkid, session) in signing_sessions.iter() {
+            tracing::info!("signing_sessions: {}", pkid);
+        }
         let (dkg_results_tx, dkg_results_rx) = tokio::sync::mpsc::unbounded_channel();
         let (signing_results_tx, signing_results_rx) = tokio::sync::mpsc::unbounded_channel();
         let (dkg_final_tx, dkg_final_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -329,6 +333,7 @@ impl<VII: ValidatorIdentityIdentity> SessionWrapEx<VII> {
                     let out_tx = self.out_tx.clone();
                     let signing_results_tx = self.signing_results_tx.clone();
                     let in_rx = session.new_subsession_in_channel(subsession_id);
+                    tracing::info!("create new subsession: {:?}", subsession_id.to_string());
                     if let Some(in_rx) = in_rx {
                         let base = session.base.clone();
                         tokio::spawn(async move {
@@ -368,6 +373,7 @@ impl<VII: ValidatorIdentityIdentity> SessionWrapEx<VII> {
             .signing_sessions_ex
             .iter()
             .map(|(pkid, session)| {
+                tracing::info!("serialize_sessions: {}", pkid);
                 session.check_serialize_deserialize()?;
                 match session.serialize() {
                     Ok(data) => Ok((pkid.clone(), data)),

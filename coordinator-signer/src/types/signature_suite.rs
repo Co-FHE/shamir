@@ -239,7 +239,7 @@ impl<VII: ValidatorIdentityIdentity + Serialize + for<'de> Deserialize<'de>>
         if self.pk.len() != 33 && self.pk.len() != 65 {
             return Err(format!("Public key must be 33 bytes or 65 bytes"));
         }
-        let pubkey = PublicKey::from_slice(&self.pk).map_err(|e| e.to_string())?;
+        let pubkey = PublicKey::from_slice(&self.pk_tweak).map_err(|e| e.to_string())?;
         if !secp.verify_ecdsa(&message, &signature, &pubkey).is_ok() {
             return Err(format!("Signature is invalid"));
         }

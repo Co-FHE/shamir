@@ -91,6 +91,22 @@ impl<VII: ValidatorIdentityIdentity, CI: Identifier> Participants<VII, CI> {
     pub(crate) fn len(&self) -> usize {
         self.0.len()
     }
+    pub(crate) fn filter(&self, filter: &Vec<CI>) -> Result<Self, ParticipantsError> {
+        let participants = self
+            .0
+            .iter()
+            .filter(|(id, _)| filter.contains(id))
+            .map(|(id, identity)| (id.clone(), identity.clone()))
+            .collect::<Vec<(CI, VII)>>();
+        if participants.len() != filter.len() {
+            return Err(ParticipantsError::ParticipantsNotMatch(format!(
+                "participants length does not match: {:?} vs {:?}",
+                participants.len(),
+                filter.len()
+            )));
+        }
+        Participants::new(participants)
+    }
     pub(crate) fn check_identifier_identity_exists(
         &self,
         identifier: &CI,

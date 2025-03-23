@@ -1,6 +1,9 @@
 use hex::encode as hex_encode;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::fmt::{Display, Formatter};
+
+use crate::types::error::SessionError;
 
 use super::{CryptoType, CryptoTypeError};
 
@@ -39,6 +42,15 @@ impl PkId {
     }
 }
 
+pub(crate) fn pk_to_pkid(
+    crypto_type: CryptoType,
+    public_key_package: &Vec<u8>,
+) -> Result<PkId, SessionError> {
+    let mut pkid = vec![crypto_type.into()];
+    pkid.extend(Sha256::digest(public_key_package.clone()));
+    let pkid = PkId::from(pkid);
+    Ok(pkid)
+}
 impl Display for PkId {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", hex_encode(&self.0))

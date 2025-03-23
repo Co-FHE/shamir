@@ -7,7 +7,7 @@ use tokio::sync::{
 };
 
 use crate::{
-    crypto::{CryptoType, Identifier, PkId, ValidatorIdentityIdentity},
+    crypto::{pk_to_pkid, CryptoType, Identifier, PkId, ValidatorIdentityIdentity},
     types::{
         error::SessionError,
         message::{SigningRequest, SigningRequestWrapEx, SigningResponse, SigningResponseWrapEx},
@@ -44,7 +44,7 @@ impl<VII: ValidatorIdentityIdentity, CI: Identifier> CoordinatorSigningSessionIn
             public_key_package: data.2,
             min_signers: CI::from_bytes(&data.3)
                 .map_err(|e| SessionError::DeserializationError(e.to_string()))?,
-            participants: Participants::deserialize(&data.3)
+            participants: Participants::deserialize(&data.4)
                 .map_err(|e| SessionError::DeserializationError(e.to_string()))?,
         })
     }
@@ -59,15 +59,6 @@ pub(crate) struct CoordinatorSigningSessionEx<VII: ValidatorIdentityIdentity> {
         oneshot::Sender<SigningResponseWrapEx>,
     )>,
 }
-pub(crate) fn signature_to_pkid(
-    crypto_type: CryptoType,
-    public_key_package: &Vec<u8>,
-) -> Result<PkId, SessionError> {
-    let mut pkid = vec![crypto_type.into()];
-    pkid.extend(Sha256::digest(public_key_package.clone()));
-    let pkid = PkId::from(pkid);
-    Ok(pkid)
-}
 impl<VII: ValidatorIdentityIdentity> CoordinatorSigningSessionEx<VII> {
     pub(crate) fn new(
         crypto_type: CryptoType,
@@ -79,7 +70,7 @@ impl<VII: ValidatorIdentityIdentity> CoordinatorSigningSessionEx<VII> {
             oneshot::Sender<SigningResponseWrapEx>,
         )>,
     ) -> Result<Self, SessionError> {
-        let pkid = signature_to_pkid(crypto_type, &public_key_package)?;
+        let pkid = pk_to_pkid(crypto_type, &public_key_package)?;
         participants.check_min_signers(min_signers)?;
 
         Ok(Self {
@@ -125,7 +116,17 @@ impl<VII: ValidatorIdentityIdentity> CoordinatorSigningSessionEx<VII> {
             oneshot::Sender<SigningResponseWrapEx>,
         )>,
     ) -> Result<SubsessionId, SessionError> {
-        let base_info = self.base_info.clone();
+        let mut base_info = self.base_info.clone();
+        // check all participants candidates are in the participants
+        for participant in participants_candidates.iter() {
+            if !base_info.participants.contains_key(participant) {
+                return Err(SessionError::CoordinatorSessionError(format!(
+                    "Participant {} not found",
+                    participant
+                )));
+            }
+        }
+        base_info.participants = base_info.participants.filter(&participants_candidates)?;
         let msg = msg.as_ref().to_vec();
         let tweak_data = tweak_data.map(|s| s.as_ref().to_vec());
         let subssesion = CoordinatorSubsessionEx::<VII>::new(

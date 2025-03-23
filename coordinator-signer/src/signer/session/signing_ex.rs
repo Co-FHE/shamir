@@ -6,7 +6,7 @@ use std::{collections::BTreeMap, time};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use crate::{
-    crypto::{Cipher, CryptoType, KeyPackage, PublicKeyPackage, Signature},
+    crypto::{pk_to_pkid, Cipher, CryptoType, KeyPackage, PublicKeyPackage, Signature},
     signer::{
         manager::{ManagerRequest, RequestEx},
         PkId, ValidatorIdentityIdentity,
@@ -44,7 +44,7 @@ impl<VII: ValidatorIdentityIdentity> SigningSignerExBase<VII> {
         Ok(Self {
             key_package,
             public_key: public_key.clone(),
-            pkid: PkId::new(public_key),
+            pkid: pk_to_pkid(base_info.crypto_type, &public_key)?,
             base_info,
         })
     }
@@ -65,6 +65,7 @@ impl<VII: ValidatorIdentityIdentity> SigningSignerExBase<VII> {
     }
 }
 
+#[derive(Debug, Clone)]
 pub(crate) struct SigningSessionEx<VII: ValidatorIdentityIdentity> {
     pub(crate) base: SigningSignerExBase<VII>,
     pub(crate) subsessions: BTreeMap<SubsessionId, UnboundedSender<CoordinatorToSignerMsg>>,
@@ -76,7 +77,7 @@ impl<VII: ValidatorIdentityIdentity> SigningSessionEx<VII> {
         base_info: DKGBaseMessage<VII, u16>,
     ) -> Result<Self, SessionError> {
         Ok(Self {
-            base: SigningSignerExBase::new(public_key_package, key_package, base_info)?,
+            base: SigningSignerExBase::new(key_package, public_key_package, base_info)?,
             subsessions: BTreeMap::new(),
         })
     }

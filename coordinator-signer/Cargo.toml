@@ -76,5 +76,5 @@ file-lock = "2.1"
 bincode = "1.3.3"
 
 sp-core = "34.0.0"
-ecdsa-tss = { path = "../../ecdsa-tss" }
+ecdsa-tss = { git = "https://github.com/verisense-network/ecdsa-tss.git", branch = "main" }
 scopeguard = "1.1.0"

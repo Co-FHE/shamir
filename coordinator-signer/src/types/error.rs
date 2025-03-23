@@ -1,14 +1,19 @@
-use crate::{crypto::Cipher, keystore::KeystoreError};
+use crate::{
+    crypto::{CryptoType, CryptoTypeError},
+    keystore::KeystoreError,
+};
+
+use super::session::ParticipantsError;
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub(crate) enum SessionError<C: Cipher> {
+pub(crate) enum SessionError {
     #[error("Invalid participants: {0}")]
-    InvalidParticipants(String),
+    InvalidParticipants(#[from] ParticipantsError),
     #[error("Missing data for split into request: {0}")]
     MissingDataForSplitIntoRequest(String),
     #[error("Invalid request: {0}")]
     InvalidRequest(String),
     #[error("Frost error: {0}")]
-    CryptoError(C::CryptoError),
+    CryptoError(String),
     #[error("Session id error: {0}")]
     SessionIdError(#[from] SessionIdError),
     #[error("Invalid response: {0}")]
@@ -26,14 +31,22 @@ pub(crate) enum SessionError<C: Cipher> {
     #[error("PkId not found: {0}")]
     PkIdNotFound(String),
     #[error("Keystore error: {0}")]
-    KeystoreError(String),
+    KeystoreError(#[from] KeystoreError),
+    #[error("crypto type not supported: {0}")]
+    CryptoTypeError(CryptoType),
+    #[error("Instruction response error: {0}")]
+    InstructionResponseError(String),
+    #[error("crypto type Error: {0}")]
+    CryptoTypeErrorNative(#[from] CryptoTypeError),
+    #[error("external error: {0}")]
+    ExternalError(String),
+    #[error("serialization error: {0}")]
+    SerializationError(String),
+    #[error("deserialization error: {0}")]
+    DeserializationError(String),
+    #[error("signature suite error: {0}")]
+    SignatureSuiteError(String),
 }
-impl<C: Cipher> From<KeystoreError> for SessionError<C> {
-    fn from(e: KeystoreError) -> Self {
-        SessionError::KeystoreError(e.to_string())
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum SessionIdError {
     #[error("Invalid session id format: {0}")]

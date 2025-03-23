@@ -1,4 +1,6 @@
 mod cipher;
+mod identifier;
+pub(crate) use identifier::*;
 mod pkid;
 pub mod validator_identity;
 
@@ -38,6 +40,8 @@ pub enum CryptoType {
     Ed448,
     #[strum(serialize = "ristretto255")]
     Ristretto255,
+    #[strum(serialize = "ecdsa-secp256k1")]
+    EcdsaSecp256k1,
 }
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum CryptoTypeError {
@@ -56,6 +60,7 @@ impl TryFrom<u8> for CryptoType {
             3 => Ok(Self::Secp256k1Tr),
             4 => Ok(Self::Ed448),
             5 => Ok(Self::Ristretto255),
+            6 => Ok(Self::EcdsaSecp256k1),
             _ => Err(CryptoTypeError::InvalidCryptoType(value)),
         }
     }
@@ -69,6 +74,7 @@ impl From<CryptoType> for u8 {
             CryptoType::Secp256k1Tr => 3,
             CryptoType::Ed448 => 4,
             CryptoType::Ristretto255 => 5,
+            CryptoType::EcdsaSecp256k1 => 6,
         }
     }
 }

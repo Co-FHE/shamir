@@ -54,6 +54,9 @@ pub struct SignerSettings {
     pub allow_external_address: bool,
     pub keystore_path: PathBuf,
     pub connection_timeout: u64,
+    pub ecdsa_port: u16,
+    pub ecdsa_dkg_timeout: u64,
+    pub ecdsa_sign_timeout: u64,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -66,6 +69,9 @@ pub struct NodeSettings {
 #[derive(Debug, Deserialize, Clone)]
 pub struct ConnectionSettings {
     pub ping_interval: u64,
+    pub node2coor_request_timeout: u64,
+    pub sig2coor_request_timeout: u64,
+    pub coor2sig_request_timeout: u64,
 }
 
 #[derive(Debug, Deserialize, Clone)]

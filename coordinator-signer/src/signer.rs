@@ -2,9 +2,13 @@ mod command;
 mod manager;
 mod session;
 use futures::stream::FuturesUnordered;
-use libp2p::request_response::{InboundRequestId, ProtocolSupport, ResponseChannel};
+use libp2p::request_response::{
+    InboundRequestId, OutboundRequestId, ProtocolSupport, ResponseChannel,
+};
 use libp2p::{ping, rendezvous, request_response, PeerId, StreamProtocol};
-use manager::{Request, SessionManagerError};
+use manager::{
+    ManagerRequestWithInboundRequestId, Request, RequestEx, RequestExWithInboundRequestId,
+};
 use session::SessionWrap;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -13,7 +17,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::unix::SocketAddr;
 use tokio::net::{UnixListener, UnixStream};
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot;
 
 use common::Settings;
@@ -32,9 +36,11 @@ use crate::crypto::{
     ValidatorIdentityPublicKey,
 };
 use crate::keystore;
+use crate::types::error::SessionError;
 use crate::types::message::{
-    CoorToSigRequest, CoorToSigResponse, DKGResponseWrap, SigBehaviour, SigBehaviourEvent,
-    SigToCoorRequest, SigToCoorResponse, SigningResponseWrap, ValidatorIdentityRequest,
+    CoorToSigRequest, CoorToSigResponse, DKGResponseWrap, DKGResponseWrapEx, DKGStageEx,
+    SigBehaviour, SigBehaviourEvent, SigToCoorRequest, SigToCoorResponse, SigningResponseWrap,
+    SigningResponseWrapEx, ValidatorIdentityRequest, ValidatorIdentityResponse,
 };
 use crate::types::ConnectionState;
 use crate::utils::list_hash;
@@ -48,19 +54,35 @@ pub struct Signer<VI: ValidatorIdentity> {
     ipc_path: PathBuf,
     coordinator_peer_id: PeerId,
     register_request_id: Option<request_response::OutboundRequestId>,
-    request_sender: UnboundedSender<Request<VI::Identity>>,
+    coor2signer_request_sender: UnboundedSender<ManagerRequestWithInboundRequestId<VI::Identity>>,
+    signer2coor_request_receiver: UnboundedReceiver<RequestEx<VI::Identity>>,
+
     dkg_response_futures: FuturesUnordered<
         oneshot::Receiver<(
             InboundRequestId,
-            Result<DKGResponseWrap<VI::Identity>, SessionManagerError>,
+            Result<DKGResponseWrap<VI::Identity>, SessionError>,
         )>,
     >,
     signing_response_futures: FuturesUnordered<
         oneshot::Receiver<(
             InboundRequestId,
-            Result<SigningResponseWrap<VI::Identity>, SessionManagerError>,
+            Result<SigningResponseWrap<VI::Identity>, SessionError>,
         )>,
     >,
+    dkg_response_futures_ex: FuturesUnordered<
+        oneshot::Receiver<(InboundRequestId, Result<DKGResponseWrapEx, SessionError>)>,
+    >,
+    signing_response_futures_ex: FuturesUnordered<
+        oneshot::Receiver<(
+            InboundRequestId,
+            Result<SigningResponseWrapEx, SessionError>,
+        )>,
+    >,
+    dkg_out_response_channels_mapping:
+        HashMap<OutboundRequestId, oneshot::Sender<Result<DKGResponseWrapEx, SessionError>>>,
+    signing_out_response_channels_mapping:
+        HashMap<OutboundRequestId, oneshot::Sender<Result<SigningResponseWrapEx, SessionError>>>,
+
     channel_mapping: HashMap<InboundRequestId, ResponseChannel<CoorToSigResponse<VI::Identity>>>,
     connection_state: ConnectionState,
     verify_message_fn: Box<dyn Fn(&VI::Identity, &[u8]) -> bool + Send + Sync>,
@@ -92,11 +114,15 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                 ),
                 sig2coor: request_response::cbor::Behaviour::new(
                     [(StreamProtocol::new("/sig2coor"), ProtocolSupport::Full)],
-                    request_response::Config::default(),
+                    request_response::Config::default().with_request_timeout(Duration::from_secs(
+                        Settings::global().connection.sig2coor_request_timeout,
+                    )),
                 ),
                 coor2sig: request_response::cbor::Behaviour::new(
                     [(StreamProtocol::new("/coor2sig"), ProtocolSupport::Full)],
-                    request_response::Config::default(),
+                    request_response::Config::default().with_request_timeout(Duration::from_secs(
+                        Settings::global().connection.coor2sig_request_timeout,
+                    )),
                 ),
                 rendezvous: rendezvous::client::Behaviour::new(key.clone()),
             })?
@@ -106,9 +132,13 @@ impl<VI: ValidatorIdentity> Signer<VI> {
             })
             .build();
         swarm.add_peer_address(coordinator_peer_id, coordinator_multiaddr.clone());
-        let (request_sender, request_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let (coor2signer_request_sender, coor2signer_request_receiver) =
+            tokio::sync::mpsc::unbounded_channel();
+        let (signer2coor_request_sender, signer2coor_request_receiver) =
+            tokio::sync::mpsc::unbounded_channel();
         manager::SignerSessionManager::new(
-            request_receiver,
+            coor2signer_request_receiver,
+            signer2coor_request_sender,
             Arc::new(keystore::Keystore::new(
                 validator_keypair.derive_key(b"keystore"),
                 None,
@@ -133,10 +163,16 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                 )),
             coordinator_peer_id,
             register_request_id: None,
-            request_sender,
+            coor2signer_request_sender,
+            signer2coor_request_receiver,
             dkg_response_futures: FuturesUnordered::new(),
             signing_response_futures: FuturesUnordered::new(),
+            dkg_response_futures_ex: FuturesUnordered::new(),
+            signing_response_futures_ex: FuturesUnordered::new(),
+
             channel_mapping: HashMap::new(),
+            dkg_out_response_channels_mapping: HashMap::new(),
+            signing_out_response_channels_mapping: HashMap::new(),
             connection_state: ConnectionState::Disconnected(None),
             verify_message_fn: Box::new(verify_message_fn),
         })
@@ -249,6 +285,24 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                         println!("Received signing request");
                         if let Err(e) = self.signing_handle_response(signing_request).await {
                             tracing::error!("Error handling signing response: {}", e);
+                        }
+                    }
+                    Some(Result::Ok(dkg_request_ex)) = self.dkg_response_futures_ex.next() => {
+                        tracing::debug!("Received dkg request ex");
+                        if let Err(e) = self.dkg_handle_response_ex(dkg_request_ex).await {
+                            tracing::error!("Error handling dkg response ex: {}", e);
+                        }
+                    }
+                    Some(Result::Ok(signing_request_ex)) = self.signing_response_futures_ex.next() => {
+                        tracing::debug!("Received signing request ex");
+                        if let Err(e) = self.signing_handle_response_ex(signing_request_ex).await {
+                            tracing::error!("Error handling signing response ex: {}", e);
+                        }
+                    }
+                    Some(request) = self.signer2coor_request_receiver.recv() => {
+                        tracing::debug!("Received signer2coor request");
+                        if let Err(e) = self.handle_signer2coor_request(request).await {
+                            tracing::error!("Error handling signer2coor request: {}", e);
                         }
                     }
                 }
@@ -414,26 +468,29 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                 match request {
                     CoorToSigRequest::DKGRequest(request) => {
                         tracing::info!(
-                            "Signer received dkg request: crypto_type: {}, from identity: {}, request_id: {}",
-                            request.crypto_type(),
-                            request.identity().to_fmt_string(),
-                            request_id
-                        );
+                                                            "Signer received dkg request: crypto_type: {}, from identity: {}, request_id: {}",
+                                                            request.crypto_type(),
+                                                            request.identity().to_fmt_string(),
+                                                            request_id
+                                                        );
                         let (tx, rx) = tokio::sync::oneshot::channel();
                         self.dkg_response_futures.push(rx);
                         self.channel_mapping.insert(request_id, channel);
-                        self.request_sender
-                            .send(Request::DKG((request_id, request), tx))
+                        self.coor2signer_request_sender
+                            .send(ManagerRequestWithInboundRequestId::Request(Request::DKG(
+                                (request_id, request),
+                                tx,
+                            )))
                             .unwrap();
                     }
                     CoorToSigRequest::SigningRequest(request) => {
                         tracing::info!(
-                            "Signer received signing request: crypto_type: {}, from identity: {}, message: {:?}, request_id: {}",
-                            request.crypto_type(),
-                            request.identity().to_fmt_string(),
-                            request.message().map(|m| hex::encode(m)),
-                            request_id
-                        );
+                                                            "Signer received signing request: crypto_type: {}, from identity: {}, message: {:?}, request_id: {}",
+                                                            request.crypto_type(),
+                                                            request.identity().to_fmt_string(),
+                                                            request.message().map(|m| hex::encode(m)),
+                                                            request_id
+                                                        );
                         if let Some(message) = request.message() {
                             // TODO: verifying message may take a long time, we need to do it in a separate thread
                             // TODO: should response rejecting the request if the message is invalid instead of discarding the request
@@ -446,12 +503,59 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                         self.signing_response_futures.push(rx);
                         self.channel_mapping.insert(request_id, channel);
                         // send request to manager
-                        self.request_sender
-                            .send(Request::Signing((request_id, request), tx))
+                        self.coor2signer_request_sender
+                            .send(ManagerRequestWithInboundRequestId::Request(
+                                Request::Signing((request_id, request), tx),
+                            ))
                             .unwrap();
                     }
                     CoorToSigRequest::Empty => {
                         tracing::info!("Signer received an empty request");
+                    }
+                    CoorToSigRequest::DKGRequestEx(dkgrequest_wrap_ex) => {
+                        tracing::info!(
+                            "Signer received dkg ex request: crypto_type: {}, from identity: {}, request_id: {}, stage: {}",
+                            dkgrequest_wrap_ex.crypto_type(),
+                            dkgrequest_wrap_ex.identity().to_fmt_string(),
+                            request_id,
+                            match dkgrequest_wrap_ex.dkg_request_ex().unwrap().stage {
+                                DKGStageEx::Init => "Init".to_string(),
+                                DKGStageEx::Intermediate(message_ex) => {
+                                    format!("Intermediate {:?}", message_ex.target)
+                                }
+                                DKGStageEx::Final(_) => "Final".to_string(),
+                            }
+                        );
+                        let (tx, rx) = tokio::sync::oneshot::channel();
+                        self.dkg_response_futures_ex.push(rx);
+                        self.channel_mapping.insert(request_id, channel);
+                        self.coor2signer_request_sender
+                            .send(ManagerRequestWithInboundRequestId::RequestEx(
+                                RequestExWithInboundRequestId::DKGEx(
+                                    (request_id, dkgrequest_wrap_ex),
+                                    tx,
+                                ),
+                            ))
+                            .unwrap();
+                    }
+                    CoorToSigRequest::SigningRequestEx(signing_request_wrap_ex) => {
+                        tracing::info!(
+                            "Signer received signing ex request: crypto_type: {}, from identity: {}, request_id: {}",
+                            signing_request_wrap_ex.crypto_type(),
+                            signing_request_wrap_ex.identity().to_fmt_string(),
+                            request_id
+                        );
+                        let (tx, rx) = tokio::sync::oneshot::channel();
+                        self.signing_response_futures_ex.push(rx);
+                        self.channel_mapping.insert(request_id, channel);
+                        self.coor2signer_request_sender
+                            .send(ManagerRequestWithInboundRequestId::RequestEx(
+                                RequestExWithInboundRequestId::SigningEx(
+                                    (request_id, signing_request_wrap_ex),
+                                    tx,
+                                ),
+                            ))
+                            .unwrap();
                     }
                 }
             }
@@ -480,12 +584,68 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                     }
                     self.register_request_id = None;
                     match response {
-                        SigToCoorResponse::Success => {
+                        SigToCoorResponse::ValidatorIdentityResponse(
+                            ValidatorIdentityResponse::Success,
+                        ) => {
                             tracing::info!("Signer registered with coordinator successfully");
                         }
-                        SigToCoorResponse::Failure(error) => {
+                        SigToCoorResponse::ValidatorIdentityResponse(
+                            ValidatorIdentityResponse::Failure(error),
+                        ) => {
                             tracing::error!("Failed to register: {}", error);
                             return Err(anyhow::anyhow!("Failed to register: {}", error));
+                        }
+                        SigToCoorResponse::DKGResponseEx(dkg_response_wrap_ex) => {
+                            tracing::info!(
+                                "Signer received dkg ex response: {:?}",
+                                dkg_response_wrap_ex
+                            );
+                        }
+                        SigToCoorResponse::SigningResponseEx(signing_response_wrap_ex) => {
+                            tracing::info!(
+                                "Signer received signing ex response: {:?}",
+                                signing_response_wrap_ex
+                            );
+                        }
+                    }
+                } else {
+                    if self
+                        .dkg_out_response_channels_mapping
+                        .contains_key(&request_id)
+                    {
+                        let r = self
+                            .dkg_out_response_channels_mapping
+                            .remove(&request_id)
+                            .unwrap();
+                        // convert SigToCoorResponse to DKGResponseWrapEx
+                        if let SigToCoorResponse::DKGResponseEx(dkg_response_wrap_ex) = response {
+                            r.send(Ok(dkg_response_wrap_ex)).unwrap();
+                        } else {
+                            r.send(Err(SessionError::InvalidResponse(format!(
+                                "Received invalid response type: {:?}",
+                                response
+                            ))))
+                            .unwrap();
+                        }
+                    } else if self
+                        .signing_out_response_channels_mapping
+                        .contains_key(&request_id)
+                    {
+                        let r = self
+                            .signing_out_response_channels_mapping
+                            .remove(&request_id)
+                            .unwrap();
+                        // convert SigToCoorResponse to SigningResponseWrapEx
+                        if let SigToCoorResponse::SigningResponseEx(signing_response_wrap_ex) =
+                            response
+                        {
+                            r.send(Ok(signing_response_wrap_ex)).unwrap();
+                        } else {
+                            r.send(Err(SessionError::InvalidResponse(format!(
+                                "Received invalid response type: {:?}",
+                                response
+                            ))))
+                            .unwrap();
                         }
                     }
                 }
@@ -500,7 +660,7 @@ impl<VI: ValidatorIdentity> Signer<VI> {
         &mut self,
         response: (
             InboundRequestId,
-            Result<DKGResponseWrap<VI::Identity>, SessionManagerError>,
+            Result<DKGResponseWrap<VI::Identity>, SessionError>,
         ),
     ) -> Result<(), anyhow::Error> {
         let id = response.0;
@@ -530,11 +690,78 @@ impl<VI: ValidatorIdentity> Signer<VI> {
         }
         Ok(())
     }
+    pub(crate) async fn dkg_handle_response_ex(
+        &mut self,
+        response: (InboundRequestId, Result<DKGResponseWrapEx, SessionError>),
+    ) -> Result<(), anyhow::Error> {
+        let request_id = response.0;
+        match response.1 {
+            Ok(response) => {
+                let channel = self.channel_mapping.remove(&request_id).unwrap();
+                let r = self
+                    .swarm
+                    .behaviour_mut()
+                    .coor2sig
+                    .send_response(channel, CoorToSigResponse::DKGResponseEx(response.clone()));
+                match r {
+                    Ok(_) => {
+                        tracing::info!(
+                            "Signer sent dkg ex response to coordinator successfully with request_id: {}",
+                            request_id
+                        );
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to send dkg ex response to coordinator: {:?}", e);
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::error!("Failed to handle response: {:?}", e);
+            }
+        }
+        Ok(())
+    }
+    pub(crate) async fn signing_handle_response_ex(
+        &mut self,
+        response: (
+            InboundRequestId,
+            Result<SigningResponseWrapEx, SessionError>,
+        ),
+    ) -> Result<(), anyhow::Error> {
+        let request_id = response.0;
+        match response.1 {
+            Ok(response) => {
+                let channel = self.channel_mapping.remove(&request_id).unwrap();
+                let r = self.swarm.behaviour_mut().coor2sig.send_response(
+                    channel,
+                    CoorToSigResponse::SigningResponseEx(response.clone()),
+                );
+                match r {
+                    Ok(_) => {
+                        tracing::info!(
+                            "Signer sent signing ex response to coordinator successfully with request_id: {}",
+                            request_id
+                        );
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            "Failed to send signing ex response to coordinator: {:?}",
+                            e
+                        );
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::error!("Failed to handle response: {:?}", e);
+            }
+        }
+        Ok(())
+    }
     pub(crate) async fn signing_handle_response(
         &mut self,
         response: (
             InboundRequestId,
-            Result<SigningResponseWrap<VI::Identity>, SessionManagerError>,
+            Result<SigningResponseWrap<VI::Identity>, SessionError>,
         ),
     ) -> Result<(), anyhow::Error> {
         let request_id = response.0;
@@ -562,6 +789,31 @@ impl<VI: ValidatorIdentity> Signer<VI> {
             }
         }
         Ok(())
+    }
+    pub(crate) async fn handle_signer2coor_request(
+        &mut self,
+        request: RequestEx<VI::Identity>,
+    ) -> Result<OutboundRequestId, anyhow::Error> {
+        match request {
+            RequestEx::DKGEx(request, response_sender) => {
+                let request_id = self.swarm.behaviour_mut().sig2coor.send_request(
+                    &self.coordinator_peer_id,
+                    SigToCoorRequest::DKGRequestEx(request),
+                );
+                self.dkg_out_response_channels_mapping
+                    .insert(request_id, response_sender);
+                return Ok(request_id);
+            }
+            RequestEx::SigningEx(request, response_sender) => {
+                let request_id = self.swarm.behaviour_mut().sig2coor.send_request(
+                    &self.coordinator_peer_id,
+                    SigToCoorRequest::SigningRequestEx(request),
+                );
+                self.signing_out_response_channels_mapping
+                    .insert(request_id, response_sender);
+                return Ok(request_id);
+            }
+        }
     }
     pub(crate) async fn handle_command(
         &mut self,

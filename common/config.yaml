@@ -1,6 +1,6 @@
 logging:
   console:
-    level: "debug"
+    level: "info"
   file:
     enable: true
     level: "info"
@@ -22,8 +22,14 @@ signer:
   ipc_socket_path: "ipc/"
   keystore_path: "keystore/signer"
   connection_timeout: 5
+  ecdsa_port: 29197
+  ecdsa_dkg_timeout: 300
+  ecdsa_sign_timeout: 10
 connection:
   ping_interval: 1
+  node2coor_request_timeout: 100
+  sig2coor_request_timeout: 100
+  coor2sig_request_timeout: 10
 session:
   state_channel_retry_interval: 1
   signing_round1_timeout: 10

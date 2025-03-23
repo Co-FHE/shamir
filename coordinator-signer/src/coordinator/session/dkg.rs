@@ -35,22 +35,22 @@ pub(crate) struct CoordinatorDKGSession<VII: ValidatorIdentityIdentity, C: Ciphe
     session_id: SessionId,
     min_signers: u16,
     dkg_state: CoordinatorDKGState<C>,
-    participants: Participants<VII, C>,
+    participants: Participants<VII, C::Identifier>,
     dkg_sender: UnboundedSender<(DKGRequestWrap<VII>, oneshot::Sender<DKGResponseWrap<VII>>)>,
 }
 #[derive(Debug, Clone)]
 pub(crate) struct DKGInfo<VII: ValidatorIdentityIdentity, C: Cipher> {
     pub(crate) min_signers: u16,
-    pub(crate) participants: Participants<VII, C>,
+    pub(crate) participants: Participants<VII, C::Identifier>,
     pub(crate) session_id: SessionId,
     pub(crate) public_key_package: C::PublicKeyPackage,
 }
 impl<VII: ValidatorIdentityIdentity, C: Cipher + PartialEq + Eq> CoordinatorDKGSession<VII, C> {
     pub fn new(
-        participants: Participants<VII, C>,
+        participants: Participants<VII, C::Identifier>,
         min_signers: u16,
         dkg_sender: UnboundedSender<(DKGRequestWrap<VII>, oneshot::Sender<DKGResponseWrap<VII>>)>,
-    ) -> Result<Self, SessionError<C>> {
+    ) -> Result<Self, SessionError> {
         participants.check_min_signers(min_signers)?;
         let session_id = SessionId::new(C::crypto_type(), min_signers, &participants)?;
         let dkg_state = CoordinatorDKGState::new();
@@ -63,7 +63,10 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher + PartialEq + Eq> CoordinatorDKGS
             dkg_sender,
         })
     }
-    fn match_base_info(&self, base_info: &DKGBaseMessage<VII, C>) -> Result<(), SessionError<C>> {
+    fn match_base_info(
+        &self,
+        base_info: &DKGBaseMessage<VII, C::Identifier>,
+    ) -> Result<(), SessionError> {
         if self.session_id != base_info.session_id {
             return Err(SessionError::BaseInfoNotMatch(format!(
                 "session id does not match: {:?} vs {:?}",
@@ -90,7 +93,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher + PartialEq + Eq> CoordinatorDKGS
     }
     pub(crate) async fn start_dkg(
         mut self,
-        response_sender: oneshot::Sender<Result<DKGInfo<VII, C>, (SessionId, SessionError<C>)>>,
+        response_sender: oneshot::Sender<Result<DKGInfo<VII, C>, (SessionId, SessionError)>>,
     ) {
         tokio::spawn(async move {
             tracing::debug!("Starting DKG session with id: {:?}", self.session_id);
@@ -202,7 +205,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher + PartialEq + Eq> CoordinatorDKGS
             }
         });
     }
-    fn split_into_single_requests(&self) -> Result<Vec<DKGRequest<VII, C>>, SessionError<C>> {
+    fn split_into_single_requests(&self) -> Result<Vec<DKGRequest<VII, C>>, SessionError> {
         match self.dkg_state.clone() {
             CoordinatorDKGState::Part1 => self
                 .participants
@@ -210,6 +213,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher + PartialEq + Eq> CoordinatorDKGS
                 .map(|(id, identity)| {
                     Ok(DKGRequest {
                         base_info: DKGBaseMessage {
+                            crypto_type: C::crypto_type(),
                             min_signers: self.min_signers,
                             participants: self.participants.clone(),
                             identifier: id.clone(),
@@ -228,6 +232,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher + PartialEq + Eq> CoordinatorDKGS
                     round1_package_map.remove(&id);
                     Ok(DKGRequest {
                         base_info: DKGBaseMessage {
+                            crypto_type: C::crypto_type(),
                             min_signers: self.min_signers,
                             participants: self.participants.clone(),
                             identifier: id.clone(),
@@ -269,6 +274,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher + PartialEq + Eq> CoordinatorDKGS
                     }
                     Ok(DKGRequest {
                         base_info: DKGBaseMessage {
+                            crypto_type: C::crypto_type(),
                             min_signers: self.min_signers,
                             participants: self.participants.clone(),
                             identifier: id.clone(),
@@ -288,7 +294,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher + PartialEq + Eq> CoordinatorDKGS
     fn handle_response(
         &self,
         response: BTreeMap<C::Identifier, DKGResponse<VII, C>>,
-    ) -> Result<CoordinatorDKGState<C>, SessionError<C>> {
+    ) -> Result<CoordinatorDKGState<C>, SessionError> {
         for (_, response) in response.iter() {
             self.match_base_info(&response.base_info)?;
         }
@@ -299,7 +305,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher + PartialEq + Eq> CoordinatorDKGS
                 for (id, _) in self.participants.iter() {
                     // find in response
                     let response = response.get(id).ok_or(
-                        crate::types::error::SessionError::<C>::InvalidResponse(format!(
+                        crate::types::error::SessionError::InvalidResponse(format!(
                             "response not found for id in part 1: {}",
                             id.to_string()
                         )),

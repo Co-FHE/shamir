@@ -25,7 +25,7 @@ pub(crate) struct CoordinatorSigningSession<VII: ValidatorIdentityIdentity, C: C
     pub(crate) pkid: PkId,
     pub(crate) public_key_package: C::PublicKeyPackage,
     pub(crate) min_signers: u16,
-    pub(crate) participants: Participants<VII, C>,
+    pub(crate) participants: Participants<VII, C::Identifier>,
     signing_sender: UnboundedSender<(
         SigningRequestWrap<VII>,
         oneshot::Sender<SigningResponseWrap<VII>>,
@@ -35,37 +35,34 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSigningSession<VII, C
     pub(crate) fn new(
         public_key_package: C::PublicKeyPackage,
         min_signers: u16,
-        participants: Participants<VII, C>,
+        participants: Participants<VII, C::Identifier>,
         signing_sender: UnboundedSender<(
             SigningRequestWrap<VII>,
             oneshot::Sender<SigningResponseWrap<VII>>,
         )>,
-    ) -> Result<Self, SessionError<C>> {
+    ) -> Result<Self, SessionError> {
         Ok(Self {
             pkid: public_key_package
                 .pkid()
-                .map_err(|e| SessionError::CryptoError(e))?,
+                .map_err(|e| SessionError::CryptoError(e.to_string()))?,
             public_key_package,
             min_signers,
             participants,
             signing_sender,
         })
     }
-    fn info(&self) -> Result<CoordinatorSigningSessionInfo, SessionError<C>> {
+    fn info(&self) -> Result<CoordinatorSigningSessionInfo, SessionError> {
         Ok(CoordinatorSigningSessionInfo {
             pkid: self.pkid.clone(),
             public_key_package: self
                 .public_key_package
                 .serialize_binary()
-                .map_err(|e| SessionError::CryptoError(e))?,
+                .map_err(|e| SessionError::CryptoError(e.to_string()))?,
             min_signers: self.min_signers,
-            participants: self
-                .participants
-                .serialize()
-                .map_err(|e| SessionError::InvalidParticipants(e.to_string()))?,
+            participants: self.participants.serialize()?,
         })
     }
-    pub(crate) fn serialize(&self) -> Result<Vec<u8>, SessionError<C>> {
+    pub(crate) fn serialize(&self) -> Result<Vec<u8>, SessionError> {
         Ok(bincode::serialize(&self.info()?).unwrap())
     }
     pub(crate) fn deserialize(
@@ -74,16 +71,15 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSigningSession<VII, C
             SigningRequestWrap<VII>,
             oneshot::Sender<SigningResponseWrap<VII>>,
         )>,
-    ) -> Result<Self, SessionError<C>> {
+    ) -> Result<Self, SessionError> {
         let info: CoordinatorSigningSessionInfo = bincode::deserialize(bytes)
             .map_err(|e| SessionError::CoordinatorSessionError(e.to_string()))?;
         Ok(Self {
             pkid: info.pkid,
             public_key_package: C::PublicKeyPackage::deserialize_binary(&info.public_key_package)
-                .map_err(|e| SessionError::CryptoError(e))?,
+                .map_err(|e| SessionError::CryptoError(e.to_string()))?,
             min_signers: info.min_signers,
-            participants: Participants::deserialize(&info.participants)
-                .map_err(|e| SessionError::InvalidParticipants(e.to_string()))?,
+            participants: Participants::deserialize(&info.participants)?,
             signing_sender,
         })
     }
@@ -92,7 +88,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSigningSession<VII, C
         msg: T,
         tweak_data: Option<T>,
         response: oneshot::Sender<
-            Result<SignatureSuite<VII, C>, (Option<SubsessionId>, SessionError<C>)>,
+            Result<SignatureSuite<VII, C>, (Option<SubsessionId>, SessionError)>,
         >,
         callback: impl FnOnce(SubsessionId),
     ) {

@@ -25,13 +25,13 @@ use super::{
 pub(crate) enum CoordinatorSigningState<VII: ValidatorIdentityIdentity, C: Cipher> {
     Round1,
     Round2 {
-        joined_participants: Participants<VII, C>,
+        joined_participants: Participants<VII, C::Identifier>,
         signing_package: C::SigningPackage,
         signing_commitments_map: BTreeMap<C::Identifier, C::SigningCommitments>,
     },
     Completed {
         signature: C::Signature,
-        joined_participants: Participants<VII, C>,
+        joined_participants: Participants<VII, C::Identifier>,
     },
 }
 pub(crate) struct CoordinatorSubsession<VII: ValidatorIdentityIdentity, C: Cipher> {
@@ -39,7 +39,7 @@ pub(crate) struct CoordinatorSubsession<VII: ValidatorIdentityIdentity, C: Ciphe
     tweak_data: Option<Vec<u8>>,
     subsession_id: SubsessionId,
     min_signers: u16,
-    participants: Participants<VII, C>,
+    participants: Participants<VII, C::Identifier>,
     state: CoordinatorSigningState<VII, C>,
     public_key: C::PublicKeyPackage,
     pkid: PkId,
@@ -53,14 +53,14 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
         pkid: PkId,
         public_key: C::PublicKeyPackage,
         min_signers: u16,
-        participants: Participants<VII, C>,
+        participants: Participants<VII, C::Identifier>,
         sign_message: Vec<u8>,
         tweak_data: Option<Vec<u8>>,
         sender: UnboundedSender<(
             SigningRequestWrap<VII>,
             oneshot::Sender<SigningResponseWrap<VII>>,
         )>,
-    ) -> Result<Self, SessionError<C>> {
+    ) -> Result<Self, SessionError> {
         let subsession_id = SubsessionId::new(
             C::crypto_type(),
             min_signers,
@@ -84,7 +84,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
     pub(crate) async fn start_signing(
         mut self,
         response_sender: oneshot::Sender<
-            Result<SignatureSuite<VII, C>, (Option<SubsessionId>, SessionError<C>)>,
+            Result<SignatureSuite<VII, C>, (Option<SubsessionId>, SessionError)>,
         >,
     ) {
         tokio::spawn(async move {
@@ -152,7 +152,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
             });
             let mut round1_responses_pool = BTreeMap::new();
             let original_state = self.state.clone();
-            let selected_responses: Result<SignatureSuite<VII, C>, SessionError<C>> = 'out: loop {
+            let selected_responses: Result<SignatureSuite<VII, C>, SessionError> = 'out: loop {
                 self.state = original_state.clone();
                 // if round1 response is None and no enough participants, break
                 if round1_responses_pool.len() >= self.min_signers as usize {
@@ -361,6 +361,8 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
                 .iter()
                 .map(|(id, identity)| SigningRequest {
                     base_info: SigningBaseMessage {
+                        crypto_type: C::crypto_type(),
+                        min_signers: self.min_signers,
                         participants: self.participants.clone(),
                         pkid: self.pkid.clone(),
                         subsession_id: self.subsession_id.clone(),
@@ -379,6 +381,8 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
                 .iter()
                 .map(|(id, identity)| SigningRequest {
                     base_info: SigningBaseMessage {
+                        crypto_type: C::crypto_type(),
+                        min_signers: self.min_signers,
                         participants: self.participants.clone(),
                         pkid: self.pkid.clone(),
                         subsession_id: self.subsession_id.clone(),
@@ -400,8 +404,21 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
 
     fn match_base_info(
         &self,
-        base_info: &SigningBaseMessage<VII, C>,
-    ) -> Result<(), SessionError<C>> {
+        base_info: &SigningBaseMessage<VII, C::Identifier, C::PublicKeyPackage>,
+    ) -> Result<(), SessionError> {
+        if C::crypto_type() != base_info.crypto_type {
+            return Err(SessionError::BaseInfoNotMatch(format!(
+                "crypto type does not match: {:?} vs {:?}",
+                C::crypto_type(),
+                base_info.crypto_type
+            )));
+        }
+        if self.min_signers != base_info.min_signers {
+            return Err(SessionError::BaseInfoNotMatch(format!(
+                "min signers does not match: {:?} vs {:?}",
+                self.min_signers, base_info.min_signers
+            )));
+        }
         if self.subsession_id != base_info.subsession_id {
             return Err(SessionError::BaseInfoNotMatch(format!(
                 "subsession id does not match: {:?} vs {:?}",
@@ -433,19 +450,19 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
     pub(crate) fn handle_response(
         &self,
         response: BTreeMap<C::Identifier, SigningResponse<VII, C>>,
-    ) -> Result<CoordinatorSigningState<VII, C>, (SessionError<C>, Option<C::Identifier>)> {
+    ) -> Result<CoordinatorSigningState<VII, C>, (SessionError, Option<C::Identifier>)> {
         for (id, response) in response.iter() {
             self.match_base_info(&response.base_info)
                 .map_err(|e| (e, Some(id.clone())))?;
         }
         self.participants
             .check_keys_includes(&response, self.min_signers as u16)
-            .map_err(|e| (e, None))?;
+            .map_err(|e| (e.into(), None))?;
 
         let joined_participants = self
             .participants
             .extract_identifiers(&response)
-            .map_err(|e| (e, None))?;
+            .map_err(|e| (e.into(), None))?;
         match self.state.clone() {
             CoordinatorSigningState::Round1 => {
                 let commitments_map = response
@@ -455,7 +472,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
                             Ok((id.clone(), commitments.clone()))
                         } else {
                             Err((
-                                SessionError::<C>::InvalidResponse(format!(
+                                SessionError::InvalidResponse(format!(
                                     "expected round 1 response but got round 2 response"
                                 )),
                                 Some(id.clone()),
@@ -465,7 +482,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
                     .collect::<Result<BTreeMap<C::Identifier, C::SigningCommitments>, _>>()?;
                 let signing_package =
                     C::SigningPackage::new(commitments_map.clone(), &self.message)
-                        .map_err(|e| (SessionError::CryptoError(e), None))?;
+                        .map_err(|e| (SessionError::CryptoError(e.to_string()), None))?;
                 Ok(CoordinatorSigningState::Round2 {
                     signing_package,
                     joined_participants,
@@ -500,7 +517,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
                     &self.public_key,
                     self.tweak_data.clone(),
                 )
-                .map_err(|e| (SessionError::CryptoError(e), None))?;
+                .map_err(|e| (SessionError::CryptoError(e.to_string()), None))?;
                 Ok(CoordinatorSigningState::Completed {
                     signature,
                     joined_participants,
@@ -517,7 +534,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSubsession<VII, C> {
 }
 
 impl<VII: ValidatorIdentityIdentity, C: Cipher> CoordinatorSigningState<VII, C> {
-    pub(crate) fn completed(&self) -> Option<(C::Signature, Participants<VII, C>)> {
+    pub(crate) fn completed(&self) -> Option<(C::Signature, Participants<VII, C::Identifier>)> {
         match self {
             CoordinatorSigningState::Completed {
                 signature,

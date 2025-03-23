@@ -3,7 +3,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use super::{Cipher, Participants};
+use super::Participants;
 use crate::types::error::SessionIdError;
 
 // SubSessionId format:
@@ -33,10 +33,10 @@ impl<'de> Deserialize<'de> for SubsessionId {
 }
 
 impl SubsessionId {
-    pub fn new<VII: ValidatorIdentityIdentity, C: Cipher>(
+    pub fn new<VII: ValidatorIdentityIdentity, CI: Identifier>(
         crypto_type: CryptoType,
         min_signers: u16,
-        participants: &Participants<VII, C>,
+        participants: &Participants<VII, CI>,
         sign_message: Vec<u8>,
         tweak_data: Option<Vec<u8>>,
         pkid: PkId,

@@ -1,5 +1,7 @@
 use rand::Rng;
 use sha2::{Digest, Sha256};
+use tokio::sync::oneshot;
+
 /// Concatenates data and calculates their SHA256 hash
 ///
 /// # Arguments
@@ -29,6 +31,29 @@ pub(crate) fn random_readable_string(length: usize) -> String {
         bytes.push(rng.gen::<u8>());
     }
     hex::encode(bytes)
+}
+
+pub(crate) fn new_oneshot_to_receive_success_or_error<T: std::fmt::Debug + Send + 'static>(
+) -> oneshot::Sender<T> {
+    let (tx, rx) = oneshot::channel();
+    tokio::spawn(async move {
+        let result = rx.await;
+        match result {
+            Ok(result) => tracing::debug!("oneshot received result: {:?}", result),
+            Err(e) => tracing::warn!("oneshot received closed: {:?}", e),
+        }
+    });
+
+    tx
+}
+pub(crate) fn derived_data(data: Option<Vec<u8>>) -> Vec<u8> {
+    if let Some(data) = data {
+        data
+    } else {
+        vec![
+            119, 104, 111, 32, 105, 115, 32, 115, 104, 105, 111, 116, 111, 108, 105, 63,
+        ]
+    }
 }
 
 #[cfg(test)]

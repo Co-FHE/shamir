@@ -24,11 +24,11 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SigningSession<VII, C> {
     pub(crate) fn new(
         public_key_package: C::PublicKeyPackage,
         min_signers: u16,
-        participants: Participants<VII, C>,
+        participants: Participants<VII, C::Identifier>,
         key_package: C::KeyPackage,
         identifier: C::Identifier,
         identity: VII,
-    ) -> Result<Self, SessionError<C>> {
+    ) -> Result<Self, SessionError> {
         Ok(Self {
             base: SigningSignerBase::new(
                 public_key_package,
@@ -41,17 +41,17 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SigningSession<VII, C> {
             subsessions: BTreeMap::new(),
         })
     }
-    pub(crate) fn deserialize(bytes: &[u8]) -> Result<Self, SessionError<C>> {
+    pub(crate) fn deserialize(bytes: &[u8]) -> Result<Self, SessionError> {
         let base = SigningSignerBase::deserialize(bytes)?;
         Ok(Self {
             base,
             subsessions: BTreeMap::new(),
         })
     }
-    pub(crate) fn serialize(&self) -> Result<Vec<u8>, SessionError<C>> {
+    pub(crate) fn serialize(&self) -> Result<Vec<u8>, SessionError> {
         self.base.serialize()
     }
-    pub(crate) fn check_serialize_deserialize(&self) -> Result<(), SessionError<C>> {
+    pub(crate) fn check_serialize_deserialize(&self) -> Result<(), SessionError> {
         let serialized = self.serialize()?;
         let deserialized = Self::deserialize(&serialized)?;
         assert_eq!(self.base.pkid, deserialized.base.pkid);
@@ -73,7 +73,7 @@ impl<VII: ValidatorIdentityIdentity, C: Cipher> SigningSession<VII, C> {
         &mut self,
         request: SigningRequest<VII, C>,
         rng: &mut R,
-    ) -> Result<SigningResponse<VII, C>, SessionError<C>> {
+    ) -> Result<SigningResponse<VII, C>, SessionError> {
         let subsession_id = request.base_info.subsession_id.clone();
         let subsession = self.subsessions.get_mut(&subsession_id);
         if let Some(subsession) = subsession {

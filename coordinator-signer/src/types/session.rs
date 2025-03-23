@@ -8,7 +8,7 @@ pub(crate) use subsession_id::SubsessionId;
 
 use crate::crypto::Identifier;
 
-use super::{error::SessionError, Cipher, ValidatorIdentityIdentity};
+use super::ValidatorIdentityIdentity;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Participants<VII: ValidatorIdentityIdentity, CI: Identifier>(BTreeMap<CI, VII>);

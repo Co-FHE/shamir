@@ -1,18 +1,12 @@
-use std::{any::Any, collections::BTreeMap};
-
 use serde::{Deserialize, Serialize};
 
 use crate::crypto::Identifier;
 use crate::types::message::SigningMessage;
-use crate::types::SessionId;
 use crate::{
-    crypto::{
-        Cipher, CryptoType, Ed25519Sha512, Ed448Shake256, P256Sha256, PkId, Ristretto255Sha512,
-        Secp256K1Sha256, Secp256K1Sha256TR, ValidatorIdentityIdentity,
-    },
-    types::{error::SessionError, Participants, SubsessionId},
+    crypto::{CryptoType, ValidatorIdentityIdentity},
+    types::{error::SessionError, SubsessionId},
 };
-pub(crate) type SigningRequestEx<VII: ValidatorIdentityIdentity> =
+pub(crate) type SigningRequestEx<VII> =
     SigningMessage<VII, u16, Vec<u8>, SigningStageEx<u16, SignatureEx>>;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum SigningStageEx<CI: Identifier, R> {
@@ -80,7 +74,7 @@ impl<VII: ValidatorIdentityIdentity> SigningRequestEx<VII> {
             _ => Err(SessionError::CryptoTypeError(self.base_info.crypto_type)),
         }
     }
-    pub(crate) fn subsession_id(&self) -> SubsessionId {
+    pub(crate) fn _subsession_id(&self) -> SubsessionId {
         self.base_info.subsession_id
     }
 }

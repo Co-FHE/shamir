@@ -12,7 +12,7 @@ pub(crate) use signature_suite::SignatureSuite;
 pub use signature_suite::SignatureSuiteInfo;
 pub(crate) use validator::Validator;
 
-use crate::crypto::{Cipher, ValidatorIdentityIdentity};
+use crate::crypto::ValidatorIdentityIdentity;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ConnectionState {

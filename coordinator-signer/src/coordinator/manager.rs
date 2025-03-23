@@ -48,6 +48,7 @@ pub(crate) enum InstructionCipher<VII: ValidatorIdentityIdentity> {
 #[derive(Clone, Debug)]
 pub(crate) enum CoordinatorStateEx<F> {
     Init,
+    #[allow(dead_code)]
     Final(F),
 }
 

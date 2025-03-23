@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use subsession::CoordinatorSubsessionEx;
 use tokio::sync::{
     mpsc::{UnboundedReceiver, UnboundedSender},
@@ -10,8 +9,8 @@ use crate::{
     crypto::{pk_to_pkid, CryptoType, Identifier, PkId, ValidatorIdentityIdentity},
     types::{
         error::SessionError,
-        message::{SigningRequest, SigningRequestWrapEx, SigningResponse, SigningResponseWrapEx},
-        Participants, SignatureSuite, SubsessionId,
+        message::{SigningRequestWrapEx, SigningResponseWrapEx},
+        Participants, SubsessionId,
     },
     SignatureSuiteInfo,
 };
@@ -49,7 +48,6 @@ impl<VII: ValidatorIdentityIdentity, CI: Identifier> CoordinatorSigningSessionIn
         })
     }
 }
-use super::{Cipher, SigningRequestWrap, SigningResponseWrap};
 
 mod subsession;
 pub(crate) struct CoordinatorSigningSessionEx<VII: ValidatorIdentityIdentity> {

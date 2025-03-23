@@ -3,7 +3,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use super::{Cipher, Participants};
+use super::Participants;
 use crate::types::error::SessionIdError;
 
 // SubSessionId format:

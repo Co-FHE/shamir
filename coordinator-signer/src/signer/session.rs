@@ -8,17 +8,13 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc};
 use common::Settings;
 use dkg::DKGSession;
 use dkg_ex::DKGSessionEx;
-use ecdsa_tss::signer_rpc::CoordinatorToSignerMsg;
 use rand::thread_rng;
 use signing::SigningSession;
 use signing_ex::SigningSessionEx;
-use tokio::sync::{
-    mpsc::{UnboundedReceiver, UnboundedSender},
-    oneshot,
-};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use crate::{
-    crypto::{Cipher, CryptoType, Secp256K1Sha256},
+    crypto::{Cipher, CryptoType},
     keystore::KeystoreManagement,
     types::{
         error::SessionError,
@@ -34,12 +30,14 @@ use crate::{
 };
 
 use super::{
-    manager::{ManagerRequest, RequestEx, RequestExWithInboundRequestId},
+    manager::{RequestEx, RequestExWithInboundRequestId},
     PkId, Request, ValidatorIdentityIdentity,
 };
 
 pub(crate) enum SignerStateEx<F> {
+    #[allow(dead_code)]
     Init,
+    #[allow(dead_code)]
     Final(F),
 }
 pub(crate) struct SessionWrap<VII: ValidatorIdentityIdentity, C: Cipher> {
@@ -229,7 +227,7 @@ impl<VII: ValidatorIdentityIdentity> SessionWrapEx<VII> {
             None => HashMap::new(),
         };
         tracing::info!("signing_sessions: {:?}", signing_sessions.len());
-        for (pkid, session) in signing_sessions.iter() {
+        for (pkid, _session) in signing_sessions.iter() {
             tracing::info!("signing_sessions: {}", pkid);
         }
         let (dkg_results_tx, dkg_results_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -384,18 +382,18 @@ impl<VII: ValidatorIdentityIdentity> SessionWrapEx<VII> {
         tracing::debug!("serialize_sessions complete");
         Ok(bincode::serialize(&sessions).unwrap())
     }
-    pub(crate) fn dkg_apply_response(
-        &mut self,
-        request: DKGRequestWrapEx<VII>,
-    ) -> Result<(), SessionError> {
-        Ok(())
-    }
-    pub(crate) fn signing_apply_response(
-        &mut self,
-        request: SigningRequestWrapEx<VII>,
-    ) -> Result<(), SessionError> {
-        Ok(())
-    }
+    // pub(crate) fn dkg_apply_response(
+    //     &mut self,
+    //     request: DKGRequestWrapEx<VII>,
+    // ) -> Result<(), SessionError> {
+    //     Ok(())
+    // }
+    // pub(crate) fn signing_apply_response(
+    //     &mut self,
+    //     request: SigningRequestWrapEx<VII>,
+    // ) -> Result<(), SessionError> {
+    //     Ok(())
+    // }
     pub(crate) fn handle_dkg_result(
         &mut self,
         request: Result<DKGRequestWrapEx<VII>, SessionError>,

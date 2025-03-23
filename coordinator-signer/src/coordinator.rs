@@ -31,7 +31,6 @@ use libp2p::{
 use libp2p::{ping, rendezvous, request_response, PeerId, StreamProtocol};
 use manager::CoordinatorStateEx;
 use manager::Instruction;
-use manager::InstructionCipher;
 use session::SessionWrap;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;

@@ -1,6 +1,6 @@
 use std::{any::Any, collections::BTreeMap};
 
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 
 use crate::{
     crypto::{
@@ -50,7 +50,7 @@ impl<VII: ValidatorIdentityIdentity, CI: Identifier> DKGBaseMessage<VII, CI> {
 }
 
 pub(crate) mod dkg_base_message_serde {
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use serde::{Deserialize, Deserializer, Serializer};
 
     use crate::{
         crypto::{Identifier, ValidatorIdentityIdentity},
@@ -87,10 +87,9 @@ pub(crate) struct DKGMessage<VII: ValidatorIdentityIdentity, CI: Identifier, S> 
     pub(crate) base_info: DKGBaseMessage<VII, CI>,
     pub(crate) stage: S,
 }
-pub(crate) type DKGResponse<VII: ValidatorIdentityIdentity, C: Cipher> =
-    DKGMessage<VII, C::Identifier, DKGResponseStage<C>>;
-pub(crate) type DKGRequest<VII: ValidatorIdentityIdentity, C: Cipher> =
-    DKGMessage<VII, C::Identifier, DKGRequestStage<C>>;
+pub(crate) type DKGResponse<VII, C> =
+    DKGMessage<VII, <C as Cipher>::Identifier, DKGResponseStage<C>>;
+pub(crate) type DKGRequest<VII, C> = DKGMessage<VII, <C as Cipher>::Identifier, DKGRequestStage<C>>;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum DKGRequestStage<C: Cipher> {
     Part1,

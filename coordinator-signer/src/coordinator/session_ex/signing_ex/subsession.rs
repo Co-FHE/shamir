@@ -7,29 +7,23 @@ use crate::{
     coordinator::CoordinatorStateEx,
     crypto::*,
     types::message::{
-        SigningBaseMessage, SigningRequestEx, SigningRequestStage, SigningRequestWrapEx,
-        SigningResponseStage, SigningResponseWrapEx, SigningStageEx,
+        SigningBaseMessage, SigningRequestEx, SigningRequestWrapEx, SigningResponseWrapEx,
+        SigningStageEx,
     },
     SignatureSuiteInfo,
 };
 use common::Settings;
-use futures::stream::FuturesUnordered;
-use futures::StreamExt;
-use itertools::Itertools;
 use tokio::sync::{
-    mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+    mpsc::{UnboundedReceiver, UnboundedSender},
     oneshot,
 };
 
-use super::{
-    Cipher, CoordinatorSigningSessionInfo, Participants, PkId, SessionError, SignatureSuite,
-    SigningRequest, SigningRequestWrap, SigningResponse, SigningResponseWrap, SubsessionId,
-};
+use super::{CoordinatorSigningSessionInfo, Participants, SessionError, SubsessionId};
 
 #[derive(Debug, Clone)]
 pub(crate) struct CoordinatorSigningFinalState<VII: ValidatorIdentityIdentity> {
-    joined_participants: Participants<VII, u16>,
-    signature: Vec<u8>,
+    _joined_participants: Participants<VII, u16>,
+    _signature: Vec<u8>,
 }
 pub(crate) struct CoordinatorSubsessionEx<VII: ValidatorIdentityIdentity> {
     base_info: CoordinatorSigningSessionInfo<VII, u16>,
@@ -411,12 +405,6 @@ impl<VII: ValidatorIdentityIdentity> CoordinatorSubsessionEx<VII> {
         //         tracing::error!("Failed to send response: {:?}", e);
         //     }
         // });
-    }
-    pub(crate) fn handle_response(
-        &self,
-        response: SigningResponseWrapEx,
-    ) -> Result<CoordinatorStateEx<CoordinatorSigningFinalState<VII>>, SessionError> {
-        todo!()
     }
     pub(crate) fn subsession_id(&self) -> SubsessionId {
         self.subsession_id.clone()

@@ -69,7 +69,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .iter()
         .map(|peer_id| <P2pIdentity as ValidatorIdentity>::Identity::from_fmt_str(peer_id).unwrap())
         .collect();
-    let min_signer = whitelist.len() as u16 / 2 + 1;
+    // let min_signer = whitelist.len() as u16 / 2 + 1;
     let cmd = commands::parse_args();
     match cmd {
         commands::Commands::Coordinator { auto_dkg } => {
@@ -178,7 +178,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             let mut queue = Vec::new();
             let start = Instant::now();
             for _ in 0..times {
-                let message = random_readable_string(100);
+                let message = random_readable_string(16);
                 let resp = node
                     .sign(
                         pkid.clone(),

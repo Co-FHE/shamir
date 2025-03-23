@@ -1,26 +1,17 @@
 use std::collections::BTreeMap;
-use std::collections::HashMap;
 
 use futures::stream::{FuturesUnordered, StreamExt};
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
 use super::SessionId;
-use super::{DKGRequestWrap, DKGResponseWrap};
 use crate::coordinator::CoordinatorStateEx;
 use crate::crypto::*;
 use crate::types::message::DKGRequestEx;
 use crate::types::message::DKGRequestWrapEx;
 use crate::types::message::DKGResponseWrapEx;
 use crate::types::message::DKGStageEx;
-use crate::{
-    crypto::Cipher,
-    types::{
-        error::SessionError,
-        message::{DKGBaseMessage, DKGRequest, DKGRequestStage, DKGResponse, DKGResponseStage},
-        Participants,
-    },
-};
+use crate::types::{error::SessionError, message::DKGBaseMessage, Participants};
 pub(crate) struct CoordinatorDKGSessionEx<VII: ValidatorIdentityIdentity> {
     crypto_type: CryptoType,
     min_signers: u16,

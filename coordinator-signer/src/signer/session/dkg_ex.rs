@@ -7,8 +7,7 @@ use crate::{
     types::{
         error::SessionError,
         message::{
-            DKGBaseMessage, DKGFinal, DKGRequestEx, DKGRequestWrapEx, DKGStageEx, MessageEx,
-            TargetOrBroadcast,
+            DKGBaseMessage, DKGFinal, DKGRequestEx, DKGStageEx, MessageEx, TargetOrBroadcast,
         },
     },
     utils,
@@ -17,11 +16,11 @@ use std::time;
 
 use super::SignerStateEx;
 pub(crate) struct DKGSessionEx<VII: ValidatorIdentityIdentity> {
-    base_info: DKGBaseMessage<VII, u16>,
-    dkg_state: SignerStateEx<ecdsa_tss::signer_rpc::KeyPackage>,
-    out_tx: UnboundedSender<ManagerRequest<VII>>,
-    out_rx: UnboundedReceiver<ecdsa_tss::signer_rpc::SignerToCoordinatorMsg>,
-    in_tx: UnboundedSender<ecdsa_tss::signer_rpc::CoordinatorToSignerMsg>,
+    _base_info: DKGBaseMessage<VII, u16>,
+    _dkg_state: SignerStateEx<ecdsa_tss::signer_rpc::KeyPackage>,
+    _out_tx: UnboundedSender<ManagerRequest<VII>>,
+    _out_rx: UnboundedReceiver<ecdsa_tss::signer_rpc::SignerToCoordinatorMsg>,
+    _in_tx: UnboundedSender<ecdsa_tss::signer_rpc::CoordinatorToSignerMsg>,
 }
 impl<VII: ValidatorIdentityIdentity> DKGSessionEx<VII> {
     pub(crate) async fn new_from_request(

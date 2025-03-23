@@ -5,8 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     crypto::{
         Cipher, CryptoType, Ed25519Sha512, Ed448Shake256, Identifier, P256Sha256, PkId,
-        PublicKeyPackage, Ristretto255Sha512, Secp256K1Sha256, Secp256K1Sha256TR,
-        ValidatorIdentityIdentity,
+        Ristretto255Sha512, Secp256K1Sha256, Secp256K1Sha256TR, ValidatorIdentityIdentity,
     },
     types::{error::SessionError, Participants, SubsessionId},
 };
@@ -27,10 +26,18 @@ pub(crate) struct SigningMessage<VII: ValidatorIdentityIdentity, CI: Identifier,
     pub(crate) base_info: SigningBaseMessage<VII, CI, PK>,
     pub(crate) stage: S,
 }
-pub(crate) type SigningResponse<VII: ValidatorIdentityIdentity, C: Cipher> =
-    SigningMessage<VII, C::Identifier, C::PublicKeyPackage, SigningResponseStage<C>>;
-pub(crate) type SigningRequest<VII: ValidatorIdentityIdentity, C: Cipher> =
-    SigningMessage<VII, C::Identifier, C::PublicKeyPackage, SigningRequestStage<VII, C>>;
+pub(crate) type SigningResponse<VII, C> = SigningMessage<
+    VII,
+    <C as Cipher>::Identifier,
+    <C as Cipher>::PublicKeyPackage,
+    SigningResponseStage<C>,
+>;
+pub(crate) type SigningRequest<VII, C> = SigningMessage<
+    VII,
+    <C as Cipher>::Identifier,
+    <C as Cipher>::PublicKeyPackage,
+    SigningRequestStage<VII, C>,
+>;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum SigningRequestStage<VII: ValidatorIdentityIdentity, C: Cipher> {
     Round1 {},

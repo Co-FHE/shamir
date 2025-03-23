@@ -7,8 +7,7 @@ use libp2p::request_response::{
 };
 use libp2p::{ping, rendezvous, request_response, PeerId, StreamProtocol};
 use manager::{
-    ManagerRequest, ManagerRequestWithInboundRequestId, Request, RequestEx,
-    RequestExWithInboundRequestId,
+    ManagerRequestWithInboundRequestId, Request, RequestEx, RequestExWithInboundRequestId,
 };
 use session::SessionWrap;
 use std::collections::HashMap;

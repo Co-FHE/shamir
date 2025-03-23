@@ -5,7 +5,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use super::{Cipher, Participants};
+use super::Participants;
 
 // SessionId format:
 // 1 byte: crypto type

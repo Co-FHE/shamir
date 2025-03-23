@@ -1,5 +1,5 @@
 use crate::{
-    crypto::{Cipher, CryptoType, CryptoTypeError},
+    crypto::{CryptoType, CryptoTypeError},
     keystore::KeystoreError,
 };
 

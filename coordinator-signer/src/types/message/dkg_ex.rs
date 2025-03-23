@@ -1,18 +1,12 @@
-use std::{any::Any, collections::BTreeMap};
-
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    crypto::{
-        Cipher, CryptoType, Ed25519Sha512, Ed448Shake256, Identifier, P256Sha256,
-        Ristretto255Sha512, Secp256K1Sha256, Secp256K1Sha256TR, ValidatorIdentityIdentity,
-    },
-    types::{error::SessionError, Participants, SessionId},
+    crypto::{CryptoType, Identifier, ValidatorIdentityIdentity},
+    types::{error::SessionError, SessionId},
 };
 
 use super::DKGMessage;
-pub(crate) type DKGRequestEx<VII: ValidatorIdentityIdentity> =
-    DKGMessage<VII, u16, DKGStageEx<u16, Vec<u8>>>;
+pub(crate) type DKGRequestEx<VII> = DKGMessage<VII, u16, DKGStageEx<u16, Vec<u8>>>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum DKGRequestWrapEx<VII: ValidatorIdentityIdentity> {
@@ -77,7 +71,7 @@ impl<VII: ValidatorIdentityIdentity> DKGRequestEx<VII> {
             _ => Err(SessionError::CryptoTypeError(self.base_info.crypto_type)),
         }
     }
-    pub(crate) fn session_id(&self) -> SessionId {
+    pub(crate) fn _session_id(&self) -> SessionId {
         self.base_info.session_id
     }
 }

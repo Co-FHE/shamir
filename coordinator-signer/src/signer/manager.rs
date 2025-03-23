@@ -2,15 +2,13 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::crypto::CryptoTypeError;
-use crate::keystore::{Keystore, KeystoreError};
+use crate::keystore::Keystore;
 use crate::signer::session::SessionWrapEx;
 use crate::types::error::SessionError;
 use crate::types::message::{
     DKGRequestWrap, DKGRequestWrapEx, DKGResponseWrap, DKGResponseWrapEx, SigningRequestWrap,
     SigningRequestWrapEx, SigningResponseWrap, SigningResponseWrapEx,
 };
-use futures::stream::FuturesUnordered;
 use libp2p::request_response::InboundRequestId;
 use strum::EnumCount;
 use tokio::sync::{
@@ -67,6 +65,7 @@ pub(crate) enum ManagerRequestWithInboundRequestId<VII: ValidatorIdentityIdentit
     RequestEx(RequestExWithInboundRequestId<VII>),
 }
 pub(crate) enum ManagerRequest<VII: ValidatorIdentityIdentity> {
+    #[allow(dead_code)]
     RequestEx(RequestEx<VII>),
 }
 macro_rules! new_session_wrap {

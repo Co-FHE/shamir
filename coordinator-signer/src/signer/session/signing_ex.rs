@@ -1,28 +1,21 @@
 use ecdsa_tss::signer_rpc::{CoordinatorToSignerMsg, SignerToCoordinatorMsg};
-use futures::future::Either;
-use rand::{CryptoRng, RngCore};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, time};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use crate::{
-    crypto::{pk_to_pkid, Cipher, CryptoType, KeyPackage, PublicKeyPackage, Signature},
-    signer::{
-        manager::{ManagerRequest, RequestEx},
-        PkId, ValidatorIdentityIdentity,
-    },
+    crypto::{pk_to_pkid, CryptoType},
+    signer::{manager::RequestEx, PkId, ValidatorIdentityIdentity},
     types::{
         error::SessionError,
         message::{
-            message_ex_to_coordinator_to_signer_msg, DKGBaseMessage, MessageEx, SignatureEx,
-            SigningBaseMessage, SigningRequest, SigningRequestEx, SigningRequestWrapEx,
-            SigningResponse, SigningResponseWrapEx, SigningStageEx, TargetOrBroadcast,
+            DKGBaseMessage, MessageEx, SignatureEx, SigningBaseMessage, SigningRequestEx,
+            SigningRequestWrapEx, SigningStageEx, TargetOrBroadcast,
         },
-        Participants, SubsessionId,
+        SubsessionId,
     },
     utils,
 };
-use scopeguard::defer;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct SigningSignerExBase<VII: ValidatorIdentityIdentity> {
@@ -34,7 +27,6 @@ pub(crate) struct SigningSignerExBase<VII: ValidatorIdentityIdentity> {
 }
 use crate::types::message::dkg_base_message_serde;
 
-use super::SignerStateEx;
 impl<VII: ValidatorIdentityIdentity> SigningSignerExBase<VII> {
     pub(crate) fn new(
         key_package: Vec<u8>,
@@ -48,21 +40,21 @@ impl<VII: ValidatorIdentityIdentity> SigningSignerExBase<VII> {
             base_info,
         })
     }
-    pub(crate) fn to_signing_base_message(
-        &self,
-        subsession_id: SubsessionId,
-    ) -> SigningBaseMessage<VII, u16, Vec<u8>> {
-        SigningBaseMessage {
-            crypto_type: self.base_info.crypto_type,
-            participants: self.base_info.participants.clone(),
-            pkid: self.pkid.clone(),
-            subsession_id: subsession_id,
-            identifier: self.base_info.identifier,
-            identity: self.base_info.identity.clone(),
-            public_key: self.public_key.clone(),
-            min_signers: self.base_info.min_signers,
-        }
-    }
+    // pub(crate) fn to_signing_base_message(
+    //     &self,
+    //     subsession_id: SubsessionId,
+    // ) -> SigningBaseMessage<VII, u16, Vec<u8>> {
+    //     SigningBaseMessage {
+    //         crypto_type: self.base_info.crypto_type,
+    //         participants: self.base_info.participants.clone(),
+    //         pkid: self.pkid.clone(),
+    //         subsession_id: subsession_id,
+    //         identifier: self.base_info.identifier,
+    //         identity: self.base_info.identity.clone(),
+    //         public_key: self.public_key.clone(),
+    //         min_signers: self.base_info.min_signers,
+    //     }
+    // }
 }
 
 #[derive(Debug, Clone)]
@@ -99,17 +91,6 @@ impl<VII: ValidatorIdentityIdentity> SigningSessionEx<VII> {
         assert_eq!(self.base, deserialized.base);
         Ok(())
     }
-    pub(crate) fn get_tx_by_pkid_subsession_id(
-        &self,
-        pkid: PkId,
-        subsession_id: SubsessionId,
-    ) -> Option<UnboundedSender<CoordinatorToSignerMsg>> {
-        if pkid == self.base.pkid {
-            self.subsessions.get(&subsession_id).cloned()
-        } else {
-            None
-        }
-    }
     pub(crate) fn new_subsession_in_channel(
         &mut self,
         subsession_id: SubsessionId,
@@ -130,18 +111,13 @@ impl<VII: ValidatorIdentityIdentity> SigningSessionEx<VII> {
         in_rx: UnboundedReceiver<CoordinatorToSignerMsg>,
     ) -> Result<SigningRequestWrapEx<VII>, SessionError> {
         let SigningBaseMessage {
-            crypto_type,
             participants,
-            pkid,
-            subsession_id,
             identifier,
-            public_key,
             identity,
             ..
         } = request.base_info.clone();
         // todo: check pkid
         participants.check_identifier_identity_exists(&identifier, &identity)?;
-        let subsession_id = request.base_info.subsession_id.clone();
         if let SigningStageEx::Init(msg, derive) = request.stage {
             let client =
                 ecdsa_tss::EcdsaTssSignerClient::new(common::Settings::global().signer.ecdsa_port)

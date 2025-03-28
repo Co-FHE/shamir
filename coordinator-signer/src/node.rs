@@ -365,7 +365,7 @@ impl<VI: ValidatorIdentity> NodeSwarm<VI> {
                             self.dkg_response_mapping.remove(&request_id)
                         {
                             if let Err(e) = response_oneshot.send(Ok(pkid)) {
-                                tracing::error!("Failed to send response: {:?}", e);
+                                tracing::error!("Failed to send response for dkg: {:?}", e);
                             }
                         } else {
                             tracing::error!(
@@ -381,7 +381,7 @@ impl<VI: ValidatorIdentity> NodeSwarm<VI> {
                             self.signing_response_mapping.remove(&request_id)
                         {
                             if let Err(e) = response_oneshot.send(Ok(signature_suite_info)) {
-                                tracing::error!("Failed to send response: {:?}", e);
+                                tracing::error!("Failed to send response for signing: {:?}", e);
                             }
                         } else {
                             tracing::error!(
@@ -395,7 +395,7 @@ impl<VI: ValidatorIdentity> NodeSwarm<VI> {
                             self.lspk_response_mapping.remove(&request_id)
                         {
                             if let Err(e) = response_oneshot.send(Ok(pkids)) {
-                                tracing::error!("Failed to send response: {:?}", e);
+                                tracing::error!("Failed to send response for lspk: {:?}", e);
                             }
                         }
                     }
@@ -406,14 +406,20 @@ impl<VI: ValidatorIdentity> NodeSwarm<VI> {
                             match auto_dkg_result {
                                 Some(auto_dkg_result) => {
                                     if let Err(e) = response_oneshot.send(Ok(auto_dkg_result)) {
-                                        tracing::error!("Failed to send response: {:?}", e);
+                                        tracing::error!(
+                                            "Failed to send response for auto_dkg: {:?}",
+                                            e
+                                        );
                                     }
                                 }
                                 None => {
                                     if let Err(e) = response_oneshot
                                         .send(Err("auto_dkg_result is None".to_string()))
                                     {
-                                        tracing::error!("Failed to send response: {:?}", e);
+                                        tracing::error!(
+                                            "Failed to send response for auto_dkg: {:?}",
+                                            e
+                                        );
                                     }
                                 }
                             }
@@ -426,7 +432,7 @@ impl<VI: ValidatorIdentity> NodeSwarm<VI> {
                             self.pk_response_mapping.remove(&request_id)
                         {
                             if let Err(e) = response_oneshot.send(Ok(group_public_key_info)) {
-                                tracing::error!("Failed to send response: {:?}", e);
+                                tracing::error!("Failed to send response for pk: {:?}", e);
                             }
                         }
                     }
@@ -435,13 +441,13 @@ impl<VI: ValidatorIdentity> NodeSwarm<VI> {
                             self.dkg_response_mapping.remove(&request_id)
                         {
                             if let Err(e) = response_oneshot.send(Err(error)) {
-                                tracing::error!("Failed to send response: {:?}", e);
+                                tracing::error!("Failed to send response for failure: {:?}", e);
                             }
                         } else if let Some((_, response_oneshot)) =
                             self.signing_response_mapping.remove(&request_id)
                         {
                             if let Err(e) = response_oneshot.send(Err(error)) {
-                                tracing::error!("Failed to send response: {:?}", e);
+                                tracing::error!("Failed to send response for failure: {:?}", e);
                             }
                         } else {
                             tracing::error!(

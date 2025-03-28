@@ -83,15 +83,22 @@ impl<VII: ValidatorIdentityIdentity> AutoDKG<VII> {
         }
         None
     }
-    pub(crate) fn update_new_dkg_result(&mut self, crypto_type: CryptoType, pkid: PkId) {
+    // if all dkg is done first time, return true
+    pub(crate) fn update_new_dkg_result(
+        &mut self,
+        crypto_type: CryptoType,
+        pkid: PkId,
+    ) -> (bool, Self) {
         if let AutoDKGState::WaitingForSignersDKG(state) = &mut self.state {
             if !state.contains_key(&crypto_type) {
                 state.insert(crypto_type, pkid);
             }
             if state.len() == <CryptoType as strum::EnumCount>::COUNT {
                 self.state = AutoDKGState::Done(state.clone());
+                return (true, self.clone());
             }
         }
+        (false, self.clone())
     }
     pub fn get_pkid_by_crypto_type(&self, crypto_type: CryptoType) -> Result<PkId, String> {
         if let AutoDKGState::Done(state) = &self.state {

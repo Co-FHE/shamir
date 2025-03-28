@@ -33,6 +33,8 @@ use manager::CoordinatorStateEx;
 use manager::Instruction;
 use session::SessionWrap;
 use std::collections::{HashMap, HashSet};
+use std::fs::File;
+use std::io::BufWriter;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -60,6 +62,7 @@ pub struct Coordinator<VI: ValidatorIdentity> {
     ipc_path: PathBuf,
     valid_validators: HashMap<VI::Identity, Validator<VI>>,
     p2ppeerid_2_endpoint: HashMap<PeerId, Multiaddr>,
+    base_path: PathBuf,
     dkg_request_mapping:
         HashMap<OutboundRequestId, (oneshot::Sender<DKGResponseWrap<VI::Identity>>, PeerId)>,
     signing_request_mapping:
@@ -202,22 +205,34 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
             &base_path,
         )?
         .listening();
-        let auto_dkg = if let Some(min_signers) = automatic_dkg {
-            if signer_whitelist.clone().is_none() {
-                return Err(anyhow::anyhow!(
-                    "signer_whitelist is required when automatic_dkg is enabled"
-                ));
-            }
-            if min_signers == 0 || signer_whitelist.clone().unwrap().len() < min_signers as usize {
-                return Err(anyhow::anyhow!(
+        // if auto_dkg file exists, load it
+        let auto_dkg_path = base_path.join("auto_dkg.json");
+        let auto_dkg = if auto_dkg_path.exists() {
+            let auto_dkg_file = File::open(auto_dkg_path).unwrap();
+            let auto_dkg_reader = std::io::BufReader::new(auto_dkg_file);
+            let auto_dkg: Option<AutoDKG<VI::Identity>> =
+                serde_json::from_reader(auto_dkg_reader).unwrap();
+            auto_dkg
+        } else {
+            if let Some(min_signers) = automatic_dkg {
+                if signer_whitelist.clone().is_none() {
+                    return Err(anyhow::anyhow!(
+                        "signer_whitelist is required when automatic_dkg is enabled"
+                    ));
+                }
+                if min_signers == 0
+                    || signer_whitelist.clone().unwrap().len() < min_signers as usize
+                {
+                    return Err(anyhow::anyhow!(
                     "min_signers must be greater than 0 and less than or equal to the number of signers in the whitelist, min signer:{:?}, whitelist:{:?}",
                     min_signers,
                     signer_whitelist.clone().unwrap().len()
                 ));
+                }
+                Some(AutoDKG::new(min_signers, signer_whitelist.clone().unwrap()))
+            } else {
+                None
             }
-            Some(AutoDKG::new(min_signers, signer_whitelist.clone().unwrap()))
-        } else {
-            None
         };
         Ok(Self {
             p2p_keypair,
@@ -243,6 +258,7 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
             lspk_response_futures_for_node: FuturesUnordered::new(),
             pk_response_futures_for_node: FuturesUnordered::new(),
             auto_dkg: auto_dkg.map(|dkg| Arc::new(RwLock::new(dkg))),
+            base_path,
         })
     }
     // if automatic_dkg is Some(min_signers), the coordinator will do dkg for all ciphersuites,
@@ -1345,6 +1361,7 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                         let manger_instruction_sender = self.instruction_sender.clone();
                         let participants = participants.clone();
                         let auto_dkg = auto_dkg.clone();
+                        let base_path = self.base_path.clone();
                         tokio::spawn(async move {
                             loop {
                                 let (instruction_sender, instruction_receiver) = oneshot::channel();
@@ -1358,10 +1375,20 @@ impl<VI: ValidatorIdentity> Coordinator<VI> {
                                 let result = instruction_receiver.await;
                                 match result {
                                     Ok(Ok(pkid)) => {
-                                        auto_dkg
+                                        if let (true, auto_dkg_value) = auto_dkg
                                             .write()
                                             .await
-                                            .update_new_dkg_result(crypto_type, pkid);
+                                            .update_new_dkg_result(crypto_type, pkid)
+                                        {
+                                            tracing::info!("All DKGs are done");
+                                            // save auto_dkg to base_path
+                                            let auto_dkg_path = base_path.join("auto_dkg.json");
+                                            let auto_dkg_file =
+                                                File::create(auto_dkg_path).unwrap();
+                                            let auto_dkg_writer = BufWriter::new(auto_dkg_file);
+                                            serde_json::to_writer(auto_dkg_writer, &auto_dkg_value)
+                                                .unwrap();
+                                        }
                                         break;
                                     }
                                     Ok(Err(e)) => {

@@ -1457,7 +1457,6 @@ dependencies = [
 [[package]]
 name = "ecdsa-tss"
 version = "0.1.0"
-source = "git+https://github.com/verisense-network/ecdsa-tss.git?branch=main#d433183b19cea4cb5f0a6bc5c6401e1f86e35e44"
 dependencies = [
  "ecdsa",
  "futures",

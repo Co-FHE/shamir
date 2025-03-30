@@ -21,8 +21,8 @@ use crate::{
         message::{
             message_ex_to_coordinator_to_signer_msg, DKGBaseMessage, DKGFinal, DKGRequest,
             DKGRequestEx, DKGRequestWrap, DKGRequestWrapEx, DKGResponseWrap, DKGResponseWrapEx,
-            DKGStageEx, SigningRequest, SigningRequestEx, SigningRequestWrap, SigningRequestWrapEx,
-            SigningResponseWrap, SigningResponseWrapEx, SigningStageEx,
+            DKGResult, DKGStageEx, SigningRequest, SigningRequestEx, SigningRequestWrap,
+            SigningRequestWrapEx, SigningResponseWrap, SigningResponseWrapEx, SigningStageEx,
         },
         SessionId,
     },
@@ -292,7 +292,10 @@ impl<VII: ValidatorIdentityIdentity> SessionWrapEx<VII> {
                         |(base, pk)| {
                             DKGRequestWrapEx::from(DKGRequestEx {
                                 base_info: base,
-                                stage: DKGStageEx::Final(pk.public_key),
+                                stage: DKGStageEx::Final(DKGResult {
+                                    public_key: pk.public_key,
+                                    key_package: pk.key_package,
+                                }),
                             })
                         },
                     );

@@ -437,7 +437,39 @@ impl<VII: ValidatorIdentityIdentity> SessionWrapEx<VII> {
                                 .await
                                 .map_err(|e| SessionError::CryptoError(e.to_string()));
                             match r {
-                                Ok((_pk, derived_pk)) => {
+                                Ok((pk, derived_pk)) => {
+                                    let base_info = session.base_info.clone();
+                                    let derived_pk_c = derived_pk.clone();
+                                    let tweak_data_c = tweak_data.clone();
+                                    tokio::spawn(async move {
+                                        let client = ecdsa_tss::EcdsaTssSignerClient::new(
+                                            common::Settings::global().signer.ecdsa_port,
+                                        )
+                                        .await
+                                        .unwrap();
+                                        // for debug/log
+                                        let result = client
+                                            .check_pk(CheckPkRequest {
+                                                crypto_type: curve_id as u32,
+                                                pkid: pkid.to_bytes(),
+                                                public_key: pk,
+                                                public_key_derived: derived_pk_c,
+                                                delta: utils::derived_data(tweak_data_c),
+                                                signer_id: base_info
+                                                    .public_key_info
+                                                    .iter()
+                                                    .map(|(id, _)| id.clone() as u32)
+                                                    .collect(),
+                                                public_key_info: base_info
+                                                    .public_key_info
+                                                    .iter()
+                                                    .map(|(_, info)| info.key_package.clone())
+                                                    .collect(),
+                                            })
+                                            .await;
+                                        tracing::info!("check_pk result: {:?}", result);
+                                    });
+
                                     Ok(GroupPublicKeyInfo::new(derived_pk, tweak_data))
                                 }
                                 Err(e) => Err(e),

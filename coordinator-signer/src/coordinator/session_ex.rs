@@ -14,6 +14,7 @@ use crate::utils;
 use combinations::Combinations;
 use common::Settings;
 use dkg_ex::{CoordinatorDKGSessionEx, DKGInfo};
+use ecdsa_tss::signer_rpc::CheckPkRequest;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use signing_ex::CoordinatorSigningSessionEx;
@@ -470,6 +471,7 @@ impl<VII: ValidatorIdentityIdentity> SessionWrapEx<VII> {
                         dkg_info.public_key_package.clone(),
                         dkg_info.min_signers,
                         dkg_info.participants.clone(),
+                        dkg_info.public_key_info.clone(),
                         self.out_init_signing_sender.clone(),
                     )?,
                 );
@@ -523,6 +525,37 @@ impl<VII: ValidatorIdentityIdentity> SessionWrapEx<VII> {
         match signing_session {
             Ok(signature_suite) => {
                 tracing::info!("signature_suite: {:?}", signature_suite);
+                let session = self.signing_sessions.get(&signature_suite.pkid).unwrap();
+                let data = (signature_suite.clone(), session.base_info.clone());
+                tokio::spawn(async move {
+                    let (signature_suite, base_info) = data;
+                    let client = ecdsa_tss::EcdsaTssSignerClient::new(
+                        common::Settings::global().signer.ecdsa_port,
+                    )
+                    .await
+                    .unwrap();
+                    // for debug/log
+                    let result = client
+                        .check_pk(CheckPkRequest {
+                            crypto_type: signature_suite.crypto_type as u32,
+                            pkid: signature_suite.pkid.to_bytes(),
+                            public_key: signature_suite.pk,
+                            public_key_derived: signature_suite.pk_tweak,
+                            delta: utils::derived_data(signature_suite.tweak_data),
+                            signer_id: base_info
+                                .public_key_info
+                                .iter()
+                                .map(|(id, _)| id.clone() as u32)
+                                .collect(),
+                            public_key_info: base_info
+                                .public_key_info
+                                .iter()
+                                .map(|(_, info)| info.key_package.clone())
+                                .collect(),
+                        })
+                        .await;
+                    tracing::info!("check_pk result: {:?}", result);
+                });
                 let subsession_id = signature_suite.subsession_id;
                 let oneshot = self.subsession_id_signaturesuite_map.remove(&subsession_id);
                 self.signing_in_final_channel_mapping.remove(&subsession_id);

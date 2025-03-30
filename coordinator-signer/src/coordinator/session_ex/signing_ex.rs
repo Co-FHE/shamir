@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use subsession::CoordinatorSubsessionEx;
 use tokio::sync::{
@@ -9,7 +11,7 @@ use crate::{
     crypto::{pk_to_pkid, CryptoType, Identifier, PkId, ValidatorIdentityIdentity},
     types::{
         error::SessionError,
-        message::{SigningRequestWrapEx, SigningResponseWrapEx},
+        message::{DKGResult, SigningRequestWrapEx, SigningResponseWrapEx},
         Participants, SubsessionId,
     },
     SignatureSuiteInfo,
@@ -21,6 +23,7 @@ pub(crate) struct CoordinatorSigningSessionInfo<VII: ValidatorIdentityIdentity, 
     pub(crate) crypto_type: CryptoType,
     pub(crate) pkid: PkId,
     pub(crate) public_key_package: Vec<u8>,
+    pub(crate) public_key_info: BTreeMap<u16, DKGResult>,
     pub(crate) min_signers: CI,
     pub(crate) participants: Participants<VII, CI>,
 }
@@ -31,21 +34,30 @@ impl<VII: ValidatorIdentityIdentity, CI: Identifier> CoordinatorSigningSessionIn
             self.crypto_type,
             self.pkid.clone(),
             self.public_key_package.clone(),
+            self.public_key_info.clone(),
             self.min_signers.to_bytes(),
             self.participants.serialize()?,
         );
         Ok(bincode::serialize(&data).unwrap())
     }
     pub(crate) fn deserialize(bytes: &[u8]) -> Result<Self, SessionError> {
-        let data: (CryptoType, PkId, Vec<u8>, Vec<u8>, Vec<u8>) = bincode::deserialize(bytes)
+        let data: (
+            CryptoType,
+            PkId,
+            Vec<u8>,
+            BTreeMap<u16, DKGResult>,
+            Vec<u8>,
+            Vec<u8>,
+        ) = bincode::deserialize(bytes)
             .map_err(|e| SessionError::DeserializationError(e.to_string()))?;
         Ok(Self {
             crypto_type: data.0,
             pkid: data.1,
             public_key_package: data.2,
-            min_signers: CI::from_bytes(&data.3)
+            public_key_info: data.3,
+            min_signers: CI::from_bytes(&data.4)
                 .map_err(|e| SessionError::DeserializationError(e.to_string()))?,
-            participants: Participants::deserialize(&data.4)
+            participants: Participants::deserialize(&data.5)
                 .map_err(|e| SessionError::DeserializationError(e.to_string()))?,
         })
     }
@@ -65,6 +77,7 @@ impl<VII: ValidatorIdentityIdentity> CoordinatorSigningSessionEx<VII> {
         public_key_package: Vec<u8>,
         min_signers: u16,
         participants: Participants<VII, u16>,
+        public_key_info: BTreeMap<u16, DKGResult>,
         out_init_signing_sender: UnboundedSender<(
             SigningRequestWrapEx<VII>,
             oneshot::Sender<SigningResponseWrapEx>,
@@ -78,6 +91,7 @@ impl<VII: ValidatorIdentityIdentity> CoordinatorSigningSessionEx<VII> {
                 crypto_type,
                 pkid,
                 public_key_package,
+                public_key_info,
                 min_signers,
                 participants,
             },

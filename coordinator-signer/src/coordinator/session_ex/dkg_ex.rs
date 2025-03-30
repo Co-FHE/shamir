@@ -7,10 +7,10 @@ use tokio::sync::{mpsc::UnboundedSender, oneshot};
 use super::SessionId;
 use crate::coordinator::CoordinatorStateEx;
 use crate::crypto::*;
-use crate::types::message::DKGRequestEx;
 use crate::types::message::DKGRequestWrapEx;
 use crate::types::message::DKGResponseWrapEx;
 use crate::types::message::DKGStageEx;
+use crate::types::message::{DKGRequestEx, DKGResult};
 use crate::types::{error::SessionError, message::DKGBaseMessage, Participants};
 pub(crate) struct CoordinatorDKGSessionEx<VII: ValidatorIdentityIdentity> {
     crypto_type: CryptoType,
@@ -28,6 +28,7 @@ pub(crate) struct DKGInfo<VII: ValidatorIdentityIdentity> {
     pub(crate) participants: Participants<VII, u16>,
     pub(crate) session_id: SessionId,
     pub(crate) public_key_package: Vec<u8>,
+    pub(crate) public_key_info: BTreeMap<u16, DKGResult>,
 }
 impl<VII: ValidatorIdentityIdentity> CoordinatorDKGSessionEx<VII> {
     pub fn new(
@@ -260,18 +261,23 @@ impl<VII: ValidatorIdentityIdentity> CoordinatorDKGSessionEx<VII> {
                     }
                 }
                 // check all packages are same
-                let first_package = packages.values().next().unwrap();
-                if packages.values().any(|package| package != first_package) {
+                let first_package = packages.values().next().unwrap().clone().public_key;
+                if packages
+                    .values()
+                    .any(|package| package.public_key != first_package)
+                {
                     return Err(SessionError::InvalidResponse(
                         "packages are not the same".to_string(),
                     ));
                 }
+
                 Ok(DKGInfo {
                     crypto_type: self.crypto_type,
                     min_signers: self.min_signers,
                     participants: self.participants.clone(),
                     session_id: self.session_id.clone(),
                     public_key_package: first_package.clone(),
+                    public_key_info: packages,
                 })
             }
             CoordinatorStateEx::Final { .. } => {

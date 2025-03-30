@@ -6,7 +6,12 @@ use crate::{
 };
 
 use super::DKGMessage;
-pub(crate) type DKGRequestEx<VII> = DKGMessage<VII, u16, DKGStageEx<u16, Vec<u8>>>;
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct DKGResult {
+    pub(crate) public_key: Vec<u8>,
+    pub(crate) key_package: Vec<u8>,
+}
+pub(crate) type DKGRequestEx<VII> = DKGMessage<VII, u16, DKGStageEx<u16, DKGResult>>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum DKGRequestWrapEx<VII: ValidatorIdentityIdentity> {

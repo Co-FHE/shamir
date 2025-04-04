@@ -74,6 +74,7 @@ pub(crate) struct SessionWrapEx<VII: ValidatorIdentityIdentity> {
             oneshot::Sender<SigningResponseWrapEx>,
         )>,
     >,
+    combinations_cache: Option<Combinations>,
 
     instruction_receiver: UnboundedReceiver<InstructionCipher<VII>>,
     keystore_management: KeystoreManagement,
@@ -123,6 +124,7 @@ impl<VII: ValidatorIdentityIdentity> SessionWrapEx<VII> {
             session_id_key_map: HashMap::new(),
             dkg_futures: FuturesUnordered::new(),
             instruction_receiver,
+            combinations_cache: None,
             signing_futures: FuturesUnordered::new(),
             subsession_id_signaturesuite_map: HashMap::new(),
             dkg_in_final_channel_mapping: HashMap::new(),
@@ -370,6 +372,7 @@ impl<VII: ValidatorIdentityIdentity> SessionWrapEx<VII> {
                     Some(sessions) => Combinations::new(
                         sessions.base_info.participants.keys().cloned().collect(),
                         sessions.base_info.min_signers,
+                        &self.combinations_cache,
                     ),
                     None => {
                         signature_response_oneshot
@@ -613,6 +616,7 @@ impl<VII: ValidatorIdentityIdentity> SessionWrapEx<VII> {
                 self.signing_in_final_channel_mapping.remove(&subsession_id);
                 if let Some(oneshot) = oneshot {
                     if combinations.is_empty() {
+                        self.combinations_cache = None;
                         if let Err(e) = oneshot.send(Err(e)) {
                             tracing::error!("Error sending signature response: {:?}", e);
                             return Err(SessionError::SendOneshotError(format!(
@@ -622,6 +626,7 @@ impl<VII: ValidatorIdentityIdentity> SessionWrapEx<VII> {
                         }
                     } else {
                         // have another try to sign
+                        self.combinations_cache = Some(combinations.clone());
                         let (in_final_tx, in_final_rx) = tokio::sync::mpsc::unbounded_channel();
                         let subsession_id = self
                             .sign(pkid.to_bytes(), msg, tweak_data, in_final_rx, combinations)

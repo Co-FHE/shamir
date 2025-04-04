@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
     time::Duration,
 };
 
@@ -108,7 +108,7 @@ impl<VII: ValidatorIdentityIdentity> CoordinatorSubsessionEx<VII> {
 
             let request_list =
                 self.split_into_single_requests(&participants_candidates.into_iter().collect());
-            let mut error_ids: HashSet<u16> = HashSet::new();
+            let mut error_ids: BTreeSet<u16> = BTreeSet::new();
             for request in request_list {
                 let (tx, rx) = oneshot::channel();
                 let (tx_with_id, rx_with_id) = oneshot::channel();

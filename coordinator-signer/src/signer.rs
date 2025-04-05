@@ -307,10 +307,35 @@ impl<VI: ValidatorIdentity> Signer<VI> {
                     }
                 }
             } else {
-                let event = self.swarm.select_next_some().await;
-                tracing::debug!("Signer received swarm event: {:?}", event);
-                if let Err(e) = self.handle_swarm_event(event).await {
-                    tracing::error!("Error handling behaviour event: {}", e);
+                loop {
+                    tokio::select! {
+                        _ = tokio::time::sleep(Duration::from_secs(5)) => {
+                            if let ConnectionState::Connecting(start_time) = self.connection_state {
+                                if start_time.elapsed()
+                                    > Duration::from_secs(common::Settings::global().signer.connection_timeout)
+                                {
+                                    tracing::warn!("Timeout reached while connecting. Retrying...");
+                                    self.dial_coordinator()?;
+                                    self.connection_state = ConnectionState::Connecting(tokio::time::Instant::now());
+                                }
+                            } else if let ConnectionState::Disconnected(last) = self.connection_state {
+                                if last.map(|t| t.elapsed().as_secs_f64()).unwrap_or(f64::INFINITY)
+                                    > common::Settings::global().signer.connection_timeout as f64
+                                {
+                                    self.dial_coordinator()?;
+                                    self.connection_state = ConnectionState::Connecting(tokio::time::Instant::now());
+                                }
+                            }
+                            continue;
+                        }
+                        event = self.swarm.select_next_some() => {
+                            tracing::debug!("Signer received swarm event: {:?}", event);
+                            if let Err(e) = self.handle_swarm_event(event).await {
+                                tracing::error!("Error handling swarm event: {}", e);
+                            }
+                            break;
+                        }
+                    }
                 }
             }
         }

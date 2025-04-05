@@ -331,7 +331,11 @@ impl<VII: ValidatorIdentityIdentity + Serialize + for<'de> Deserialize<'de>>
                     rec_id,
                 )
                 .ok()?;
-                secp.recover_ecdsa(&message, &recoverable_sig).ok()?;
+                let recovered_pubkey = secp.recover_ecdsa(&message, &recoverable_sig).ok()?;
+                if recovered_pubkey.serialize() != pubkey.serialize() {
+                    return None;
+                }
+
                 Some(v as u8)
             })
             .ok_or(format!("Failed to recover signature"))?;
@@ -432,5 +436,46 @@ mod tests {
         let signature_with_rsv_bytes = signature_with_rsv.to_vec();
 
         assert_eq!(sb, signature_with_rsv_bytes);
+    }
+    #[test]
+    fn test_signature_with_rsv_for_v() {
+        let message =
+            hex::decode("85f6512eb80f1d54ec936219c16736b9e1ba682dfd7ea83d6bf621d853215bf9")
+                .unwrap();
+        let pubkey = hex::decode("044893638429c9f86d73ee52d9295115c77559b9a5926f6a17147be4ef2a3680841bda650e33ce2186db4538954cbddc289cb01322b3a38d342a1856da404ceb3c").unwrap();
+        let signature = hex::decode("6b49884c2e998716901acd93ec94486cc619d8bd1f029e2c59281113484716740bbcabcb195bf4be5956b9ad1c163d1e840a814e4f1cbf1175be07820a75359e").unwrap();
+        let suite = SignatureSuiteInfo::<sp_core::crypto::AccountId32> {
+            signature: signature.to_vec(),
+            pk: vec![],
+            pk_tweak: pubkey.clone(),
+            pk_verifying_key: vec![],
+            pk_verifying_key_tweak: vec![],
+            tweak_data: None,
+            subsession_id: SubsessionId::new(
+                CryptoType::EcdsaSecp256k1,
+                1,
+                &Participants::<libp2p::PeerId, u16>::new(vec![(1, libp2p::PeerId::random())])
+                    .unwrap(),
+                message.clone(),
+                None,
+                PkId::new(vec![0x06; 33]),
+            )
+            .unwrap(),
+            participants: BTreeMap::new(),
+            joined_participants: BTreeMap::new(),
+            pkid: PkId::new(vec![]),
+            message: message.to_vec(),
+            crypto_type: CryptoType::Secp256k1,
+            original_serialized: "".to_string(),
+        };
+        let signature = suite.signature_with_rsv().unwrap();
+        assert_eq!(signature.len(), 65);
+        let signature_with_rsv = suite.signature_with_rsv();
+        assert!(signature_with_rsv.is_ok());
+        let signature_with_rsv = signature_with_rsv.unwrap();
+        assert!(signature_with_rsv.len() == 65);
+        // signature +cover_id must equal to signature_with_rsv
+        let signature_with_rsv_bytes = signature_with_rsv.to_vec();
+        println!("signature_with_rsv_bytes: {:?}", signature_with_rsv_bytes);
     }
 }

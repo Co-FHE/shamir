@@ -309,7 +309,7 @@ impl<VI: ValidatorIdentity> Signer<VI> {
             } else {
                 loop {
                     tokio::select! {
-                        _ = tokio::time::sleep(Duration::from_secs(5)) => {
+                        _ = tokio::time::sleep(Duration::from_secs(common::Settings::global().signer.connection_timeout)) => {
                             if let ConnectionState::Connecting(start_time) = self.connection_state {
                                 if start_time.elapsed()
                                     > Duration::from_secs(common::Settings::global().signer.connection_timeout)
